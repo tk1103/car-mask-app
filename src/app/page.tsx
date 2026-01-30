@@ -391,6 +391,12 @@ export default function Home() {
     // 画像エクスポート機能（ZIP形式）
     const exportImages = async (exportAll: boolean) => {
         try {
+            // クライアントサイドでのみ実行
+            if (typeof window === 'undefined') {
+                alert('この機能はブラウザでのみ利用できます');
+                return;
+            }
+
             const receiptsToExport = exportAll ? receipts : groupedReceipts.sortedMonthKeys.flatMap(monthKey =>
                 groupedReceipts.grouped[monthKey] || []
             ).concat(groupedReceipts.unknownDateReceipts);
@@ -400,7 +406,7 @@ export default function Home() {
                 return;
             }
 
-            // JSZipを動的にインポート
+            // JSZipを動的にインポート（クライアントサイドでのみ）
             const JSZip = (await import('jszip')).default;
             const zip = new JSZip();
 
@@ -2441,7 +2447,7 @@ export default function Home() {
                     }
 
                     // 台形補正を適用（OCRで検出されたcornersを優先、なければdetectedCornersを使用）
-                    const cornersToUse = ocrCorners && ocrCorners.length === 4 ? ocrCorners : detectedCorners;
+                    const cornersToUse: Array<{ x: number; y: number }> | null = ocrCorners && ocrCorners.length === 4 ? ocrCorners : detectedCorners;
                     let finalImageBlob = blob;
                     if (cornersToUse && cornersToUse.length === 4) {
                         try {
@@ -2504,7 +2510,7 @@ export default function Home() {
                         receiptDate: receiptDate,
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency || 'JPY',
-                        corners: cornersToUse,
+                        corners: cornersToUse ?? undefined,
                     };
 
                     await db.receipts.add(receipt);
