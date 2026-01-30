@@ -2665,20 +2665,7 @@ export default function Home() {
                     const day = parseInt(dateParts[2], 10);
                     
                     dateStr = `${year}/${month}/${day}`;
-                    
-                    if (editForm.time) {
-                        const timeParts = editForm.time.split(':');
-                        if (timeParts.length >= 2) {
-                            const hours = parseInt(timeParts[0], 10);
-                            const minutes = parseInt(timeParts[1], 10);
-                            receiptDate = new Date(year, month - 1, day, hours || 0, minutes || 0);
-                            timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-                        } else {
-                            receiptDate = new Date(year, month - 1, day);
-                        }
-                    } else {
-                        receiptDate = new Date(year, month - 1, day);
-                    }
+                    receiptDate = new Date(year, month - 1, day);
                 }
             }
             
@@ -2692,7 +2679,7 @@ export default function Home() {
             });
 
             setEditingReceipt(null);
-            setEditForm({ vendor: '', amount: 0, note: '', date: '', time: '' });
+            setEditForm({ vendor: '', amount: 0, note: '', date: '' });
             await loadReceipts();
         } catch (error) {
             console.error('Failed to update receipt:', error);
