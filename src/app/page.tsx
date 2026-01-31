@@ -827,12 +827,16 @@ export default function Home() {
 
                     // 縦長レシートが横向きで検出されている場合、画像を90度回転
                     if (needsRotation) {
-                        console.log('Rotating image 90 degrees counter-clockwise to correct orientation');
+                        console.log('Rotating image 270 degrees (90 degrees counter-clockwise) to correct orientation');
                         
                         // 90度反時計回りに回転（画像の中心を基準）
                         // 縦長レシートが横向きの場合、90度反時計回りに回転させて正しい向きにする
+                        // OpenCV.jsでは、正の角度が反時計回り、負の角度が時計回り
+                        // 時計回りになってしまっている場合は、角度の符号を確認する必要がある
                         const center = new window.cv.Point(img.width / 2, img.height / 2);
-                        const rotationMatrix = window.cv.getRotationMatrix2D(center, 90, 1.0); // 90度 = 90度反時計回り
+                        // 270度 = -90度 = 90度反時計回り（時計回りの逆）
+                        // 時計回りになってしまっている場合は、270度を使う
+                        const rotationMatrix = window.cv.getRotationMatrix2D(center, 270, 1.0); // 270度 = 90度反時計回り
                         
                         // 回転後の画像サイズ（幅と高さを入れ替え）
                         const rotatedWidth = img.height;
@@ -850,12 +854,12 @@ export default function Home() {
                             new window.cv.Scalar()
                         );
                         
-                        // 回転後の座標を計算（90度反時計回り）
-                        // 画像を90度反時計回りに回転させた場合の座標変換:
+                        // 回転後の座標を計算（270度 = 90度反時計回り）
+                        // 画像を270度回転させた場合の座標変換（90度反時計回りと同じ）:
                         // 元の座標 (x, y) → 回転後 (y, width - x)
                         // 回転後の画像サイズは (height, width) になる
                         const rotatedCorners = srcCorners.map(corner => {
-                            // 回転後の座標を計算
+                            // 回転後の座標を計算（270度 = 90度反時計回り）
                             const rotatedX = corner.y;
                             const rotatedY = img.width - corner.x;
                             return { x: rotatedX, y: rotatedY };
@@ -863,7 +867,7 @@ export default function Home() {
 
                         // 回転後の座標順序を調整（左上、右上、右下、左下）
                         // 元の順序: [左上(0), 右上(1), 右下(2), 左下(3)]
-                        // 90度反時計回り回転後の位置:
+                        // 270度（90度反時計回り）回転後の位置:
                         // - 元の左上(0) → 回転後の右上
                         // - 元の右上(1) → 回転後の右下
                         // - 元の右下(2) → 回転後の左下
