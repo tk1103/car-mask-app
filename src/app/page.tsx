@@ -14,8 +14,11 @@ declare global {
             };
             MatVector: new () => any;
             Point: any;
+            Point2f: any;
             getPerspectiveTransform: (src: any, dst: any) => any;
+            getRotationMatrix2D: (center: any, angle: number, scale: number) => any;
             warpPerspective: (src: any, dst: any, M: any, dsize: any, flags?: number, borderMode?: number, borderValue?: any) => void;
+            warpAffine: (src: any, dst: any, M: any, dsize: any, flags?: number, borderMode?: number, borderValue?: any) => void;
             imread: (canvasId: string | HTMLCanvasElement) => any;
             imshow: (canvasId: string | HTMLCanvasElement, mat: any) => void;
             matFromArray: (rows: number, cols: number, type: number, array: number[]) => any;
@@ -775,7 +778,15 @@ export default function Home() {
                     const isPortrait = H > W;
                     const aspectRatio = H / W;
 
+                    // 画像の向きを判定（画像の幅と高さを比較）
+                    const imageIsLandscape = img.width > img.height;
+
                     console.log(`Receipt dimensions: W=${W.toFixed(1)}, H=${H.toFixed(1)}, aspect ratio: ${aspectRatio.toFixed(3)}, isPortrait: ${isPortrait}`);
+                    console.log(`Image dimensions: ${img.width}x${img.height}, imageIsLandscape: ${imageIsLandscape}`);
+
+                    // 縦長レシートが横向きで検出されている場合を判定
+                    // レシートが縦長（H > W）かつ画像が横向き（width > height）の場合、回転が必要
+                    const needsRotation = isPortrait && imageIsLandscape;
 
                     // 出力サイズを決定：レシート本来の向きを維持
                     const maxDimension = 2000; // 最大解像度
@@ -808,55 +819,165 @@ export default function Home() {
                         }
                     }
 
-                    console.log(`Output size (preserve orientation): ${outputWidth}x${outputHeight} (aspect ratio: ${aspectRatio.toFixed(2)}, ${isPortrait ? 'portrait' : 'landscape'})`);
-
-                    // 出力Canvasのサイズを設定
-                    dstCanvas.width = outputWidth;
-                    dstCanvas.height = outputHeight;
+                    console.log(`Output size (preserve orientation): ${outputWidth}x${outputHeight} (aspect ratio: ${aspectRatio.toFixed(2)}, ${isPortrait ? 'portrait' : 'landscape'}), needsRotation: ${needsRotation}`);
 
                     // OpenCV.jsのMatオブジェクトを作成
                     const srcMat = window.cv.imread(srcCanvas);
-                    const dstMat = new window.cv.Mat();
+                    let workingMat = srcMat; // 作業用のMat（回転が必要な場合は回転後のMatを使用）
 
-                    // ソース点とターゲット点を準備
-                    // 検出された4点をそのまま出力サイズの四隅にマッピング（回転処理なし）
-                    const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-                        srcCorners[0].x, srcCorners[0].y, // 左上
-                        srcCorners[1].x, srcCorners[1].y, // 右上
-                        srcCorners[2].x, srcCorners[2].y, // 右下
-                        srcCorners[3].x, srcCorners[3].y, // 左下
-                    ]);
+                    // 縦長レシートが横向きで検出されている場合、画像を90度回転
+                    if (needsRotation) {
+                        console.log('Rotating image 90 degrees clockwise to correct orientation');
+                        
+                        // 90度時計回りに回転（画像の中心を基準）
+                        const center = new window.cv.Point(img.width / 2, img.height / 2);
+                        const rotationMatrix = window.cv.getRotationMatrix2D(center, -90, 1.0); // -90度 = 90度時計回り
+                        
+                        // 回転後の画像サイズ（幅と高さを入れ替え）
+                        const rotatedWidth = img.height;
+                        const rotatedHeight = img.width;
+                        
+                        // 回転後のMatを作成
+                        const rotatedMat = new window.cv.Mat();
+                        window.cv.warpAffine(
+                            srcMat,
+                            rotatedMat,
+                            rotationMatrix,
+                            new window.cv.Size(rotatedWidth, rotatedHeight),
+                            window.cv.INTER_LINEAR,
+                            window.cv.BORDER_CONSTANT,
+                            new window.cv.Scalar()
+                        );
+                        
+                        // 回転後の座標を計算（90度時計回り）
+                        // 元の座標: (x, y) → 回転後: (height - y, x)
+                        const rotatedCorners = srcCorners.map(corner => ({
+                            x: img.height - corner.y,
+                            y: corner.x
+                        }));
 
-                    // ターゲット点：レシート本来の向きを維持した四隅
-                    const dstPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-                        0, 0,                                    // 左上
-                        outputWidth, 0,                          // 右上
-                        outputWidth, outputHeight,                // 右下
-                        0, outputHeight,                         // 左下
-                    ]);
+                        // 回転後の座標順序を調整（左上、右上、右下、左下）
+                        // 元の順序: [左上, 右上, 右下, 左下]
+                        // 90度時計回り回転後: [右上, 右下, 左下, 左上]
+                        const reorderedCorners = [
+                            rotatedCorners[1], // 元の右上 → 回転後の左上
+                            rotatedCorners[2], // 元の右下 → 回転後の右上
+                            rotatedCorners[3], // 元の左下 → 回転後の右下
+                            rotatedCorners[0], // 元の左上 → 回転後の左下
+                        ];
 
-                    // 透視変換行列を計算
-                    const M = window.cv.getPerspectiveTransform(srcPoints, dstPoints);
+                        // 作業用Matを回転後のMatに置き換え
+                        srcMat.delete(); // 元のMatを削除
+                        workingMat = rotatedMat;
 
-                    // 透視変換を適用（INTER_CUBICで文字の鮮明度を最大化）
-                    const dsize = new window.cv.Size(outputWidth, outputHeight);
-                    // INTER_CUBICを使用（文字の鮮明度を最大化）
-                    const interpolationMethod = window.cv.INTER_CUBIC || window.cv.INTER_LINEAR;
+                        // 回転後の座標を使用して透視変換
+                        const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+                            reorderedCorners[0].x, reorderedCorners[0].y, // 左上
+                            reorderedCorners[1].x, reorderedCorners[1].y, // 右上
+                            reorderedCorners[2].x, reorderedCorners[2].y, // 右下
+                            reorderedCorners[3].x, reorderedCorners[3].y, // 左下
+                        ]);
 
-                    console.log(`Applying perspective transform with ${interpolationMethod === window.cv.INTER_CUBIC ? 'INTER_CUBIC' : 'INTER_LINEAR'}`);
+                        // ターゲット点：縦長レシートの正しい向き（縦長）
+                        const dstPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+                            0, 0,                                    // 左上
+                            outputWidth, 0,                          // 右上
+                            outputWidth, outputHeight,                // 右下
+                            0, outputHeight,                         // 左下
+                        ]);
 
-                    window.cv.warpPerspective(
-                        srcMat,
-                        dstMat,
-                        M,
-                        dsize,
-                        interpolationMethod, // INTER_CUBICで文字の鮮明度を最大化
-                        window.cv.BORDER_CONSTANT,
-                        new window.cv.Scalar()
-                    );
+                        // 透視変換行列を計算
+                        const M = window.cv.getPerspectiveTransform(srcPoints, dstPoints);
 
-                    // 結果をCanvasに描画
-                    window.cv.imshow(dstCanvas, dstMat);
+                        // 出力Canvasのサイズを設定
+                        dstCanvas.width = outputWidth;
+                        dstCanvas.height = outputHeight;
+
+                        // 透視変換を適用
+                        const dstMat = new window.cv.Mat();
+                        const dsize = new window.cv.Size(outputWidth, outputHeight);
+                        const interpolationMethod = window.cv.INTER_CUBIC || window.cv.INTER_LINEAR;
+
+                        console.log(`Applying perspective transform with ${interpolationMethod === window.cv.INTER_CUBIC ? 'INTER_CUBIC' : 'INTER_LINEAR'}`);
+
+                        window.cv.warpPerspective(
+                            workingMat,
+                            dstMat,
+                            M,
+                            dsize,
+                            interpolationMethod,
+                            window.cv.BORDER_CONSTANT,
+                            new window.cv.Scalar()
+                        );
+
+                        // 結果をCanvasに描画
+                        window.cv.imshow(dstCanvas, dstMat);
+
+                        // メモリを解放（warpPerspectiveの後に削除）
+                        dstMat.delete();
+                        srcPoints.delete();
+                        dstPoints.delete();
+                        M.delete();
+                        rotationMatrix.delete();
+                        rotatedMat.delete(); // 最後に削除（workingMatが参照しているため）
+                    } else {
+                        // 通常の透視変換（回転不要）
+                        // 出力Canvasのサイズを設定
+                        dstCanvas.width = outputWidth;
+                        dstCanvas.height = outputHeight;
+
+                        const dstMat = new window.cv.Mat();
+
+                        // ソース点とターゲット点を準備
+                        const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+                            srcCorners[0].x, srcCorners[0].y, // 左上
+                            srcCorners[1].x, srcCorners[1].y, // 右上
+                            srcCorners[2].x, srcCorners[2].y, // 右下
+                            srcCorners[3].x, srcCorners[3].y, // 左下
+                        ]);
+
+                        // ターゲット点：レシート本来の向きを維持した四隅
+                        const dstPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+                            0, 0,                                    // 左上
+                            outputWidth, 0,                          // 右上
+                            outputWidth, outputHeight,                // 右下
+                            0, outputHeight,                         // 左下
+                        ]);
+
+                        // 透視変換行列を計算
+                        const M = window.cv.getPerspectiveTransform(srcPoints, dstPoints);
+
+                        // 透視変換を適用（INTER_CUBICで文字の鮮明度を最大化）
+                        const dsize = new window.cv.Size(outputWidth, outputHeight);
+                        // INTER_CUBICを使用（文字の鮮明度を最大化）
+                        const interpolationMethod = window.cv.INTER_CUBIC || window.cv.INTER_LINEAR;
+
+                        console.log(`Applying perspective transform with ${interpolationMethod === window.cv.INTER_CUBIC ? 'INTER_CUBIC' : 'INTER_LINEAR'}`);
+
+                        window.cv.warpPerspective(
+                            workingMat,
+                            dstMat,
+                            M,
+                            dsize,
+                            interpolationMethod, // INTER_CUBICで文字の鮮明度を最大化
+                            window.cv.BORDER_CONSTANT,
+                            new window.cv.Scalar()
+                        );
+
+                        // 結果をCanvasに描画
+                        window.cv.imshow(dstCanvas, dstMat);
+
+                        // メモリを解放
+                        dstMat.delete();
+                        srcPoints.delete();
+                        dstPoints.delete();
+                        M.delete();
+                    }
+
+                    // 元のMatを削除（回転処理で既に削除されている場合は無視）
+                    if (workingMat === srcMat) {
+                        srcMat.delete();
+                    }
 
                     // メモリを解放（SizeとScalarは軽量オブジェクトなので削除不要）
                     srcMat.delete();
