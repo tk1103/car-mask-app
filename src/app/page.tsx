@@ -827,11 +827,12 @@ export default function Home() {
 
                     // 縦長レシートが横向きで検出されている場合、画像を90度回転
                     if (needsRotation) {
-                        console.log('Rotating image 90 degrees clockwise to correct orientation');
+                        console.log('Rotating image 90 degrees counter-clockwise to correct orientation');
                         
-                        // 90度時計回りに回転（画像の中心を基準）
+                        // 90度反時計回りに回転（画像の中心を基準）
+                        // 縦長レシートが横向きの場合、90度反時計回りに回転させて正しい向きにする
                         const center = new window.cv.Point(img.width / 2, img.height / 2);
-                        const rotationMatrix = window.cv.getRotationMatrix2D(center, -90, 1.0); // -90度 = 90度時計回り
+                        const rotationMatrix = window.cv.getRotationMatrix2D(center, 90, 1.0); // 90度 = 90度反時計回り
                         
                         // 回転後の画像サイズ（幅と高さを入れ替え）
                         const rotatedWidth = img.height;
@@ -849,21 +850,30 @@ export default function Home() {
                             new window.cv.Scalar()
                         );
                         
-                        // 回転後の座標を計算（90度時計回り）
-                        // 元の座標: (x, y) → 回転後: (height - y, x)
-                        const rotatedCorners = srcCorners.map(corner => ({
-                            x: img.height - corner.y,
-                            y: corner.x
-                        }));
+                        // 回転後の座標を計算（90度反時計回り）
+                        // 画像を90度反時計回りに回転させた場合の座標変換:
+                        // 元の座標 (x, y) → 回転後 (y, width - x)
+                        // 回転後の画像サイズは (height, width) になる
+                        const rotatedCorners = srcCorners.map(corner => {
+                            // 回転後の座標を計算
+                            const rotatedX = corner.y;
+                            const rotatedY = img.width - corner.x;
+                            return { x: rotatedX, y: rotatedY };
+                        });
 
                         // 回転後の座標順序を調整（左上、右上、右下、左下）
-                        // 元の順序: [左上, 右上, 右下, 左下]
-                        // 90度時計回り回転後: [右上, 右下, 左下, 左上]
+                        // 元の順序: [左上(0), 右上(1), 右下(2), 左下(3)]
+                        // 90度反時計回り回転後の位置:
+                        // - 元の左上(0) → 回転後の右上
+                        // - 元の右上(1) → 回転後の右下
+                        // - 元の右下(2) → 回転後の左下
+                        // - 元の左下(3) → 回転後の左上
+                        // したがって、回転後の順序は [左下(3), 左上(0), 右上(1), 右下(2)]
                         const reorderedCorners = [
-                            rotatedCorners[1], // 元の右上 → 回転後の左上
-                            rotatedCorners[2], // 元の右下 → 回転後の右上
-                            rotatedCorners[3], // 元の左下 → 回転後の右下
-                            rotatedCorners[0], // 元の左上 → 回転後の左下
+                            rotatedCorners[3], // 元の左下 → 回転後の左上
+                            rotatedCorners[0], // 元の左上 → 回転後の右上
+                            rotatedCorners[1], // 元の右上 → 回転後の右下
+                            rotatedCorners[2], // 元の右下 → 回転後の左下
                         ];
 
                         // 作業用Matを回転後のMatに置き換え
