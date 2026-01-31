@@ -1042,14 +1042,14 @@ export default function Home() {
                 invoice_number: data.invoice_number || undefined,
                 currency: data.currency || undefined,
                 corners: data.corners || undefined,
-                expenseCategory: data.expenseCategory || '雑費',
+                expenseCategory: (data.expenseCategory || '雑費') as ExpenseCategory,
                 categoryReason: data.categoryReason || undefined,
                 confidenceScore: data.confidenceScore !== undefined ? data.confidenceScore : 0.5,
                 hasWarning,
             };
         } catch (err) {
             console.error('OCR processing failed:', err);
-            return { amount: 0, vendor: '', expenseCategory: '雑費', hasWarning: true };
+            return { amount: 0, vendor: '', expenseCategory: '雑費' as ExpenseCategory, hasWarning: true };
         } finally {
             if (!skipStateUpdate) {
                 setIsOcrProcessing(false);
@@ -1295,7 +1295,7 @@ export default function Home() {
                 receiptDate: receiptDate, // Geminiが読み取った日時
                 invoice_number: extractedInvoiceNumber,
                 corners: corners,
-                expenseCategory: extractedExpenseCategory || '雑費', // 勘定科目
+                expenseCategory: (extractedExpenseCategory ?? '雑費') as ExpenseCategory, // 勘定科目
                 categoryReason: extractedCategoryReason,
                 confidenceScore: extractedConfidenceScore,
             };
@@ -2312,7 +2312,7 @@ export default function Home() {
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency || 'JPY',
                         corners: apiCorners,
-                        expenseCategory: extractedExpenseCategory || '雑費',
+                        expenseCategory: (extractedExpenseCategory ?? '雑費') as ExpenseCategory,
                         categoryReason: extractedCategoryReason,
                         confidenceScore: extractedConfidenceScore,
                     };
@@ -2539,7 +2539,7 @@ export default function Home() {
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency || 'JPY',
                         corners: cornersToUse ?? undefined,
-                        expenseCategory: extractedExpenseCategory || '雑費',
+                        expenseCategory: (extractedExpenseCategory ?? '雑費') as ExpenseCategory,
                         categoryReason: extractedCategoryReason,
                         confidenceScore: extractedConfidenceScore,
                     };
@@ -2751,7 +2751,7 @@ export default function Home() {
             amount: receipt.amount || 0,
             note: receipt.note || '',
             date: dateStr,
-            expenseCategory: receipt.expenseCategory || '雑費',
+            expenseCategory: (receipt.expenseCategory ?? '雑費') as ExpenseCategory,
         });
     };
 
