@@ -2662,7 +2662,7 @@ export default function Home() {
                 invoice_number: extractedInvoiceNumber,
                 currency: extractedCurrency || 'JPY',
                 corners: corners,
-                expenseCategory: extractedExpenseCategory || 'その他',
+                expenseCategory: extractedExpenseCategory || '雑費',
             };
 
             await db.receipts.add(receipt);
@@ -2715,7 +2715,7 @@ export default function Home() {
             });
 
             setEditingReceipt(null);
-            setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: 'その他' });
+            setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
             await loadReceipts();
         } catch (error) {
             console.error('Failed to update receipt:', error);
