@@ -2815,7 +2815,7 @@ export default function Home() {
 
     if (isLoading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="min-h-screen flex items-center justify-center bg-gray-100">
                 <div className="text-gray-500">読み込み中...</div>
             </div>
         );
@@ -2823,9 +2823,9 @@ export default function Home() {
 
     if (error) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+            <div className="min-h-screen flex items-center justify-center bg-gray-100">
                 <div className="text-center">
-                    <p className="text-red-500 mb-4">{error}</p>
+                    <p className="text-red-600 mb-4">{error}</p>
                     <button
                         onClick={loadReceipts}
                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -2838,9 +2838,9 @@ export default function Home() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 pb-20">
+        <div className="min-h-screen bg-gray-100 pb-20">
             {/* Header */}
-            <header className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
+            <header className="sticky top-0 z-10 bg-white border-b border-gray-300 shadow-sm">
                 <div className="max-w-4xl mx-auto px-4 py-4">
                     <div className="flex items-center justify-between mb-3">
                         <h1 className="text-2xl font-bold text-gray-900">レシート管理</h1>
@@ -2848,14 +2848,14 @@ export default function Home() {
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={clearAllReceipts}
-                                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm"
+                                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
                                 >
                                     <X size={18} />
                                     <span>データクリア</span>
                                 </button>
                                 <button
                                     onClick={() => setShowExportModal(true)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
                                 >
                                     <Download size={18} />
                                     <span>エクスポート</span>
@@ -2868,19 +2868,19 @@ export default function Home() {
                         {Object.entries(totalAmountByCurrency).map(([currency, amount]) => (
                             <div
                                 key={currency}
-                                className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg px-4 py-3 shadow-sm border border-blue-200"
+                                className="bg-gray-100 rounded-lg px-4 py-3 shadow-sm border border-gray-300"
                             >
-                                <div className="text-xs text-gray-600 font-medium mb-1">
+                                <div className="text-xs text-gray-500 font-medium mb-1">
                                     Total {currency}
                                 </div>
-                                <div className="text-2xl font-bold text-blue-700">
+                                <div className="text-2xl font-bold text-blue-600">
                                     {formatAmount(amount, currency)}
                                 </div>
                             </div>
                         ))}
                         {Object.keys(totalAmountByCurrency).length === 0 && (
-                            <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg px-4 py-3 shadow-sm border border-gray-200">
-                                <div className="text-xs text-gray-600 font-medium mb-1">
+                            <div className="bg-gray-100 rounded-lg px-4 py-3 shadow-sm border border-gray-300">
+                                <div className="text-xs text-gray-500 font-medium mb-1">
                                     Total JPY
                                 </div>
                                 <div className="text-2xl font-bold text-gray-700">
@@ -2898,31 +2898,31 @@ export default function Home() {
                     <div className="bg-white rounded-lg p-6 flex flex-col items-center gap-4 relative overflow-hidden w-full max-w-sm mx-4">
                         {/* スキャンアニメーション（切り抜いた範囲がスキャンされるような光るラインが上下に動く） */}
                         <div className="absolute inset-0 overflow-hidden rounded-lg">
-                            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-400/40 to-transparent animate-scan"></div>
+                            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-600/40 to-transparent animate-scan"></div>
                             {/* 追加のスキャンライン効果 */}
-                            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-300/20 to-transparent animate-scan" style={{ animationDelay: '0.5s' }}></div>
+                            <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-600/20 to-transparent animate-scan" style={{ animationDelay: '0.5s' }}></div>
                         </div>
                         <Loader2 className="animate-spin text-blue-600 relative z-10" size={32} />
-                        <p className="text-gray-800 font-medium relative z-10">画像を圧縮・送信中...</p>
+                        <p className="text-gray-900 font-medium relative z-10">画像を圧縮・送信中...</p>
                     </div>
                 </div>
             )}
 
             {/* OCR警告メッセージ */}
             {ocrWarning && (
-                <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-yellow-50 border border-yellow-200 rounded-lg shadow-lg p-4 max-w-md mx-4">
+                <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-gray-100 border border-gray-300 rounded-lg shadow-lg p-4 max-w-md mx-4">
                     <div className="flex items-start gap-3">
                         <div className="flex-shrink-0">
-                            <svg className="w-5 h-5 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                            <svg className="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
                         </div>
                         <div className="flex-1">
-                            <p className="text-sm font-medium text-yellow-800">{ocrWarning}</p>
+                            <p className="text-sm font-medium text-gray-700">{ocrWarning}</p>
                         </div>
                         <button
                             onClick={() => setOcrWarning(null)}
-                            className="flex-shrink-0 text-yellow-600 hover:text-yellow-800"
+                            className="flex-shrink-0 text-gray-500 hover:text-gray-700"
                         >
                             <X size={18} />
                         </button>
@@ -2934,7 +2934,7 @@ export default function Home() {
             {showExportModal && (
                 <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-                        <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                        <div className="border-b border-gray-300 px-6 py-4 flex items-center justify-between">
                             <h2 className="text-xl font-bold text-gray-900">CSVエクスポート</h2>
                             <button
                                 onClick={() => setShowExportModal(false)}
@@ -2947,97 +2947,97 @@ export default function Home() {
                         <div className="p-6 space-y-6">
                             {/* エクスポート形式の選択 */}
                             <div>
-                                <label className="block text-sm font-medium text-gray-800 mb-3">
+                                <label className="block text-sm font-medium text-gray-700 mb-3">
                                     エクスポート形式を選択
                                 </label>
                                 <div className="space-y-2">
                                     {/* 画像エクスポート */}
-                                    <div className="border-t border-gray-200 pt-4 mt-4">
+                                    <div className="border-t border-gray-300 pt-4 mt-4">
                                         <h3 className="text-sm font-semibold text-gray-700 mb-2">画像エクスポート</h3>
                                         <button
                                             onClick={() => exportImages(false)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">画像をZIPでエクスポート（現在表示中）</div>
                                             <div className="text-xs text-gray-500 mt-1">撮影したサイズのまま画像をZIPファイルでダウンロード</div>
-                                            <div className="text-xs text-gray-400 mt-1">
+                                            <div className="text-xs text-gray-500 mt-1">
                                                 {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
                                             </div>
                                         </button>
                                         <button
                                             onClick={() => exportImages(true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors mt-2"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors mt-2"
                                         >
                                             <div className="font-semibold text-gray-900">画像をZIPでエクスポート（全データ）</div>
                                             <div className="text-xs text-gray-500 mt-1">撮影したサイズのまま画像をZIPファイルでダウンロード</div>
-                                            <div className="text-xs text-gray-400 mt-1">{receipts.length}件</div>
+                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                         </button>
                                     </div>
                                     
                                     {/* CSVエクスポート */}
-                                    <div className="border-t border-gray-200 pt-4 mt-4">
+                                    <div className="border-t border-gray-300 pt-4 mt-4">
                                         <h3 className="text-sm font-semibold text-gray-700 mb-2">CSVエクスポート</h3>
                                     <button
                                         onClick={() => exportToCSV('generic', false)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
                                     >
                                         <div className="font-semibold text-gray-900">汎用CSV（現在表示中）</div>
                                         <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
-                                        <div className="text-xs text-gray-400 mt-1">
+                                        <div className="text-xs text-gray-500 mt-1">
                                             {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
                                         </div>
                                     </button>
                                     <button
                                         onClick={() => exportToCSV('generic', true)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
                                     >
                                         <div className="font-semibold text-gray-900">汎用CSV（全データ）</div>
                                         <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
-                                        <div className="text-xs text-gray-400 mt-1">{receipts.length}件</div>
+                                        <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                     </button>
                                     <button
                                         onClick={() => exportToCSV('freee', false)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
                                     >
                                         <div className="font-semibold text-gray-900">freee形式（現在表示中）</div>
                                         <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
-                                        <div className="text-xs text-gray-400 mt-1">
+                                        <div className="text-xs text-gray-500 mt-1">
                                             {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
                                         </div>
                                     </button>
                                     <button
                                         onClick={() => exportToCSV('freee', true)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
                                     >
                                         <div className="font-semibold text-gray-900">freee形式（全データ）</div>
                                         <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
-                                        <div className="text-xs text-gray-400 mt-1">{receipts.length}件</div>
+                                        <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                     </button>
                                     <button
                                         onClick={() => exportToCSV('moneyforward', false)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
                                     >
                                         <div className="font-semibold text-gray-900">マネーフォワード形式（現在表示中）</div>
                                         <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
-                                        <div className="text-xs text-gray-400 mt-1">
+                                        <div className="text-xs text-gray-500 mt-1">
                                             {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
                                         </div>
                                     </button>
                                     <button
                                         onClick={() => exportToCSV('moneyforward', true)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors"
+                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
                                     >
                                         <div className="font-semibold text-gray-900">マネーフォワード形式（全データ）</div>
                                         <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
-                                        <div className="text-xs text-gray-400 mt-1">{receipts.length}件</div>
+                                        <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                     </button>
                                     </div>
                                 </div>
                             </div>
 
                             {/* 注意事項 */}
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                <p className="text-xs text-blue-800">
+                            <div className="bg-gray-100 border border-gray-300 rounded-lg p-3">
+                                <p className="text-xs text-gray-700">
                                     💡 各形式のボタンをクリックすると、選択した範囲のデータが即座にダウンロードされます。
                                     <br />
                                     THB（タイバーツ）のレシートは備考欄に「外貨: THB」と記載されます。
@@ -3045,7 +3045,7 @@ export default function Home() {
                             </div>
                         </div>
 
-                        <div className="border-t border-gray-200 px-6 py-4 flex justify-end">
+                        <div className="border-t border-gray-300 px-6 py-4 flex justify-end">
                             <button
                                 onClick={() => setShowExportModal(false)}
                                 className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
@@ -3110,7 +3110,7 @@ export default function Home() {
 
                         {/* 右側: 編集フォーム */}
                         <div className="w-full md:w-1/2 flex flex-col max-h-[90vh] overflow-y-auto">
-                            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                            <div className="sticky top-0 bg-white border-b border-gray-300 px-6 py-4 flex items-center justify-between">
                                 <h2 className="text-xl font-bold text-gray-900">レシートを編集</h2>
                                 <button
                                     onClick={() => {
@@ -3125,14 +3125,14 @@ export default function Home() {
 
                             <div className="p-6 space-y-4 flex-1">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-800 mb-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
                                         店名
                                     </label>
                                     <input
                                         type="text"
                                         value={editForm.vendor}
                                         onChange={(e) => setEditForm({ ...editForm, vendor: e.target.value })}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder:text-gray-500"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 placeholder:text-gray-500"
                                         style={{
                                             fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'
                                         }}
@@ -3141,14 +3141,14 @@ export default function Home() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-800 mb-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
                                         金額
                                     </label>
                                     <input
                                         type="number"
                                         value={editForm.amount || ''}
                                         onChange={(e) => setEditForm({ ...editForm, amount: parseFloat(e.target.value) || 0 })}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder:text-gray-500"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 placeholder:text-gray-500"
                                         placeholder="0"
                                         min="0"
                                         step="1"
@@ -3156,14 +3156,14 @@ export default function Home() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-800 mb-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
                                         日付
                                     </label>
                                     <input
                                         type="date"
                                         value={editForm.date}
                                         onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder:text-gray-500"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 placeholder:text-gray-500"
                                         style={{
                                             fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'
                                         }}
@@ -3171,20 +3171,20 @@ export default function Home() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-800 mb-2">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
                                         メモ
                                     </label>
                                     <textarea
                                         value={editForm.note}
                                         onChange={(e) => setEditForm({ ...editForm, note: e.target.value })}
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-gray-900 placeholder:text-gray-500"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent resize-none text-gray-900 placeholder:text-gray-500"
                                         placeholder="メモを入力"
                                         rows={4}
                                     />
                                 </div>
                             </div>
 
-                            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex gap-3">
+                            <div className="sticky bottom-0 bg-gray-100 border-t border-gray-300 px-6 py-4 flex gap-3">
                                 <button
                                     onClick={() => {
                                         setEditingReceipt(null);
@@ -3328,7 +3328,7 @@ export default function Home() {
                                                 <path
                                                     d={pathData}
                                                     fill="none"
-                                                    stroke="rgba(34, 197, 94, 0.9)"
+                                                    stroke="rgba(37, 99, 235, 0.9)"
                                                     strokeWidth="3"
                                                     strokeDasharray="8 4"
                                                     strokeLinecap="round"
@@ -3341,7 +3341,7 @@ export default function Home() {
                                                             cx={corner.x}
                                                             cy={corner.y}
                                                             r="8"
-                                                            fill="rgba(34, 197, 94, 0.9)"
+                                                            fill="rgba(37, 99, 235, 0.9)"
                                                             stroke="white"
                                                             strokeWidth="2"
                                                         />
@@ -3480,7 +3480,7 @@ export default function Home() {
                                             </p>
                                             {/* デバッグ情報（開発環境のみ） */}
                                             {process.env.NODE_ENV === 'development' && (
-                                                <p className="text-xs text-gray-400 mt-1">
+                                                <p className="text-xs text-gray-500 mt-1">
                                                     {(() => {
                                                         const corners = detectedCorners || detectedCornersRef.current;
                                                         return corners ? `検出中: ${corners.length}点` : '検出なし';
@@ -3508,7 +3508,7 @@ export default function Home() {
                             const corners = detectedCorners || detectedCornersRef.current;
                             return corners && !isReceiptAreaValid;
                         })() && (
-                                <div className="mb-2 px-4 py-2 bg-yellow-500/90 text-white text-sm rounded-lg">
+                                <div className="mb-2 px-4 py-2 bg-gray-700 text-white text-sm rounded-lg">
                                     レシートが小さすぎます。もう少し近づけてください。
                                 </div>
                             )}
@@ -3523,8 +3523,8 @@ export default function Home() {
                                 const corners = detectedCorners || detectedCornersRef.current;
                                 return corners !== null && !isReceiptAreaValid;
                             })()
-                                ? 'bg-gray-400 border-gray-500 cursor-not-allowed opacity-50'
-                                : 'bg-white border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+                                ? 'bg-gray-500 border-gray-700 cursor-not-allowed opacity-50'
+                                : 'bg-white border-gray-300 hover:border-gray-500 hover:bg-gray-100'
                                 }`}
                             aria-label="写真を撮る"
                             type="button"
@@ -3533,8 +3533,8 @@ export default function Home() {
                                 const corners = detectedCorners || detectedCornersRef.current;
                                 return corners !== null && !isReceiptAreaValid;
                             })()
-                                ? 'bg-gray-300 border-gray-400'
-                                : 'bg-white border-gray-200'
+                                ? 'bg-gray-500 border-gray-700'
+                                : 'bg-white border-gray-300'
                                 }`}></div>
                         </button>
                     </div>
@@ -3546,7 +3546,7 @@ export default function Home() {
                 <div className="fixed inset-0 z-50 bg-black flex flex-col">
                     {/* 自動解析中のメッセージ */}
                     {isOcrProcessing && (
-                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-60 bg-blue-600/90 text-white px-6 py-3 rounded-lg backdrop-blur-sm shadow-lg">
+                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-60 bg-blue-600 text-white px-6 py-3 rounded-lg backdrop-blur-sm shadow-lg">
                             <div className="flex items-center gap-3">
                                 <Loader2 className="animate-spin" size={20} />
                                 <span className="font-medium">解析中...</span>
@@ -3573,7 +3573,7 @@ export default function Home() {
                                 setPreviewImage(null);
                                 startCamera();
                             }}
-                            className="flex-1 px-6 py-3 border-2 border-gray-300 rounded-lg text-white hover:bg-gray-800 transition-colors font-medium"
+                            className="flex-1 px-6 py-3 border-2 border-gray-300 rounded-lg text-white hover:bg-gray-700 transition-colors font-medium"
                         >
                             撮り直す
                         </button>
@@ -3650,33 +3650,33 @@ export default function Home() {
             <main className="max-w-4xl mx-auto px-4 py-6">
                 {receipts.length === 0 ? (
                     <div className="text-center py-12">
-                        <Camera className="mx-auto text-gray-400 mb-4" size={48} />
+                        <Camera className="mx-auto text-gray-500 mb-4" size={48} />
                         <p className="text-gray-500 text-lg">レシートがありません</p>
-                        <p className="text-gray-400 text-sm mt-2">右下のカメラボタンから撮影してください</p>
+                        <p className="text-gray-500 text-sm mt-2">右下のカメラボタンから撮影してください</p>
                     </div>
                 ) : (
                     <div className="space-y-6">
                         {/* ソートコントロール */}
-                        <div className="flex items-center justify-between bg-white rounded-lg shadow-sm p-4 sticky top-16 z-10 border border-gray-200">
+                        <div className="flex items-center justify-between bg-white rounded-lg shadow-sm p-4 sticky top-16 z-10 border border-gray-300">
                             <h2 className="text-lg font-semibold text-gray-900">レシート一覧</h2>
                             <div className="flex items-center gap-3">
                                 <div className="flex items-center gap-2">
-                                    <label className="text-sm text-gray-600">ソート基準:</label>
+                                    <label className="text-sm text-gray-500">ソート基準:</label>
                                     <select
                                         value={sortBy}
                                         onChange={(e) => setSortBy(e.target.value as 'timestamp' | 'receiptDate')}
-                                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent bg-white"
                                     >
                                         <option value="receiptDate">レシート日時</option>
                                         <option value="timestamp">撮影時間</option>
                                     </select>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <label className="text-sm text-gray-600">並び順:</label>
+                                    <label className="text-sm text-gray-500">並び順:</label>
                                     <select
                                         value={sortOrder}
                                         onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
-                                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 focus:border-transparent bg-white"
                                     >
                                         <option value="newest">新しい順</option>
                                         <option value="oldest">古い順</option>
@@ -3691,17 +3691,17 @@ export default function Home() {
                             const monthlyTotal = getMonthlyTotal(monthReceipts);
 
                             return (
-                                <div key={monthKey} className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden mb-6">
+                                <div key={monthKey} className="bg-white rounded-lg shadow-sm border border-gray-300 overflow-hidden mb-6">
                                     {/* 月間サマリーヘッダー */}
-                                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 px-6 py-4">
+                                    <div className="bg-gray-100 border-b border-gray-300 px-6 py-4">
                                         <div className="flex items-center justify-between">
                                             <h3 className="text-xl font-bold text-gray-900">
                                                 {formatMonthName(monthKey)}
                                             </h3>
                                             <div className="flex items-center gap-4">
-                                                <span className="text-sm text-gray-600">合計:</span>
+                                                <span className="text-sm text-gray-500">合計:</span>
                                                 {Object.entries(monthlyTotal).map(([currency, amount]) => (
-                                                    <span key={currency} className="text-lg font-semibold text-blue-700">
+                                                    <span key={currency} className="text-lg font-semibold text-blue-600">
                                                         {formatAmount(amount, currency)}
                                                     </span>
                                                 ))}
@@ -3749,7 +3749,7 @@ export default function Home() {
                                                         </div>
                                                         
                                                         {/* 情報とボタンエリア */}
-                                                        <div className="bg-white p-3 border-t border-gray-200">
+                                                        <div className="bg-white p-3 border-t border-gray-300">
                                                             {/* 店名と金額 */}
                                                             <div className="mb-2">
                                                                 <div className="font-semibold text-sm text-gray-900 mb-1 line-clamp-1">
@@ -3766,7 +3766,7 @@ export default function Home() {
                                                             </div>
                                                             
                                                             {/* 日付情報 */}
-                                                            <div className="text-xs text-gray-600 mb-2 space-y-0.5">
+                                                            <div className="text-xs text-gray-500 mb-2 space-y-0.5">
                                                                 <div>📸 {formatDate(receipt.timestamp)}</div>
                                                                 {receipt.receiptDate && (
                                                                     <div>📅 {formatDate(receipt.receiptDate)}</div>
@@ -3774,13 +3774,13 @@ export default function Home() {
                                                             </div>
                                                             
                                                             {/* 編集・削除ボタン */}
-                                                            <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+                                                            <div className="flex items-center gap-2 pt-2 border-t border-gray-300">
                                                                 <button
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
                                                                         openEditModal(receipt);
                                                                     }}
-                                                                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                     aria-label="編集"
                                                                     type="button"
                                                                 >
@@ -3794,7 +3794,7 @@ export default function Home() {
                                                                             deleteReceipt(receipt.id);
                                                                         }
                                                                     }}
-                                                                    className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                    className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                     aria-label="削除"
                                                                     type="button"
                                                                 >
@@ -3814,15 +3814,15 @@ export default function Home() {
 
                         {/* 日付不明のレシート */}
                         {groupedReceipts.unknownDateReceipts.length > 0 && (
-                            <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                            <div className="bg-white rounded-lg shadow-sm border border-gray-300 overflow-hidden">
                                 {/* 日付不明セクションヘッダー */}
-                                <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 px-6 py-4">
+                                <div className="bg-gray-100 border-b border-gray-300 px-6 py-4">
                                     <div className="flex items-center justify-between">
                                         <h3 className="text-xl font-bold text-gray-900">
                                             日付不明
                                         </h3>
                                         <div className="flex items-center gap-4">
-                                            <span className="text-sm text-gray-600">合計:</span>
+                                            <span className="text-sm text-gray-500">合計:</span>
                                             {Object.entries(getMonthlyTotal(groupedReceipts.unknownDateReceipts)).map(([currency, amount]) => (
                                                 <span key={currency} className="text-lg font-semibold text-gray-700">
                                                     {formatAmount(amount, currency)}
@@ -3872,7 +3872,7 @@ export default function Home() {
                                                     </div>
                                                     
                                                     {/* 情報とボタンエリア */}
-                                                    <div className="bg-white p-3 border-t border-gray-200">
+                                                    <div className="bg-white p-3 border-t border-gray-300">
                                                         {/* 店名と金額 */}
                                                         <div className="mb-2">
                                                             <div className="font-semibold text-sm text-gray-900 mb-1 line-clamp-1">
@@ -3889,7 +3889,7 @@ export default function Home() {
                                                         </div>
                                                         
                                                         {/* 日付情報 */}
-                                                        <div className="text-xs text-gray-600 mb-2 space-y-0.5">
+                                                        <div className="text-xs text-gray-500 mb-2 space-y-0.5">
                                                             <div>📸 {formatDate(receipt.timestamp)}</div>
                                                             {receipt.receiptDate && (
                                                                 <div>📅 {formatDate(receipt.receiptDate)}</div>
@@ -3903,7 +3903,7 @@ export default function Home() {
                                                                     e.stopPropagation();
                                                                     openEditModal(receipt);
                                                                 }}
-                                                                className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                 aria-label="編集"
                                                                 type="button"
                                                             >
@@ -3917,7 +3917,7 @@ export default function Home() {
                                                                         deleteReceipt(receipt.id);
                                                                     }
                                                                 }}
-                                                                className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                    className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                 aria-label="削除"
                                                                 type="button"
                                                             >
