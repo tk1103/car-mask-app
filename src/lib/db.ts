@@ -1,12 +1,16 @@
 import Dexie, { Table } from 'dexie';
 
 export type ExpenseCategory = 
+    | '仕入高'
+    | '広告宣伝費'
+    | '消耗品費'
     | '会議費'
     | '接待交際費'
-    | '消耗品'
-    | '車両運搬費'
     | '旅費交通費'
-    | 'その他';
+    | '通信費'
+    | '支払手数料'
+    | '新聞図書費'
+    | '雑費';
 
 export interface Receipt {
     id?: number;
@@ -21,7 +25,9 @@ export interface Receipt {
     receiptDate?: Date; // Geminiが読み取った日時をDateオブジェクトとして保存
     invoice_number?: string; // インボイス番号
     corners?: Array<{ x: number; y: number }>; // レシートの四隅の座標（0-1000の正規化座標）
-    expenseCategory?: ExpenseCategory; // 経費カテゴリ
+    expenseCategory?: ExpenseCategory; // 勘定科目
+    categoryReason?: string; // 勘定科目判定の理由
+    confidenceScore?: number; // 判定の信頼度（0.0-1.0）
 }
 
 export class MyDatabase extends Dexie {

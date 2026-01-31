@@ -95,8 +95,10 @@ export async function POST(request: NextRequest) {
                         invoice_number: { type: "string" as const },
                         expenseCategory: { 
                             type: "string" as const,
-                            enum: ["会議費", "接待交際費", "消耗品", "車両運搬費", "旅費交通費", "その他"]
+                            enum: ["仕入高", "広告宣伝費", "消耗品費", "会議費", "接待交際費", "旅費交通費", "通信費", "支払手数料", "新聞図書費", "雑費"]
                         },
+                        categoryReason: { type: "string" as const },
+                        confidenceScore: { type: "number" as const },
                         corners: {
                             type: "array" as const,
                             items: {
@@ -111,7 +113,7 @@ export async function POST(request: NextRequest) {
                             maxItems: 4
                         }
                     },
-                    required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners", "expenseCategory"]
+                    required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners", "expenseCategory", "categoryReason", "confidenceScore"]
                 } as any
             }
         });
@@ -249,49 +251,71 @@ F. INVOICE_NUMBER:
    - Japanese receipts: Various formats
    - If not found or unclear, return null
 
-G. EXPENSE_CATEGORY (経費カテゴリ):
-   - Analyze the receipt content (vendor name, items purchased, location, amount) to determine the expense category
-   - Categories and their criteria:
-     * "会議費" (Meeting Expenses):
-       - Conference rooms, meeting spaces, seminar halls
-       - Office supplies for meetings (whiteboards, markers, etc.)
-       - Catering for business meetings
-       - Examples: 会議室, セミナー, 会議, ミーティング, conference room, meeting room
+G. EXPENSE_CATEGORY (勘定科目):
+   - You are an excellent accounting assistant working at a Japanese tax accounting firm.
+   - Analyze the receipt content (vendor name, items purchased, location, amount) to determine the accounting category according to Japanese accounting standards.
+   - Follow the priority order and logic below:
+   
+   【判定の優先順位とロジック】
+   1. 店名や品目から「転売・加工・提供用」の仕入れと判断できれば最優先で「仕入高」。
+   2. 飲食の場合、金額と店名から「会議費」か「接待交際費」かを推論。
+   3. 判断に迷う場合は、その理由を categoryReason フィールドに記述し、最も可能性の高いものを選ぶ。
+   
+   【勘定科目リストと判定基準】
+     * "仕入高":
+       - 販売用の食材、商品、材料の買い出し
+       - 転売・加工・提供用の仕入れ
+       - Examples: 食材仕入れ, 商品仕入れ, 材料購入, 卸売, wholesale, ingredients for sale
      
-     * "接待交際費" (Entertainment Expenses):
-       - Restaurants, bars, cafes for business entertainment
-       - Gifts for clients or business partners
-       - Business dinners, lunches with clients
-       - Examples: レストラン, 居酒屋, 接待, 交際費, restaurant, bar, entertainment
+     * "広告宣伝費":
+       - チラシ、名刺、SNS広告、宣伝用備品
+       - Examples: チラシ, 名刺, 広告, 宣伝, flyer, business card, advertising, promotion
      
-     * "消耗品" (Supplies):
-       - Office supplies (pens, paper, notebooks, etc.)
-       - Cleaning supplies
-       - Small tools and equipment
-       - Examples: 文房具, オフィス用品, 消耗品, office supplies, stationery, cleaning supplies
+     * "消耗品費":
+       - 10万円未満の備品、事務用品、日用品
+       - Examples: 文房具, オフィス用品, 事務用品, 日用品, office supplies, stationery, under 100,000 yen
      
-     * "車両運搬費" (Vehicle/Transportation Expenses):
-       - Gas stations, parking fees
-       - Vehicle maintenance, car repairs
-       - Vehicle rental
-       - Examples: ガソリンスタンド, 駐車場, 車両, 運搬, gas station, parking, vehicle, car
+     * "会議費":
+       - 1人または少人数の打ち合わせ飲食代
+       - 金額が5,000円以下目安
+       - Examples: 会議, 打ち合わせ, ミーティング, meeting, small group dining under 5,000 yen
      
-     * "旅費交通費" (Travel Expenses):
-       - Trains, buses, taxis, flights
-       - Hotels, accommodations
-       - Public transportation tickets
-       - Examples: 電車, バス, タクシー, ホテル, 交通費, train, bus, taxi, hotel, travel
+     * "接待交際費":
+       - 取引先への贈答、会食、ゴルフ等
+       - 金額が5,000円超の飲食
+       - Examples: 接待, 交際費, 会食, ゴルフ, entertainment, client dining over 5,000 yen
      
-     * "その他" (Other):
-       - If the receipt doesn't clearly fit into any of the above categories
+     * "旅費交通費":
+       - 電車、タクシー、バス、駐車場、宿泊費
+       - Examples: 電車, タクシー, バス, 駐車場, ホテル, train, taxi, bus, parking, hotel
+     
+     * "通信費":
+       - 切手、宅配便、インターネット、電話代
+       - Examples: 切手, 宅配便, インターネット, 電話代, postage, delivery, internet, phone
+     
+     * "支払手数料":
+       - 振込手数料、代引き手数料、事務手数料
+       - Examples: 振込手数料, 代引き手数料, 事務手数料, transfer fee, cash on delivery fee
+     
+     * "新聞図書費":
+       - 書籍、雑誌、新聞
+       - Examples: 書籍, 雑誌, 新聞, book, magazine, newspaper
+     
+     * "雑費":
+       - 上記いずれにも当てはまらない一時的な費用
        - Default category when uncertain
    
-   - Consider multiple factors:
-     * Vendor name (e.g., "ガソリンスタンド" → "車両運搬費")
-     * Item descriptions (e.g., "会議室" → "会議費")
-     * Location context (e.g., hotel → "旅費交通費")
-     * Amount and context (e.g., small office supplies → "消耗品")
-   - If uncertain, use "その他" as default
+   H. CATEGORY_REASON (判定理由):
+   - Describe the reasoning for the category selection in Japanese
+   - If uncertain, explain why and what factors were considered
+   - Examples: "店名がレストランで金額が8,000円のため接待交際費と判定", "事務用品の購入のため消耗品費と判定"
+   
+   I. CONFIDENCE_SCORE (信頼度):
+   - Provide a confidence score from 0.0 to 1.0
+   - 1.0: Very confident (clear indicators match category)
+   - 0.7-0.9: Confident (most indicators match)
+   - 0.5-0.6: Somewhat confident (some indicators match, but uncertain)
+   - 0.0-0.4: Low confidence (unclear or ambiguous)
 
 H. CORNERS:
    - Return array of 4 coordinates: [{x, y}, {x, y}, {x, y}, {x, y}]
@@ -613,7 +637,9 @@ RETURN:
             time: parsedData.time || '',
             invoice_number: parsedData.invoice_number || '',
             corners: corners,
-            expenseCategory: parsedData.expenseCategory || 'その他',
+            expenseCategory: parsedData.expenseCategory || '雑費',
+            categoryReason: parsedData.categoryReason || '',
+            confidenceScore: parsedData.confidenceScore !== undefined ? parsedData.confidenceScore : 0.5,
             inference_reason: inferenceReason || null, // 通貨判定の推論理由
             rawText: text, // デバッグ用
         });

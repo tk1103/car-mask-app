@@ -85,7 +85,7 @@ export default function Home() {
         amount: 0, 
         note: '', 
         date: '',
-        expenseCategory: 'その他'
+        expenseCategory: '雑費'
     });
     const [isOpenCvReady, setIsOpenCvReady] = useState(false);
     const [expandedImage, setExpandedImage] = useState<{ url: string; receipt: Receipt } | null>(null);
@@ -924,6 +924,8 @@ export default function Home() {
         currency?: string | null;
         corners?: Array<{ x: number; y: number }>;
         expenseCategory?: ExpenseCategory;
+        categoryReason?: string;
+        confidenceScore?: number;
         hasWarning: boolean
     }> => {
         try {
@@ -1031,7 +1033,7 @@ export default function Home() {
             // 金額が0の場合は警告を表示
             const hasWarning = data.amount === 0 || !data.amount;
 
-            // Gemini APIからの解析結果を返す（vendor, amount, date, time, invoice_number, currency, corners, expenseCategory）
+            // Gemini APIからの解析結果を返す（vendor, amount, date, time, invoice_number, currency, corners, expenseCategory, categoryReason, confidenceScore）
             return {
                 amount: data.amount || 0,
                 vendor: data.vendor || '',
@@ -1040,12 +1042,14 @@ export default function Home() {
                 invoice_number: data.invoice_number || undefined,
                 currency: data.currency || undefined,
                 corners: data.corners || undefined,
-                expenseCategory: data.expenseCategory || 'その他',
+                expenseCategory: data.expenseCategory || '雑費',
+                categoryReason: data.categoryReason || undefined,
+                confidenceScore: data.confidenceScore !== undefined ? data.confidenceScore : 0.5,
                 hasWarning,
             };
         } catch (err) {
             console.error('OCR processing failed:', err);
-            return { amount: 0, vendor: '', expenseCategory: 'その他', hasWarning: true };
+            return { amount: 0, vendor: '', expenseCategory: '雑費', hasWarning: true };
         } finally {
             if (!skipStateUpdate) {
                 setIsOcrProcessing(false);
@@ -1207,7 +1211,7 @@ export default function Home() {
                 return;
             }
 
-            // 3. OCRで金額、店名、日付、時刻、インボイス番号、四隅の座標、経費カテゴリを抽出（軽量画像を使用）
+            // 3. OCRで金額、店名、日付、時刻、インボイス番号、四隅の座標、勘定科目を抽出（軽量画像を使用）
             const {
                 amount: extractedAmount,
                 vendor: extractedVendor,
@@ -1217,6 +1221,8 @@ export default function Home() {
                 currency: extractedCurrency,
                 corners,
                 expenseCategory: extractedExpenseCategory,
+                categoryReason: extractedCategoryReason,
+                confidenceScore: extractedConfidenceScore,
                 hasWarning
             } = await extractAmountFromOcr(ocrImageBlob);
 
@@ -1289,7 +1295,9 @@ export default function Home() {
                 receiptDate: receiptDate, // Geminiが読み取った日時
                 invoice_number: extractedInvoiceNumber,
                 corners: corners,
-                expenseCategory: extractedExpenseCategory || 'その他', // 経費カテゴリ
+                expenseCategory: extractedExpenseCategory || '雑費', // 勘定科目
+                categoryReason: extractedCategoryReason,
+                confidenceScore: extractedConfidenceScore,
             };
 
             await db.receipts.add(receipt);
@@ -2235,6 +2243,8 @@ export default function Home() {
                         currency: extractedCurrency,
                         corners: apiCorners,
                         expenseCategory: extractedExpenseCategory,
+                        categoryReason: extractedCategoryReason,
+                        confidenceScore: extractedConfidenceScore,
                         hasWarning
                     } = await extractAmountFromOcr(ocrImageBlob);
 
@@ -2302,7 +2312,9 @@ export default function Home() {
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency || 'JPY',
                         corners: apiCorners,
-                        expenseCategory: extractedExpenseCategory || 'その他',
+                        expenseCategory: extractedExpenseCategory || '雑費',
+                        categoryReason: extractedCategoryReason,
+                        confidenceScore: extractedConfidenceScore,
                     };
 
                     await db.receipts.add(receipt);
@@ -2452,6 +2464,8 @@ export default function Home() {
                         currency: extractedCurrency,
                         corners: ocrCorners,
                         expenseCategory: extractedExpenseCategory,
+                        categoryReason: extractedCategoryReason,
+                        confidenceScore: extractedConfidenceScore,
                         hasWarning
                     } = await extractAmountFromOcr(ocrImageBlob, true);
 
@@ -2525,7 +2539,9 @@ export default function Home() {
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency || 'JPY',
                         corners: cornersToUse ?? undefined,
-                        expenseCategory: extractedExpenseCategory || 'その他',
+                        expenseCategory: extractedExpenseCategory || '雑費',
+                        categoryReason: extractedCategoryReason,
+                        confidenceScore: extractedConfidenceScore,
                     };
 
                     await db.receipts.add(receipt);
@@ -2572,6 +2588,8 @@ export default function Home() {
                 currency: extractedCurrency,
                 corners,
                 expenseCategory: extractedExpenseCategory,
+                categoryReason: extractedCategoryReason,
+                confidenceScore: extractedConfidenceScore,
                 hasWarning
             } = await extractAmountFromOcr(ocrImageBlob);
 
@@ -2733,7 +2751,7 @@ export default function Home() {
             amount: receipt.amount || 0,
             note: receipt.note || '',
             date: dateStr,
-            expenseCategory: receipt.expenseCategory || 'その他',
+            expenseCategory: receipt.expenseCategory || '雑費',
         });
     };
 
@@ -2832,20 +2850,24 @@ export default function Home() {
         return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     };
 
-    // 経費カテゴリのバッジスタイルを取得
+    // 勘定科目のバッジスタイルを取得
     const getExpenseCategoryBadge = (category: ExpenseCategory | undefined) => {
         const categoryStyles: Record<ExpenseCategory, { bg: string; text: string }> = {
+            '仕入高': { bg: 'bg-blue-600', text: 'text-white' },
+            '広告宣伝費': { bg: 'bg-blue-600', text: 'text-white' },
+            '消耗品費': { bg: 'bg-gray-500', text: 'text-white' },
             '会議費': { bg: 'bg-blue-600', text: 'text-white' },
             '接待交際費': { bg: 'bg-blue-600', text: 'text-white' },
-            '消耗品': { bg: 'bg-gray-500', text: 'text-white' },
-            '車両運搬費': { bg: 'bg-gray-700', text: 'text-white' },
             '旅費交通費': { bg: 'bg-gray-700', text: 'text-white' },
-            'その他': { bg: 'bg-gray-300', text: 'text-gray-700' },
+            '通信費': { bg: 'bg-gray-500', text: 'text-white' },
+            '支払手数料': { bg: 'bg-gray-700', text: 'text-white' },
+            '新聞図書費': { bg: 'bg-gray-500', text: 'text-white' },
+            '雑費': { bg: 'bg-gray-300', text: 'text-gray-700' },
         };
-        const style = categoryStyles[category || 'その他'];
+        const style = categoryStyles[category || '雑費'];
         return (
             <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}>
-                {category || 'その他'}
+                {category || '雑費'}
             </span>
         );
     };
@@ -3152,7 +3174,7 @@ export default function Home() {
                                 <button
                                     onClick={() => {
                                         setEditingReceipt(null);
-                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: 'その他' });
+                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
                                     }}
                                     className="p-2 hover:bg-gray-100 rounded-full transition-colors"
                                 >
@@ -3209,19 +3231,23 @@ export default function Home() {
 
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        経費カテゴリ
+                                        勘定科目
                                     </label>
                                     <select
                                         value={editForm.expenseCategory}
                                         onChange={(e) => setEditForm({ ...editForm, expenseCategory: e.target.value as ExpenseCategory })}
                                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 bg-white"
                                     >
+                                        <option value="仕入高">仕入高</option>
+                                        <option value="広告宣伝費">広告宣伝費</option>
+                                        <option value="消耗品費">消耗品費</option>
                                         <option value="会議費">会議費</option>
                                         <option value="接待交際費">接待交際費</option>
-                                        <option value="消耗品">消耗品</option>
-                                        <option value="車両運搬費">車両運搬費</option>
                                         <option value="旅費交通費">旅費交通費</option>
-                                        <option value="その他">その他</option>
+                                        <option value="通信費">通信費</option>
+                                        <option value="支払手数料">支払手数料</option>
+                                        <option value="新聞図書費">新聞図書費</option>
+                                        <option value="雑費">雑費</option>
                                     </select>
                                 </div>
 
@@ -3243,7 +3269,7 @@ export default function Home() {
                                 <button
                                     onClick={() => {
                                         setEditingReceipt(null);
-                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: 'その他' });
+                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
                                     }}
                                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
                                 >
