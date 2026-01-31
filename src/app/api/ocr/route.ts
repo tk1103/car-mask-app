@@ -93,6 +93,10 @@ export async function POST(request: NextRequest) {
                         date: { type: "string" as const },
                         time: { type: "string" as const },
                         invoice_number: { type: "string" as const },
+                        expenseCategory: { 
+                            type: "string" as const,
+                            enum: ["会議費", "接待交際費", "消耗品", "車両運搬費", "旅費交通費", "その他"]
+                        },
                         corners: {
                             type: "array" as const,
                             items: {
@@ -107,7 +111,7 @@ export async function POST(request: NextRequest) {
                             maxItems: 4
                         }
                     },
-                    required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners"]
+                    required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners", "expenseCategory"]
                 } as any
             }
         });
@@ -245,7 +249,51 @@ F. INVOICE_NUMBER:
    - Japanese receipts: Various formats
    - If not found or unclear, return null
 
-G. CORNERS:
+G. EXPENSE_CATEGORY (経費カテゴリ):
+   - Analyze the receipt content (vendor name, items purchased, location, amount) to determine the expense category
+   - Categories and their criteria:
+     * "会議費" (Meeting Expenses):
+       - Conference rooms, meeting spaces, seminar halls
+       - Office supplies for meetings (whiteboards, markers, etc.)
+       - Catering for business meetings
+       - Examples: 会議室, セミナー, 会議, ミーティング, conference room, meeting room
+     
+     * "接待交際費" (Entertainment Expenses):
+       - Restaurants, bars, cafes for business entertainment
+       - Gifts for clients or business partners
+       - Business dinners, lunches with clients
+       - Examples: レストラン, 居酒屋, 接待, 交際費, restaurant, bar, entertainment
+     
+     * "消耗品" (Supplies):
+       - Office supplies (pens, paper, notebooks, etc.)
+       - Cleaning supplies
+       - Small tools and equipment
+       - Examples: 文房具, オフィス用品, 消耗品, office supplies, stationery, cleaning supplies
+     
+     * "車両運搬費" (Vehicle/Transportation Expenses):
+       - Gas stations, parking fees
+       - Vehicle maintenance, car repairs
+       - Vehicle rental
+       - Examples: ガソリンスタンド, 駐車場, 車両, 運搬, gas station, parking, vehicle, car
+     
+     * "旅費交通費" (Travel Expenses):
+       - Trains, buses, taxis, flights
+       - Hotels, accommodations
+       - Public transportation tickets
+       - Examples: 電車, バス, タクシー, ホテル, 交通費, train, bus, taxi, hotel, travel
+     
+     * "その他" (Other):
+       - If the receipt doesn't clearly fit into any of the above categories
+       - Default category when uncertain
+   
+   - Consider multiple factors:
+     * Vendor name (e.g., "ガソリンスタンド" → "車両運搬費")
+     * Item descriptions (e.g., "会議室" → "会議費")
+     * Location context (e.g., hotel → "旅費交通費")
+     * Amount and context (e.g., small office supplies → "消耗品")
+   - If uncertain, use "その他" as default
+
+H. CORNERS:
    - Return array of 4 coordinates: [{x, y}, {x, y}, {x, y}, {x, y}]
    - Order: top-left, top-right, bottom-right, bottom-left
    - Normalized coordinates (0-1000 range)
@@ -565,6 +613,7 @@ RETURN:
             time: parsedData.time || '',
             invoice_number: parsedData.invoice_number || '',
             corners: corners,
+            expenseCategory: parsedData.expenseCategory || 'その他',
             inference_reason: inferenceReason || null, // 通貨判定の推論理由
             rawText: text, // デバッグ用
         });

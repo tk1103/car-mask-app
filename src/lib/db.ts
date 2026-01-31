@@ -1,5 +1,13 @@
 import Dexie, { Table } from 'dexie';
 
+export type ExpenseCategory = 
+    | '会議費'
+    | '接待交際費'
+    | '消耗品'
+    | '車両運搬費'
+    | '旅費交通費'
+    | 'その他';
+
 export interface Receipt {
     id?: number;
     image: Blob;
@@ -13,6 +21,7 @@ export interface Receipt {
     receiptDate?: Date; // Geminiが読み取った日時をDateオブジェクトとして保存
     invoice_number?: string; // インボイス番号
     corners?: Array<{ x: number; y: number }>; // レシートの四隅の座標（0-1000の正規化座標）
+    expenseCategory?: ExpenseCategory; // 経費カテゴリ
 }
 
 export class MyDatabase extends Dexie {
