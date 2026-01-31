@@ -767,19 +767,17 @@ export default function Home() {
                         Math.pow(srcCorners[2].y - srcCorners[1].y, 2)
                     );
 
-                    // 平均値を計算して、真正面から見たレシートのアスペクト比を決定
-                    const avgWidth = (topWidth + bottomWidth) / 2;
-                    const avgHeight = (leftHeight + rightHeight) / 2;
+                    // 上辺・下辺の平均幅（W）と左辺・右辺の平均高さ（H）を算出
+                    const W = (topWidth + bottomWidth) / 2;  // 平均幅
+                    const H = (leftHeight + rightHeight) / 2;  // 平均高さ
 
-                    // 縦長か横長かを自動判別
-                    const isPortrait = avgHeight > avgWidth;
-                    // アスペクト比を正確に計算（真正面から見た状態）
-                    const aspectRatio = avgHeight / avgWidth;
+                    // W > H なら横長（Landscape）、H > W なら縦長（Portrait）
+                    const isPortrait = H > W;
+                    const aspectRatio = H / W;
 
-                    console.log(`Receipt dimensions: ${avgWidth.toFixed(1)} x ${avgHeight.toFixed(1)}, aspect ratio: ${aspectRatio.toFixed(3)}, portrait: ${isPortrait}`);
+                    console.log(`Receipt dimensions: W=${W.toFixed(1)}, H=${H.toFixed(1)}, aspect ratio: ${aspectRatio.toFixed(3)}, isPortrait: ${isPortrait}`);
 
-                    // 出力サイズを決定（最大2000pxまで動的に確保、縦横比を維持）
-                    // レシートの長さに応じて解像度を動的に調整
+                    // 出力サイズを決定：レシート本来の向きを維持
                     const maxDimension = 2000; // 最大解像度
                     const minDimension = 800; // 最小解像度
 
@@ -787,10 +785,9 @@ export default function Home() {
                     let outputHeight: number;
 
                     if (isPortrait) {
-                        // 縦長レシート
-                        // 幅を基準に、縦横比を維持しながら最大2000pxまで拡大
-                        const baseWidth = Math.min(maxDimension, Math.max(minDimension, avgWidth));
-                        outputWidth = baseWidth;
+                        // 縦長レシート：幅を基準に、縦横比を維持しながら最大2000pxまで拡大
+                        const baseWidth = Math.min(maxDimension, Math.max(minDimension, W));
+                        outputWidth = Math.round(baseWidth);
                         outputHeight = Math.round(outputWidth * aspectRatio);
 
                         // 高さが2000pxを超える場合は、高さを基準に調整
@@ -799,10 +796,9 @@ export default function Home() {
                             outputWidth = Math.round(outputHeight / aspectRatio);
                         }
                     } else {
-                        // 横長レシート
-                        // 高さを基準に、縦横比を維持しながら最大2000pxまで拡大
-                        const baseHeight = Math.min(maxDimension, Math.max(minDimension, avgHeight));
-                        outputHeight = baseHeight;
+                        // 横長レシート：高さを基準に、縦横比を維持しながら最大2000pxまで拡大
+                        const baseHeight = Math.min(maxDimension, Math.max(minDimension, H));
+                        outputHeight = Math.round(baseHeight);
                         outputWidth = Math.round(outputHeight / aspectRatio);
 
                         // 幅が2000pxを超える場合は、幅を基準に調整
@@ -812,7 +808,7 @@ export default function Home() {
                         }
                     }
 
-                    console.log(`Output size: ${outputWidth}x${outputHeight} (aspect ratio: ${aspectRatio.toFixed(2)})`);
+                    console.log(`Output size (preserve orientation): ${outputWidth}x${outputHeight} (aspect ratio: ${aspectRatio.toFixed(2)}, ${isPortrait ? 'portrait' : 'landscape'})`);
 
                     // 出力Canvasのサイズを設定
                     dstCanvas.width = outputWidth;
@@ -823,6 +819,7 @@ export default function Home() {
                     const dstMat = new window.cv.Mat();
 
                     // ソース点とターゲット点を準備
+                    // 検出された4点をそのまま出力サイズの四隅にマッピング（回転処理なし）
                     const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
                         srcCorners[0].x, srcCorners[0].y, // 左上
                         srcCorners[1].x, srcCorners[1].y, // 右上
@@ -830,11 +827,12 @@ export default function Home() {
                         srcCorners[3].x, srcCorners[3].y, // 左下
                     ]);
 
+                    // ターゲット点：レシート本来の向きを維持した四隅
                     const dstPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
                         0, 0,                                    // 左上
                         outputWidth, 0,                          // 右上
                         outputWidth, outputHeight,                // 右下
-                        0, outputHeight,                          // 左下
+                        0, outputHeight,                         // 左下
                     ]);
 
                     // 透視変換行列を計算
