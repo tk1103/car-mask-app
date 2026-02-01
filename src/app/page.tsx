@@ -2535,6 +2535,47 @@ export default function Home() {
         return areaPercent >= 10; // 画面の10%以上（顔に引っ張られないよう、手に持っているサイズで即反応）
     }, [detectedCorners, calculateReceiptArea]);
 
+    // レシートのアスペクト比を計算（横倒し判定用）
+    const receiptAspectRatio = useMemo(() => {
+        if (!detectedCorners || !videoRef.current) return null;
+        const video = videoRef.current;
+        if (video.videoWidth === 0 || video.videoHeight === 0) return null;
+
+        // 正規化座標（0-1）を実際のピクセル座標に変換
+        const pixelCorners = detectedCorners.map(corner => ({
+            x: corner.x * video.videoWidth,
+            y: corner.y * video.videoHeight
+        }));
+
+        // 4点から幅と高さを計算
+        const topWidth = Math.sqrt(
+            Math.pow(pixelCorners[1].x - pixelCorners[0].x, 2) +
+            Math.pow(pixelCorners[1].y - pixelCorners[0].y, 2)
+        );
+        const bottomWidth = Math.sqrt(
+            Math.pow(pixelCorners[2].x - pixelCorners[3].x, 2) +
+            Math.pow(pixelCorners[2].y - pixelCorners[3].y, 2)
+        );
+        const leftHeight = Math.sqrt(
+            Math.pow(pixelCorners[3].x - pixelCorners[0].x, 2) +
+            Math.pow(pixelCorners[3].y - pixelCorners[0].y, 2)
+        );
+        const rightHeight = Math.sqrt(
+            Math.pow(pixelCorners[2].x - pixelCorners[1].x, 2) +
+            Math.pow(pixelCorners[2].y - pixelCorners[1].y, 2)
+        );
+
+        const W = (topWidth + bottomWidth) / 2;
+        const H = (leftHeight + rightHeight) / 2;
+
+        return W / H; // 幅/高さの比率（1より大きいと横長）
+    }, [detectedCorners]);
+
+    // レシートが横倒しかどうかを判定（アスペクト比が1.3以上の場合）
+    const isReceiptLandscape = useMemo(() => {
+        return receiptAspectRatio !== null && receiptAspectRatio > 1.3;
+    }, [receiptAspectRatio]);
+
     const capturePhoto = useCallback(async () => {
         if (!videoRef.current || !canvasRef.current) return;
 
@@ -2543,6 +2584,14 @@ export default function Home() {
         const ctx = canvas.getContext('2d');
 
         if (!ctx) return;
+
+        // 撮影前チェック：レシートが横倒しの場合に警告
+        if (detectedCorners && detectedCorners.length === 4 && isReceiptLandscape) {
+            const shouldProceed = window.confirm('レシートが横倒しになっている可能性があります。\n文字が水平に読めるように撮影してください。\n\nそれでも撮影を続けますか？');
+            if (!shouldProceed) {
+                return;
+            }
+        }
 
         const imageWidth = video.videoWidth;
         const imageHeight = video.videoHeight;
@@ -2638,6 +2687,12 @@ export default function Home() {
 
                     if (hasWarning) {
                         setOcrWarning('金額を確認してください。読み取り精度が低い可能性があります。');
+                        setTimeout(() => setOcrWarning(null), 5000);
+                    }
+
+                    // 文字の向きチェック：rotation_neededが0以外の場合に警告
+                    if (rotation_needed !== undefined && rotation_needed !== null && rotation_needed !== 0) {
+                        setOcrWarning('文字の向きを確認してください。画像が回転して保存されます。');
                         setTimeout(() => setOcrWarning(null), 5000);
                     }
 
@@ -3645,6 +3700,16 @@ export default function Home() {
                                 </svg>
                             )}
 
+                        {/* 水平ガイド線（検出されたレシートがある場合も表示） */}
+                        {(() => {
+                            const corners = detectedCorners || detectedCornersRef.current;
+                            return corners && corners.length === 4;
+                        })() && (
+                                <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-25">
+                                    <div className="border-t-2 border-dashed border-white/40"></div>
+                                </div>
+                            )}
+
                         {/* デフォルトガイド（レシートが検知できない場合） */}
                         {(() => {
                             // detectedCornersRefも確認（状態更新の遅延を考慮）
@@ -3756,6 +3821,20 @@ export default function Home() {
                                             )}
                                         </div>
                                     </div>
+
+                                    {/* 水平ガイドメッセージ（常に表示） */}
+                                    <div className="absolute top-20 left-0 right-0 text-center pointer-events-none z-30">
+                                        <div className="inline-block bg-black/60 px-4 py-2 rounded-lg backdrop-blur-sm">
+                                            <p className="text-white text-xs font-medium drop-shadow-lg">
+                                                金額が左から右へ水平になるように撮影してください
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* 水平ガイド線（画面中央） */}
+                                    <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-20">
+                                        <div className="border-t-2 border-dashed border-white/40"></div>
+                                    </div>
                                 </div>
                             )}
 
@@ -3777,6 +3856,17 @@ export default function Home() {
                         })() && (
                                 <div className="mb-2 px-4 py-2 bg-gray-700 text-white text-sm rounded-lg">
                                     レシートが小さすぎます。もう少し近づけてください。
+                                </div>
+                            )}
+
+                        {/* 横倒し警告 */}
+                        {(() => {
+                            // detectedCornersRefも確認（状態更新の遅延を考慮）
+                            const corners = detectedCorners || detectedCornersRef.current;
+                            return corners && corners.length === 4 && isReceiptLandscape;
+                        })() && (
+                                <div className="mb-2 px-4 py-2 bg-yellow-600/90 text-white text-sm rounded-lg font-medium animate-pulse">
+                                    ⚠️ レシートを縦（または文字を水平）にしてください
                                 </div>
                             )}
                         <button
