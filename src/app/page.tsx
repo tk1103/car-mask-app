@@ -3706,7 +3706,7 @@ export default function Home() {
                             return corners && corners.length === 4;
                         })() && (
                                 <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-25">
-                                    <div className="border-t-2 border-dashed border-white/40"></div>
+                                    <div className="border-t-2 border-dashed border-blue-500"></div>
                                 </div>
                             )}
 
@@ -3729,28 +3729,28 @@ export default function Home() {
                                             aspectRatio: '1 / 1'
                                         }}>
                                             {/* レシート用ガイド枠の境界線（点線の矩形） */}
-                                            <div className="absolute inset-0 border-2 border-dashed border-white/60 rounded-lg shadow-lg"></div>
+                                            <div className="absolute inset-0 border-2 border-dashed border-blue-500 rounded-lg shadow-lg"></div>
 
                                             {/* L字型のフォーカス・マーカー（四隅） */}
                                             {/* 左上 */}
                                             <div className="absolute top-0 left-0 w-12 h-12">
-                                                <div className="absolute top-0 left-0 w-6 h-1 bg-white/60 rounded-full shadow-lg"></div>
-                                                <div className="absolute top-0 left-0 w-1 h-6 bg-white/60 rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 left-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 left-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
                                             </div>
                                             {/* 右上 */}
                                             <div className="absolute top-0 right-0 w-12 h-12">
-                                                <div className="absolute top-0 right-0 w-6 h-1 bg-white/60 rounded-full shadow-lg"></div>
-                                                <div className="absolute top-0 right-0 w-1 h-6 bg-white/60 rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 right-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 right-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
                                             </div>
                                             {/* 右下 */}
                                             <div className="absolute bottom-0 right-0 w-12 h-12">
-                                                <div className="absolute bottom-0 right-0 w-6 h-1 bg-white/60 rounded-full shadow-lg"></div>
-                                                <div className="absolute bottom-0 right-0 w-1 h-6 bg-white/60 rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 right-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 right-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
                                             </div>
                                             {/* 左下 */}
                                             <div className="absolute bottom-0 left-0 w-12 h-12">
-                                                <div className="absolute bottom-0 left-0 w-6 h-1 bg-white/60 rounded-full shadow-lg"></div>
-                                                <div className="absolute bottom-0 left-0 w-1 h-6 bg-white/60 rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 left-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 left-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
                                             </div>
                                         </div>
                                     </div>
@@ -3833,7 +3833,7 @@ export default function Home() {
 
                                     {/* 水平ガイド線（画面中央） */}
                                     <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-20">
-                                        <div className="border-t-2 border-dashed border-white/40"></div>
+                                        <div className="border-t-2 border-dashed border-blue-500"></div>
                                     </div>
                                 </div>
                             )}
