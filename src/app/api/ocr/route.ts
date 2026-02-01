@@ -111,9 +111,13 @@ export async function POST(request: NextRequest) {
                             },
                             minItems: 4,
                             maxItems: 4
+                        },
+                        rotation_needed: {
+                            type: "number" as const,
+                            enum: [0, 1, 2, 3]
                         }
                     },
-                    required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners", "expenseCategory", "categoryReason", "confidenceScore"]
+                    required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners", "expenseCategory", "categoryReason", "confidenceScore", "rotation_needed"]
                 } as any
             }
         });
@@ -322,6 +326,23 @@ H. CORNERS:
    - Order: top-left, top-right, bottom-right, bottom-left
    - Normalized coordinates (0-1000 range)
    - These should mark the physical edges of the receipt paper
+
+I. ROTATION_NEEDED (CRITICAL - TEXT ORIENTATION DETECTION):
+   - Analyze the orientation of text lines in the receipt image, specifically focusing on:
+     * Price amounts (numbers with currency symbols)
+     * Item names and descriptions
+     * Text that should be read horizontally (left to right)
+   - Determine how many 90-degree clockwise rotations the image needs to make the text horizontal and readable
+   - Return 'rotation_needed' as a number:
+     * 0: Text is already horizontal and readable (no rotation needed)
+     * 1: Image is rotated 90 degrees clockwise (needs 270-degree counter-clockwise rotation to correct)
+     * 2: Image is rotated 180 degrees (upside down, needs 180-degree rotation to correct)
+     * 3: Image is rotated 90 degrees counter-clockwise (needs 90-degree clockwise rotation to correct)
+   - IMPORTANT: Base your judgment on the actual text orientation, NOT on the physical shape of the receipt or logo orientation
+   - Example: If a long receipt is photographed sideways but the prices are readable horizontally, return 0
+   - Example: If prices appear vertically (rotated 90 degrees), return 1
+   - Example: If prices appear upside down, return 2
+   - Example: If prices appear rotated 90 degrees counter-clockwise, return 3
 
 QUALITY REQUIREMENTS:
 - Read every character carefully, especially numbers
@@ -629,6 +650,14 @@ RETURN:
             }
         }
 
+        // rotation_neededの検証とデフォルト値設定
+        let rotationNeeded = parsedData.rotation_needed;
+        if (rotationNeeded === undefined || rotationNeeded === null) {
+            rotationNeeded = 0; // デフォルトは回転不要
+        }
+        // 0-3の範囲に制限
+        rotationNeeded = Math.max(0, Math.min(3, Math.round(rotationNeeded)));
+
         return NextResponse.json({
             vendor: parsedData.vendor || '',
             amount: amount,
@@ -640,6 +669,7 @@ RETURN:
             expenseCategory: parsedData.expenseCategory || '雑費',
             categoryReason: parsedData.categoryReason || '',
             confidenceScore: parsedData.confidenceScore !== undefined ? parsedData.confidenceScore : 0.5,
+            rotation_needed: rotationNeeded,
             inference_reason: inferenceReason || null, // 通貨判定の推論理由
             rawText: text, // デバッグ用
         });

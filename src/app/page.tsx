@@ -759,6 +759,95 @@ export default function Home() {
         ];
     };
 
+    // 画像を回転させる関数（テキストが水平に読めるように）
+    const rotateImageForTextOrientation = async (
+        imageBlob: Blob,
+        rotationNeeded: number
+    ): Promise<Blob> => {
+        // rotation_neededが0の場合は回転不要
+        if (rotationNeeded === 0 || rotationNeeded === undefined || rotationNeeded === null) {
+            return imageBlob;
+        }
+
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            if (!ctx) {
+                reject(new Error('Canvas context not available'));
+                return;
+            }
+
+            img.onload = () => {
+                try {
+                    // rotation_neededに基づいて回転角度を決定
+                    // 1: 270度反時計回り（右に90度回転している状態を修正）
+                    // 2: 180度回転（上下逆さまを修正）
+                    // 3: 90度時計回り（左に90度回転している状態を修正）
+                    let rotationAngle = 0;
+                    let newWidth = img.width;
+                    let newHeight = img.height;
+
+                    switch (rotationNeeded) {
+                        case 1:
+                            rotationAngle = -90; // 270度反時計回り = -90度
+                            newWidth = img.height;
+                            newHeight = img.width;
+                            break;
+                        case 2:
+                            rotationAngle = 180;
+                            break;
+                        case 3:
+                            rotationAngle = 90;
+                            newWidth = img.height;
+                            newHeight = img.width;
+                            break;
+                        default:
+                            resolve(imageBlob);
+                            return;
+                    }
+
+                    console.log(`Rotating image: rotation_needed=${rotationNeeded}, angle=${rotationAngle} degrees`);
+
+                    // Canvasのサイズを設定（回転後のサイズ）
+                    canvas.width = newWidth;
+                    canvas.height = newHeight;
+
+                    // 回転の中心を設定
+                    ctx.translate(newWidth / 2, newHeight / 2);
+                    ctx.rotate((rotationAngle * Math.PI) / 180);
+                    ctx.translate(-img.width / 2, -img.height / 2);
+
+                    // 画像を描画
+                    ctx.drawImage(img, 0, 0);
+
+                    // Blobに変換
+                    canvas.toBlob(
+                        (blob) => {
+                            if (blob) {
+                                resolve(blob);
+                            } else {
+                                reject(new Error('Failed to convert canvas to blob'));
+                            }
+                        },
+                        'image/jpeg',
+                        0.95 // 高画質
+                    );
+                } catch (error) {
+                    console.error('Image rotation failed:', error);
+                    resolve(imageBlob); // エラー時は元の画像を返す
+                }
+            };
+
+            img.onerror = () => {
+                reject(new Error('Failed to load image for rotation'));
+            };
+
+            img.src = URL.createObjectURL(imageBlob);
+        });
+    };
+
     // OpenCV.jsを使用したシンプルな透視変換（Perspective Transform）
     // 回転処理は一切行わず、検出された4点をそのまま正対化するだけ
     const applyPerspectiveCorrection = async (
@@ -975,6 +1064,7 @@ export default function Home() {
         expenseCategory?: ExpenseCategory;
         categoryReason?: string;
         confidenceScore?: number;
+        rotation_needed?: number;
         hasWarning: boolean
     }> => {
         try {
@@ -1073,6 +1163,9 @@ export default function Home() {
             const data = await response.json();
             console.log('OCR API response:', data);
 
+            // rotation_neededを取得
+            const rotationNeeded = data.rotation_needed !== undefined ? data.rotation_needed : 0;
+
             // レスポンスデータの検証
             if (!data || typeof data !== 'object') {
                 console.error('Invalid response data:', data);
@@ -1082,7 +1175,7 @@ export default function Home() {
             // 金額が0の場合は警告を表示
             const hasWarning = data.amount === 0 || !data.amount;
 
-            // Gemini APIからの解析結果を返す（vendor, amount, date, time, invoice_number, currency, corners, expenseCategory, categoryReason, confidenceScore）
+            // Gemini APIからの解析結果を返す（vendor, amount, date, time, invoice_number, currency, corners, expenseCategory, categoryReason, confidenceScore, rotation_needed）
             return {
                 amount: data.amount || 0,
                 vendor: data.vendor || '',
@@ -1094,11 +1187,12 @@ export default function Home() {
                 expenseCategory: (data.expenseCategory || '雑費') as ExpenseCategory,
                 categoryReason: data.categoryReason || undefined,
                 confidenceScore: data.confidenceScore !== undefined ? data.confidenceScore : 0.5,
+                rotation_needed: rotationNeeded,
                 hasWarning,
             };
         } catch (err) {
             console.error('OCR processing failed:', err);
-            return { amount: 0, vendor: '', expenseCategory: '雑費' as ExpenseCategory, hasWarning: true };
+            return { amount: 0, vendor: '', expenseCategory: '雑費' as ExpenseCategory, rotation_needed: 0, hasWarning: true };
         } finally {
             if (!skipStateUpdate) {
                 setIsOcrProcessing(false);
@@ -1260,7 +1354,7 @@ export default function Home() {
                 return;
             }
 
-            // 3. OCRで金額、店名、日付、時刻、インボイス番号、四隅の座標、勘定科目を抽出（軽量画像を使用）
+            // 3. OCRで金額、店名、日付、時刻、インボイス番号、四隅の座標、勘定科目、回転情報を抽出（軽量画像を使用）
             const {
                 amount: extractedAmount,
                 vendor: extractedVendor,
@@ -1272,6 +1366,7 @@ export default function Home() {
                 expenseCategory: extractedExpenseCategory,
                 categoryReason: extractedCategoryReason,
                 confidenceScore: extractedConfidenceScore,
+                rotation_needed,
                 hasWarning
             } = await extractAmountFromOcr(ocrImageBlob);
 
@@ -1296,6 +1391,18 @@ export default function Home() {
                 } catch (correctionError) {
                     console.warn('Failed to apply perspective correction, using original image:', correctionError);
                     // エラー時は元の高解像度画像を使用
+                }
+            }
+
+            // 5. テキストの向きに基づいて画像を回転（rotation_neededに基づく）
+            if (rotation_needed !== undefined && rotation_needed !== null && rotation_needed !== 0) {
+                try {
+                    console.log(`Rotating image for text orientation: rotation_needed=${rotation_needed}`);
+                    finalImageBlob = await rotateImageForTextOrientation(finalImageBlob, rotation_needed);
+                    console.log('Image rotation for text orientation applied successfully');
+                } catch (rotationError) {
+                    console.warn('Failed to rotate image for text orientation, using original image:', rotationError);
+                    // エラー時は回転前の画像を使用
                 }
             }
 
@@ -2294,6 +2401,7 @@ export default function Home() {
                         expenseCategory: extractedExpenseCategory,
                         categoryReason: extractedCategoryReason,
                         confidenceScore: extractedConfidenceScore,
+                        rotation_needed,
                         hasWarning
                     } = await extractAmountFromOcr(ocrImageBlob);
 
@@ -2313,6 +2421,15 @@ export default function Home() {
                             );
                         } catch (correctionError) {
                             console.warn('Failed to apply perspective correction:', correctionError);
+                        }
+                    }
+
+                    // テキストの向きに基づいて画像を回転
+                    if (rotation_needed !== undefined && rotation_needed !== null && rotation_needed !== 0) {
+                        try {
+                            finalImageBlob = await rotateImageForTextOrientation(finalImageBlob, rotation_needed);
+                        } catch (rotationError) {
+                            console.warn('Failed to rotate image for text orientation:', rotationError);
                         }
                     }
 
@@ -2515,6 +2632,7 @@ export default function Home() {
                         expenseCategory: extractedExpenseCategory,
                         categoryReason: extractedCategoryReason,
                         confidenceScore: extractedConfidenceScore,
+                        rotation_needed,
                         hasWarning
                     } = await extractAmountFromOcr(ocrImageBlob, true);
 
@@ -2539,6 +2657,15 @@ export default function Home() {
                             }
                         } catch (correctionError) {
                             console.warn('Failed to apply perspective correction:', correctionError);
+                        }
+                    }
+
+                    // テキストの向きに基づいて画像を回転
+                    if (rotation_needed !== undefined && rotation_needed !== null && rotation_needed !== 0) {
+                        try {
+                            finalImageBlob = await rotateImageForTextOrientation(finalImageBlob, rotation_needed);
+                        } catch (rotationError) {
+                            console.warn('Failed to rotate image for text orientation:', rotationError);
                         }
                     }
 
@@ -2639,6 +2766,7 @@ export default function Home() {
                 expenseCategory: extractedExpenseCategory,
                 categoryReason: extractedCategoryReason,
                 confidenceScore: extractedConfidenceScore,
+                rotation_needed,
                 hasWarning
             } = await extractAmountFromOcr(ocrImageBlob);
 
@@ -2662,6 +2790,15 @@ export default function Home() {
                     }
                 } catch (correctionError) {
                     console.warn('Failed to apply perspective correction:', correctionError);
+                }
+            }
+
+            // テキストの向きに基づいて画像を回転
+            if (rotation_needed !== undefined && rotation_needed !== null && rotation_needed !== 0) {
+                try {
+                    finalImageBlob = await rotateImageForTextOrientation(finalImageBlob, rotation_needed);
+                } catch (rotationError) {
+                    console.warn('Failed to rotate image for text orientation:', rotationError);
                 }
             }
 
