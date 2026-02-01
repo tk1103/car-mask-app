@@ -3650,7 +3650,7 @@ export default function Home() {
                                                 <path
                                                     d={pathData}
                                                     fill="none"
-                                                    stroke="rgba(37, 99, 235, 0.9)"
+                                                    stroke="rgba(37, 99, 235, 1)"
                                                     strokeWidth="3"
                                                     strokeDasharray="8 4"
                                                     strokeLinecap="round"
@@ -3664,32 +3664,32 @@ export default function Home() {
                                                             cy={corner.y}
                                                             r="8"
                                                             fill="rgba(37, 99, 235, 0.9)"
-                                                            stroke="white"
+                                                            stroke="rgba(37, 99, 235, 1)"
                                                             strokeWidth="2"
                                                         />
                                                         {/* L字型マーカー */}
                                                         {index === 0 && ( // 左上
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke="white" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke="white" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
                                                             </>
                                                         )}
                                                         {index === 1 && ( // 右上
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke="white" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke="white" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
                                                             </>
                                                         )}
                                                         {index === 2 && ( // 右下
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke="white" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke="white" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
                                                             </>
                                                         )}
                                                         {index === 3 && ( // 左下
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke="white" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke="white" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
                                                             </>
                                                         )}
                                                     </g>
