@@ -77,16 +77,16 @@ export default function Home() {
     const [isOcrProcessing, setIsOcrProcessing] = useState(false);
     const [ocrWarning, setOcrWarning] = useState<string | null>(null);
     const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
-    const [editForm, setEditForm] = useState<{ 
-        vendor: string; 
-        amount: number; 
-        note: string; 
+    const [editForm, setEditForm] = useState<{
+        vendor: string;
+        amount: number;
+        note: string;
         date: string;
         expenseCategory: ExpenseCategory;
-    }>({ 
-        vendor: '', 
-        amount: 0, 
-        note: '', 
+    }>({
+        vendor: '',
+        amount: 0,
+        note: '',
         date: '',
         expenseCategory: '雑費'
     });
@@ -423,14 +423,14 @@ export default function Home() {
             // 各レシート画像をZIPに追加（元のサイズを保持）
             for (let i = 0; i < receiptsToExport.length; i++) {
                 const receipt = receiptsToExport[i];
-                const dateStr = receipt.receiptDate 
+                const dateStr = receipt.receiptDate
                     ? `${receipt.receiptDate.getFullYear()}${String(receipt.receiptDate.getMonth() + 1).padStart(2, '0')}${String(receipt.receiptDate.getDate()).padStart(2, '0')}`
-                    : receipt.timestamp 
+                    : receipt.timestamp
                         ? `${receipt.timestamp.getFullYear()}${String(receipt.timestamp.getMonth() + 1).padStart(2, '0')}${String(receipt.timestamp.getDate()).padStart(2, '0')}`
                         : 'unknown';
                 const vendorStr = receipt.vendor ? receipt.vendor.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20) : 'receipt';
                 const filename = `${dateStr}_${vendorStr}_${receipt.id || i}.jpg`;
-                
+
                 // BlobをそのままZIPに追加（元のサイズを保持）
                 zip.file(filename, receipt.image);
             }
@@ -712,7 +712,55 @@ export default function Home() {
         };
     }, []);
 
-    // OpenCV.jsを使用した完全な透視変換（Perspective Transform）
+    // 4つの頂点を数学的にソート（左上、右上、右下、左下の順）
+    const sortCorners = (corners: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> => {
+        if (corners.length !== 4) {
+            return corners;
+        }
+
+        // 各点の特徴量を計算
+        const cornersWithFeatures = corners.map((corner, index) => ({
+            ...corner,
+            index,
+            sum: corner.x + corner.y,      // (x+y): 左上が最小、右下が最大
+            diff: corner.x - corner.y,    // (x-y): 左下が最小、右上が最大
+        }));
+
+        // 左上: (x+y)が最小
+        const topLeft = cornersWithFeatures.reduce((min, corner) =>
+            corner.sum < min.sum ? corner : min
+        );
+
+        // 右下: (x+y)が最大
+        const bottomRight = cornersWithFeatures.reduce((max, corner) =>
+            corner.sum > max.sum ? corner : max
+        );
+
+        // 残りの2点から右上と左下を判定
+        const remaining = cornersWithFeatures.filter(
+            corner => corner.index !== topLeft.index && corner.index !== bottomRight.index
+        );
+
+        // 右上: (x-y)が最大
+        const topRight = remaining.reduce((max, corner) =>
+            corner.diff > max.diff ? corner : max
+        );
+
+        // 左下: (x-y)が最小
+        const bottomLeft = remaining.reduce((min, corner) =>
+            corner.diff < min.diff ? corner : min
+        );
+
+        return [
+            { x: topLeft.x, y: topLeft.y },        // 左上
+            { x: topRight.x, y: topRight.y },      // 右上
+            { x: bottomRight.x, y: bottomRight.y }, // 右下
+            { x: bottomLeft.x, y: bottomLeft.y },  // 左下
+        ];
+    };
+
+    // OpenCV.jsを使用したシンプルな透視変換（Perspective Transform）
+    // 回転処理は一切行わず、検出された4点をそのまま正対化するだけ
     const applyPerspectiveCorrection = async (
         imageBlob: Blob,
         corners: Array<{ x: number; y: number }>,
@@ -746,10 +794,13 @@ export default function Home() {
                     srcCtx.drawImage(img, 0, 0);
 
                     // 正規化座標（0-1000）を実際の画像座標に変換
-                    const srcCorners = corners.map(corner => ({
+                    const rawCorners = corners.map(corner => ({
                         x: (corner.x / 1000) * img.width,
                         y: (corner.y / 1000) * img.height,
                     }));
+
+                    // 4つの頂点を数学的にソート（左上、右上、右下、左下の順）
+                    const srcCorners = sortCorners(rawCorners);
 
                     // レシートの縦横比を正確に計算（4点の座標から、真正面から見た状態を想定）
                     // 台形補正後の長方形のアスペクト比を計算
@@ -774,39 +825,20 @@ export default function Home() {
                     const W = (topWidth + bottomWidth) / 2;  // 平均幅
                     const H = (leftHeight + rightHeight) / 2;  // 平均高さ
 
-                    // W > H なら横長（Landscape）、H > W なら縦長（Portrait）
-                    const isPortrait = H > W;
+                    // アスペクト比を計算
                     const aspectRatio = H / W;
 
-                    // 画像の向きを判定（画像の幅と高さを比較）
-                    const imageIsLandscape = img.width > img.height;
+                    console.log(`Receipt dimensions: W=${W.toFixed(1)}, H=${H.toFixed(1)}, aspect ratio: ${aspectRatio.toFixed(3)}`);
 
-                    console.log(`Receipt dimensions: W=${W.toFixed(1)}, H=${H.toFixed(1)}, aspect ratio: ${aspectRatio.toFixed(3)}, isPortrait: ${isPortrait}`);
-                    console.log(`Image dimensions: ${img.width}x${img.height}, imageIsLandscape: ${imageIsLandscape}`);
-
-                    // 縦長レシートが横向きで検出されている場合を判定
-                    // レシートが縦長（H > W）かつ画像が横向き（width > height）の場合、回転が必要
-                    const needsRotation = isPortrait && imageIsLandscape;
-
-                    // 出力サイズを決定：レシート本来の向きを維持
+                    // 出力サイズを決定：レシートのアスペクト比を維持
                     const maxDimension = 2000; // 最大解像度
                     const minDimension = 800; // 最小解像度
 
                     let outputWidth: number;
                     let outputHeight: number;
 
-                    if (isPortrait) {
-                        // 縦長レシート：幅を基準に、縦横比を維持しながら最大2000pxまで拡大
-                        const baseWidth = Math.min(maxDimension, Math.max(minDimension, W));
-                        outputWidth = Math.round(baseWidth);
-                        outputHeight = Math.round(outputWidth * aspectRatio);
-
-                        // 高さが2000pxを超える場合は、高さを基準に調整
-                        if (outputHeight > maxDimension) {
-                            outputHeight = maxDimension;
-                            outputWidth = Math.round(outputHeight / aspectRatio);
-                        }
-                    } else {
+                    // 幅と高さのどちらを基準にするか決定
+                    if (W > H) {
                         // 横長レシート：高さを基準に、縦横比を維持しながら最大2000pxまで拡大
                         const baseHeight = Math.min(maxDimension, Math.max(minDimension, H));
                         outputHeight = Math.round(baseHeight);
@@ -817,189 +849,73 @@ export default function Home() {
                             outputWidth = maxDimension;
                             outputHeight = Math.round(outputWidth * aspectRatio);
                         }
+                    } else {
+                        // 縦長レシート：幅を基準に、縦横比を維持しながら最大2000pxまで拡大
+                        const baseWidth = Math.min(maxDimension, Math.max(minDimension, W));
+                        outputWidth = Math.round(baseWidth);
+                        outputHeight = Math.round(outputWidth * aspectRatio);
+
+                        // 高さが2000pxを超える場合は、高さを基準に調整
+                        if (outputHeight > maxDimension) {
+                            outputHeight = maxDimension;
+                            outputWidth = Math.round(outputHeight / aspectRatio);
+                        }
                     }
 
-                    console.log(`Output size (preserve orientation): ${outputWidth}x${outputHeight} (aspect ratio: ${aspectRatio.toFixed(2)}, ${isPortrait ? 'portrait' : 'landscape'}), needsRotation: ${needsRotation}`);
+                    console.log(`Output size: ${outputWidth}x${outputHeight} (aspect ratio: ${aspectRatio.toFixed(2)})`);
 
                     // OpenCV.jsのMatオブジェクトを作成
                     const srcMat = window.cv.imread(srcCanvas);
-                    let workingMat = srcMat; // 作業用のMat（回転が必要な場合は回転後のMatを使用）
 
-                    // 縦長レシートが横向きで検出されている場合、画像を90度回転
-                    if (needsRotation) {
-                        console.log('Rotating image 270 degrees (90 degrees counter-clockwise) to correct orientation');
-                        
-                        // 90度反時計回りに回転（画像の中心を基準）
-                        // 縦長レシートが横向きの場合、90度反時計回りに回転させて正しい向きにする
-                        // OpenCV.jsでは、正の角度が反時計回り、負の角度が時計回り
-                        // 時計回りになってしまっている場合は、角度の符号を確認する必要がある
-                        const center = new window.cv.Point(img.width / 2, img.height / 2);
-                        // 270度 = -90度 = 90度反時計回り（時計回りの逆）
-                        // 時計回りになってしまっている場合は、270度を使う
-                        const rotationMatrix = window.cv.getRotationMatrix2D(center, 270, 1.0); // 270度 = 90度反時計回り
-                        
-                        // 回転後の画像サイズ（幅と高さを入れ替え）
-                        const rotatedWidth = img.height;
-                        const rotatedHeight = img.width;
-                        
-                        // 回転後のMatを作成
-                        const rotatedMat = new window.cv.Mat();
-                        window.cv.warpAffine(
-                            srcMat,
-                            rotatedMat,
-                            rotationMatrix,
-                            new window.cv.Size(rotatedWidth, rotatedHeight),
-                            window.cv.INTER_LINEAR,
-                            window.cv.BORDER_CONSTANT,
-                            new window.cv.Scalar()
-                        );
-                        
-                        // 回転後の座標を計算（270度 = 90度反時計回り）
-                        // 画像を270度回転させた場合の座標変換（90度反時計回りと同じ）:
-                        // 元の座標 (x, y) → 回転後 (y, width - x)
-                        // 回転後の画像サイズは (height, width) になる
-                        const rotatedCorners = srcCorners.map(corner => {
-                            // 回転後の座標を計算（270度 = 90度反時計回り）
-                            const rotatedX = corner.y;
-                            const rotatedY = img.width - corner.x;
-                            return { x: rotatedX, y: rotatedY };
-                        });
+                    // 出力Canvasのサイズを設定
+                    dstCanvas.width = outputWidth;
+                    dstCanvas.height = outputHeight;
 
-                        // 回転後の座標順序を調整（左上、右上、右下、左下）
-                        // 元の順序: [左上(0), 右上(1), 右下(2), 左下(3)]
-                        // 270度（90度反時計回り）回転後の位置:
-                        // - 元の左上(0) → 回転後の右上
-                        // - 元の右上(1) → 回転後の右下
-                        // - 元の右下(2) → 回転後の左下
-                        // - 元の左下(3) → 回転後の左上
-                        // したがって、回転後の順序は [左下(3), 左上(0), 右上(1), 右下(2)]
-                        const reorderedCorners = [
-                            rotatedCorners[3], // 元の左下 → 回転後の左上
-                            rotatedCorners[0], // 元の左上 → 回転後の右上
-                            rotatedCorners[1], // 元の右上 → 回転後の右下
-                            rotatedCorners[2], // 元の右下 → 回転後の左下
-                        ];
+                    // ソース点とターゲット点を準備
+                    const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+                        srcCorners[0].x, srcCorners[0].y, // 左上
+                        srcCorners[1].x, srcCorners[1].y, // 右上
+                        srcCorners[2].x, srcCorners[2].y, // 右下
+                        srcCorners[3].x, srcCorners[3].y, // 左下
+                    ]);
 
-                        // 作業用Matを回転後のMatに置き換え
-                        srcMat.delete(); // 元のMatを削除
-                        workingMat = rotatedMat;
+                    // ターゲット点：出力Canvasの四隅
+                    const dstPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
+                        0, 0,                                    // 左上
+                        outputWidth, 0,                          // 右上
+                        outputWidth, outputHeight,                // 右下
+                        0, outputHeight,                         // 左下
+                    ]);
 
-                        // 回転後の座標を使用して透視変換
-                        const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-                            reorderedCorners[0].x, reorderedCorners[0].y, // 左上
-                            reorderedCorners[1].x, reorderedCorners[1].y, // 右上
-                            reorderedCorners[2].x, reorderedCorners[2].y, // 右下
-                            reorderedCorners[3].x, reorderedCorners[3].y, // 左下
-                        ]);
+                    // 透視変換行列を計算
+                    const M = window.cv.getPerspectiveTransform(srcPoints, dstPoints);
 
-                        // ターゲット点：縦長レシートの正しい向き（縦長）
-                        const dstPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-                            0, 0,                                    // 左上
-                            outputWidth, 0,                          // 右上
-                            outputWidth, outputHeight,                // 右下
-                            0, outputHeight,                         // 左下
-                        ]);
+                    // 透視変換を適用
+                    const dstMat = new window.cv.Mat();
+                    const dsize = new window.cv.Size(outputWidth, outputHeight);
+                    const interpolationMethod = window.cv.INTER_CUBIC || window.cv.INTER_LINEAR;
 
-                        // 透視変換行列を計算
-                        const M = window.cv.getPerspectiveTransform(srcPoints, dstPoints);
+                    console.log(`Applying perspective transform with ${interpolationMethod === window.cv.INTER_CUBIC ? 'INTER_CUBIC' : 'INTER_LINEAR'}`);
 
-                        // 出力Canvasのサイズを設定
-                        dstCanvas.width = outputWidth;
-                        dstCanvas.height = outputHeight;
+                    window.cv.warpPerspective(
+                        srcMat,
+                        dstMat,
+                        M,
+                        dsize,
+                        interpolationMethod,
+                        window.cv.BORDER_CONSTANT,
+                        new window.cv.Scalar()
+                    );
 
-                        // 透視変換を適用
-                        const dstMat = new window.cv.Mat();
-                        const dsize = new window.cv.Size(outputWidth, outputHeight);
-                        const interpolationMethod = window.cv.INTER_CUBIC || window.cv.INTER_LINEAR;
+                    // 結果をCanvasに描画
+                    window.cv.imshow(dstCanvas, dstMat);
 
-                        console.log(`Applying perspective transform with ${interpolationMethod === window.cv.INTER_CUBIC ? 'INTER_CUBIC' : 'INTER_LINEAR'}`);
-
-                        window.cv.warpPerspective(
-                            workingMat,
-                            dstMat,
-                            M,
-                            dsize,
-                            interpolationMethod,
-                            window.cv.BORDER_CONSTANT,
-                            new window.cv.Scalar()
-                        );
-
-                        // 結果をCanvasに描画
-                        window.cv.imshow(dstCanvas, dstMat);
-
-                        // メモリを解放（warpPerspectiveの後に削除）
-                        dstMat.delete();
-                        srcPoints.delete();
-                        dstPoints.delete();
-                        M.delete();
-                        rotationMatrix.delete();
-                        rotatedMat.delete(); // 最後に削除（workingMatが参照しているため）
-                    } else {
-                        // 通常の透視変換（回転不要）
-                        // 出力Canvasのサイズを設定
-                        dstCanvas.width = outputWidth;
-                        dstCanvas.height = outputHeight;
-
-                        const dstMat = new window.cv.Mat();
-
-                        // ソース点とターゲット点を準備
-                        const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-                            srcCorners[0].x, srcCorners[0].y, // 左上
-                            srcCorners[1].x, srcCorners[1].y, // 右上
-                            srcCorners[2].x, srcCorners[2].y, // 右下
-                            srcCorners[3].x, srcCorners[3].y, // 左下
-                        ]);
-
-                        // ターゲット点：レシート本来の向きを維持した四隅
-                        const dstPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-                            0, 0,                                    // 左上
-                            outputWidth, 0,                          // 右上
-                            outputWidth, outputHeight,                // 右下
-                            0, outputHeight,                         // 左下
-                        ]);
-
-                        // 透視変換行列を計算
-                        const M = window.cv.getPerspectiveTransform(srcPoints, dstPoints);
-
-                        // 透視変換を適用（INTER_CUBICで文字の鮮明度を最大化）
-                        const dsize = new window.cv.Size(outputWidth, outputHeight);
-                        // INTER_CUBICを使用（文字の鮮明度を最大化）
-                        const interpolationMethod = window.cv.INTER_CUBIC || window.cv.INTER_LINEAR;
-
-                        console.log(`Applying perspective transform with ${interpolationMethod === window.cv.INTER_CUBIC ? 'INTER_CUBIC' : 'INTER_LINEAR'}`);
-
-                        window.cv.warpPerspective(
-                            workingMat,
-                            dstMat,
-                            M,
-                            dsize,
-                            interpolationMethod, // INTER_CUBICで文字の鮮明度を最大化
-                            window.cv.BORDER_CONSTANT,
-                            new window.cv.Scalar()
-                        );
-
-                        // 結果をCanvasに描画
-                        window.cv.imshow(dstCanvas, dstMat);
-
-                        // メモリを解放
-                        dstMat.delete();
-                        srcPoints.delete();
-                        dstPoints.delete();
-                        M.delete();
-                    }
-
-                    // 元のMatを削除（回転処理で既に削除されている場合は無視）
-                    if (workingMat === srcMat) {
-                        srcMat.delete();
-                    }
-
-                    // メモリを解放（SizeとScalarは軽量オブジェクトなので削除不要）
+                    // メモリを解放
                     srcMat.delete();
                     dstMat.delete();
                     srcPoints.delete();
                     dstPoints.delete();
                     M.delete();
-                    // dsizeは削除不要（Sizeオブジェクトにはdelete()メソッドがない）
 
                     // 一時的なCanvasを削除
                     document.body.removeChild(srcCanvas);
@@ -1463,9 +1379,9 @@ export default function Home() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 const isHTTPS = location.protocol === 'https:';
                 const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-                
+
                 let errorMessage = 'カメラAPIが利用できません。\n\n';
-                
+
                 if (!isHTTPS && !isLocalhost) {
                     errorMessage += '⚠️ HTTPS接続が必要です。\n';
                     errorMessage += 'スマートフォンでカメラを使用するには、HTTPS（https://）での接続が必要です。\n\n';
@@ -1478,7 +1394,7 @@ export default function Home() {
                     errorMessage += 'お使いのブラウザはカメラAPIをサポートしていない可能性があります。\n';
                     errorMessage += '最新のブラウザ（Chrome、Safari、Firefox）をお試しください。';
                 }
-                
+
                 alert(errorMessage);
                 throw new Error('MediaDevices API not available');
             }
@@ -1562,14 +1478,14 @@ export default function Home() {
             setIsCameraActive(true);
         } catch (error: any) {
             console.error('Failed to access camera:', error);
-            
+
             // MediaDevices API not available のエラーは既にアラートを表示済み
             if (error.message === 'MediaDevices API not available') {
                 return;
             }
-            
+
             let errorMessage = 'カメラへのアクセスに失敗しました。\n\n';
-            
+
             if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
                 errorMessage += 'カメラの権限が拒否されました。\nブラウザの設定でカメラへのアクセスを許可してください。';
             } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
@@ -1581,7 +1497,7 @@ export default function Home() {
             } else {
                 errorMessage += 'エラー: ' + (error.message || error.name || '不明なエラー');
             }
-            
+
             alert(errorMessage);
         }
     };
@@ -1620,7 +1536,7 @@ export default function Home() {
             } catch (torchError) {
                 // エラーは無視
             }
-            
+
             stream.getTracks().forEach(track => track.stop());
             setStream(null);
             setIsCameraActive(false);
@@ -2824,19 +2740,19 @@ export default function Home() {
             let receiptDate: Date | undefined = undefined;
             let dateStr: string | undefined = undefined;
             let timeStr: string | undefined = undefined;
-            
+
             if (editForm.date) {
                 const dateParts = editForm.date.split('-');
                 if (dateParts.length === 3) {
                     const year = parseInt(dateParts[0], 10);
                     const month = parseInt(dateParts[1], 10);
                     const day = parseInt(dateParts[2], 10);
-                    
+
                     dateStr = `${year}/${month}/${day}`;
                     receiptDate = new Date(year, month - 1, day);
                 }
             }
-            
+
             await db.receipts.update(editingReceipt.id, {
                 vendor: editForm.vendor,
                 amount: editForm.amount,
@@ -2858,17 +2774,17 @@ export default function Home() {
 
     const openEditModal = (receipt: Receipt) => {
         setEditingReceipt(receipt);
-        
+
         // 日付をフォーム用の形式に変換（時刻は編集しない）
         let dateStr = '';
-        
+
         if (receipt.receiptDate) {
             // receiptDateが存在する場合はそれを使用
             const date = new Date(receipt.receiptDate);
             dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         } else if (receipt.date) {
             // date文字列が存在する場合（YYYY/MM/DD形式またはYYYY-MM-DD形式）
-            const dateParts = receipt.date.includes('/') 
+            const dateParts = receipt.date.includes('/')
                 ? receipt.date.split('/')
                 : receipt.date.split('-');
             if (dateParts.length === 3) {
@@ -2878,7 +2794,7 @@ export default function Home() {
                 dateStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
             }
         }
-        
+
         setEditForm({
             vendor: receipt.vendor || '',
             amount: receipt.amount || 0,
@@ -3165,64 +3081,64 @@ export default function Home() {
                                             <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                         </button>
                                     </div>
-                                    
+
                                     {/* CSVエクスポート */}
                                     <div className="border-t border-gray-300 pt-4 mt-4">
                                         <h3 className="text-sm font-semibold text-gray-700 mb-2">CSVエクスポート</h3>
-                                    <button
-                                        onClick={() => exportToCSV('generic', false)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
-                                    >
-                                        <div className="font-semibold text-gray-900">汎用CSV（現在表示中）</div>
-                                        <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
-                                        <div className="text-xs text-gray-500 mt-1">
-                                            {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
-                                        </div>
-                                    </button>
-                                    <button
-                                        onClick={() => exportToCSV('generic', true)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
-                                    >
-                                        <div className="font-semibold text-gray-900">汎用CSV（全データ）</div>
-                                        <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
-                                        <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
-                                    </button>
-                                    <button
-                                        onClick={() => exportToCSV('freee', false)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
-                                    >
-                                        <div className="font-semibold text-gray-900">freee形式（現在表示中）</div>
-                                        <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
-                                        <div className="text-xs text-gray-500 mt-1">
-                                            {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
-                                        </div>
-                                    </button>
-                                    <button
-                                        onClick={() => exportToCSV('freee', true)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
-                                    >
-                                        <div className="font-semibold text-gray-900">freee形式（全データ）</div>
-                                        <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
-                                        <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
-                                    </button>
-                                    <button
-                                        onClick={() => exportToCSV('moneyforward', false)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
-                                    >
-                                        <div className="font-semibold text-gray-900">マネーフォワード形式（現在表示中）</div>
-                                        <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
-                                        <div className="text-xs text-gray-500 mt-1">
-                                            {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
-                                        </div>
-                                    </button>
-                                    <button
-                                        onClick={() => exportToCSV('moneyforward', true)}
-                                        className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
-                                    >
-                                        <div className="font-semibold text-gray-900">マネーフォワード形式（全データ）</div>
-                                        <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
-                                        <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
-                                    </button>
+                                        <button
+                                            onClick={() => exportToCSV('generic', false)}
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                        >
+                                            <div className="font-semibold text-gray-900">汎用CSV（現在表示中）</div>
+                                            <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
+                                            <div className="text-xs text-gray-500 mt-1">
+                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => exportToCSV('generic', true)}
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                        >
+                                            <div className="font-semibold text-gray-900">汎用CSV（全データ）</div>
+                                            <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
+                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
+                                        </button>
+                                        <button
+                                            onClick={() => exportToCSV('freee', false)}
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                        >
+                                            <div className="font-semibold text-gray-900">freee形式（現在表示中）</div>
+                                            <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
+                                            <div className="text-xs text-gray-500 mt-1">
+                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => exportToCSV('freee', true)}
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                        >
+                                            <div className="font-semibold text-gray-900">freee形式（全データ）</div>
+                                            <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
+                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
+                                        </button>
+                                        <button
+                                            onClick={() => exportToCSV('moneyforward', false)}
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                        >
+                                            <div className="font-semibold text-gray-900">マネーフォワード形式（現在表示中）</div>
+                                            <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
+                                            <div className="text-xs text-gray-500 mt-1">
+                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => exportToCSV('moneyforward', true)}
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                        >
+                                            <div className="font-semibold text-gray-900">マネーフォワード形式（全データ）</div>
+                                            <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
+                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -3961,7 +3877,7 @@ export default function Home() {
                                                                 }}
                                                             />
                                                         </div>
-                                                        
+
                                                         {/* 情報とボタンエリア */}
                                                         <div className="bg-white p-3 border-t border-gray-300">
                                                             {/* 店名と金額 */}
@@ -3978,14 +3894,14 @@ export default function Home() {
                                                                     )}
                                                                 </div>
                                                             </div>
-                                                            
+
                                                             {/* 経費カテゴリ */}
                                                             {receipt.expenseCategory && (
                                                                 <div className="mb-2">
                                                                     {getExpenseCategoryBadge(receipt.expenseCategory)}
                                                                 </div>
                                                             )}
-                                                            
+
                                                             {/* 日付情報 */}
                                                             <div className="text-xs text-gray-500 mb-2 space-y-0.5">
                                                                 <div>📸 {formatDate(receipt.timestamp)}</div>
@@ -3993,7 +3909,7 @@ export default function Home() {
                                                                     <div>📅 {formatDate(receipt.receiptDate)}</div>
                                                                 )}
                                                             </div>
-                                                            
+
                                                             {/* 編集・削除ボタン */}
                                                             <div className="flex items-center gap-2 pt-2 border-t border-gray-300">
                                                                 <button
@@ -4091,7 +4007,7 @@ export default function Home() {
                                                             }}
                                                         />
                                                     </div>
-                                                    
+
                                                     {/* 情報とボタンエリア */}
                                                     <div className="bg-white p-3 border-t border-gray-300">
                                                         {/* 店名と金額 */}
@@ -4108,7 +4024,7 @@ export default function Home() {
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        
+
                                                         {/* 日付情報 */}
                                                         <div className="text-xs text-gray-500 mb-2 space-y-0.5">
                                                             <div>📸 {formatDate(receipt.timestamp)}</div>
@@ -4116,7 +4032,7 @@ export default function Home() {
                                                                 <div>📅 {formatDate(receipt.receiptDate)}</div>
                                                             )}
                                                         </div>
-                                                        
+
                                                         {/* 編集・削除ボタン */}
                                                         <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
                                                             <button
@@ -4124,7 +4040,7 @@ export default function Home() {
                                                                     e.stopPropagation();
                                                                     openEditModal(receipt);
                                                                 }}
-                                                                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                 aria-label="編集"
                                                                 type="button"
                                                             >
@@ -4138,7 +4054,7 @@ export default function Home() {
                                                                         deleteReceipt(receipt.id);
                                                                     }
                                                                 }}
-                                                                    className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                 aria-label="削除"
                                                                 type="button"
                                                             >
