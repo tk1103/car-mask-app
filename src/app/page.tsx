@@ -3163,16 +3163,16 @@ export default function Home() {
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={clearAllReceipts}
-                                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm text-sm"
                                 >
-                                    <X size={18} />
+                                    <X size={14} />
                                     <span>データクリア</span>
                                 </button>
                                 <button
                                     onClick={() => setShowExportModal(true)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm text-sm"
                                 >
-                                    <Download size={18} />
+                                    <Download size={14} />
                                     <span>エクスポート</span>
                                 </button>
                             </div>
