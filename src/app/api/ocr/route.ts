@@ -7,11 +7,12 @@ export async function POST(request: NextRequest) {
         // ガード節: APIキーが未設定の場合は詳細なエラーを返す
         const apiKey = process.env.GEMINI_API_KEY;
 
-        // デバッグ用: 環境変数の状態をログに出力
+        // デバッグ用: 環境変数の状態をログに出力（Vercel環境でも確認可能）
         console.log('Environment check:', {
             hasApiKey: !!apiKey,
             apiKeyLength: apiKey?.length || 0,
             nodeEnv: process.env.NODE_ENV,
+            vercelEnv: process.env.VERCEL ? 'true' : 'false',
             allEnvKeys: Object.keys(process.env).filter(key => key.includes('GEMINI') || key.includes('GOOGLE') || key.includes('API'))
         });
 
@@ -441,13 +442,17 @@ RETURN:
                 errorMessage.toLowerCase().includes('api key') ||
                 errorMessage.toLowerCase().includes('authentication') ||
                 errorMessage.toLowerCase().includes('unauthorized')) {
+                const isVercel = process.env.VERCEL === '1';
                 return NextResponse.json({
                     error: 'Authentication failed',
                     message: 'APIキーの認証に失敗しました',
                     userMessage: 'APIキーの設定を確認してください。',
-                    details: '.env.localファイルにGEMINI_API_KEYが正しく設定されているか確認してください。開発サーバーを再起動してください。',
+                    details: isVercel 
+                        ? 'Vercelの環境変数設定でGEMINI_API_KEYが正しく設定されているか確認してください。Settings > Environment Variablesで確認してください。'
+                        : '.env.localファイルにGEMINI_API_KEYが正しく設定されているか確認してください。開発サーバーを再起動してください。',
                     type: 'AuthenticationError',
-                    status: 401
+                    status: 401,
+                    isVercel: isVercel
                 }, { status: 401 });
             }
 
@@ -736,8 +741,11 @@ RETURN:
             lowerErrorMessage.includes('auth') || lowerErrorMessage.includes('unauthorized') ||
             lowerErrorMessage.includes('401') || lowerErrorMessage.includes('403') ||
             lowerErrorString.includes('api key') || lowerErrorString.includes('authentication')) {
+            const isVercel = process.env.VERCEL === '1';
             errorDetails.userMessage = 'APIキーの設定を確認してください。';
-            errorDetails.details = '.env.localファイルにGEMINI_API_KEYが正しく設定されているか確認してください。開発サーバーを再起動してください。';
+            errorDetails.details = isVercel
+                ? 'Vercelの環境変数設定でGEMINI_API_KEYが正しく設定されているか確認してください。Settings > Environment Variablesで確認してください。'
+                : '.env.localファイルにGEMINI_API_KEYが正しく設定されているか確認してください。開発サーバーを再起動してください。';
         } else if (lowerErrorMessage.includes('network') || lowerErrorMessage.includes('fetch') ||
             lowerErrorMessage.includes('timeout')) {
             errorDetails.userMessage = 'ネットワークエラーが発生しました。';

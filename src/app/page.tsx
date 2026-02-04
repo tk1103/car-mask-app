@@ -1192,7 +1192,22 @@ export default function Home() {
             };
         } catch (err) {
             console.error('OCR processing failed:', err);
-            return { amount: 0, vendor: '', expenseCategory: '雑費' as ExpenseCategory, rotation_needed: 0, hasWarning: true };
+            const errorMessage = err instanceof Error ? err.message : String(err);
+
+            // エラーメッセージをユーザーに表示
+            if (!skipStateUpdate) {
+                setOcrWarning(`OCR処理に失敗しました: ${errorMessage}`);
+                setTimeout(() => setOcrWarning(null), 10000);
+            }
+
+            // エラー情報を含めて返す
+            return {
+                amount: 0,
+                vendor: '',
+                expenseCategory: '雑費' as ExpenseCategory,
+                rotation_needed: 0,
+                hasWarning: true
+            };
         } finally {
             if (!skipStateUpdate) {
                 setIsOcrProcessing(false);
