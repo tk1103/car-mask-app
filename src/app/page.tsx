@@ -1799,9 +1799,9 @@ export default function Home() {
                 medianBlurred.delete();
 
                 // 2. 二値化しきい値の固定化：背景が複雑な場合、adaptiveThresholdは逆効果
-                // 明るいレシート（150以上）だけを白く、それ以外を真っ黒に切り捨てる（閾値を下げて検出感度を向上）
+                // 明るいレシート（120以上）だけを白く、それ以外を真っ黒に切り捨てる（閾値を下げて検出感度を向上）
                 thresholded = new window.cv.Mat();
-                window.cv.threshold(gaussianBlurred, thresholded, 150, 255, window.cv.THRESH_BINARY);
+                window.cv.threshold(gaussianBlurred, thresholded, 120, 255, window.cv.THRESH_BINARY);
                 gaussianBlurred.delete();
 
                 // 3. オープニング処理：レシートと繋がってしまっている「細い背景の線」を一度断ち切る
@@ -1878,8 +1878,8 @@ export default function Home() {
                     if (areaPercent >= 5.0) areaStats.above5Percent++;
                     if (areaPercent >= 10.0) areaStats.above10Percent++;
 
-                    // 面積フィルタリング：0.3%以上（レシートが小さすぎる場合は除外、感度を向上）
-                    if (areaPercent < 0.3 || areaPercent > 80.0) {
+                    // 面積フィルタリング：0.1%以上（レシートが小さすぎる場合は除外、感度を大幅に向上）
+                    if (areaPercent < 0.1 || areaPercent > 80.0) {
                         cnt.delete();
                         continue;
                     }
@@ -1891,23 +1891,23 @@ export default function Home() {
                     const aspectRatio = rectWidth > rectHeight ? rectWidth / rectHeight : rectHeight / rectWidth;
 
                     // 正方形に近いもの（顔）を即座に捨て、長方形（レシート）のみを残す
-                    // aspectRatio > 1.15 || aspectRatio < 0.85 の条件で、正方形に近いものを除外（緩和）
-                    if (aspectRatio <= 1.15 && aspectRatio >= 0.85) {
+                    // aspectRatio > 1.1 || aspectRatio < 0.9 の条件で、正方形に近いものを除外（さらに緩和して検出感度向上）
+                    if (aspectRatio <= 1.1 && aspectRatio >= 0.9) {
                         cnt.delete();
                         continue;
                     }
 
-                    // 画面上部20%を無視：画面の最上部には通常、顔や背景がある（緩和）
+                    // 画面上部10%を無視：画面の最上部には通常、顔や背景がある（さらに緩和して検出感度向上）
                     const centerY = rotatedRect.center.y;
-                    if (centerY < height * 0.2) {
+                    if (centerY < height * 0.1) {
                         cnt.delete();
                         continue;
                     }
 
-                    // 画面の中央付近にある輪郭を優先：画面の端（上下左右5%以内）に触れているものは無視（緩和）
+                    // 画面の中央付近にある輪郭を優先：画面の端（上下左右2%以内）に触れているものは無視（さらに緩和して検出感度向上）
                     const centerX = rotatedRect.center.x;
-                    const marginX = width * 0.05;
-                    const marginY = height * 0.05;
+                    const marginX = width * 0.02;
+                    const marginY = height * 0.02;
                     if (centerX < marginX || centerX > width - marginX ||
                         centerY < marginY || centerY > height - marginY) {
                         cnt.delete();
@@ -1935,7 +1935,7 @@ export default function Home() {
                 // HSV Matは使用していないため削除不要
 
                 // デバッグログ（検出状況を詳細に記録）
-                if (Math.random() < 0.3 || largeContourCount === 0 || bestContourIndex < 0) {
+                if (Math.random() < 0.5 || largeContourCount === 0 || bestContourIndex < 0) {
                     console.log('[Detection] Contours:', {
                         total: contourSize,
                         valid: validContourCount,
@@ -1951,10 +1951,10 @@ export default function Home() {
                             above5Percent: areaStats.above5Percent
                         },
                         filters: {
-                            minArea: '0.3%',
-                            aspectRatio: '1.15-0.85以外',
-                            topMargin: '20%',
-                            edgeMargin: '5%'
+                            minArea: '0.1%',
+                            aspectRatio: '1.1-0.9以外',
+                            topMargin: '10%',
+                            edgeMargin: '2%'
                         }
                     });
                 }
@@ -2547,7 +2547,7 @@ export default function Home() {
         if (video.videoWidth === 0 || video.videoHeight === 0) return false;
 
         const areaPercent = calculateReceiptArea(detectedCorners, video.videoWidth, video.videoHeight);
-        return areaPercent >= 10; // 画面の10%以上（顔に引っ張られないよう、手に持っているサイズで即反応）
+        return areaPercent >= 5; // 画面の5%以上（検出感度を向上）
     }, [detectedCorners, calculateReceiptArea]);
 
     // レシートのアスペクト比を計算（横倒し判定用）
