@@ -2573,7 +2573,7 @@ export default function Home() {
         return areaPercent >= 5; // 画面の5%以上（検出感度を向上）
     }, [detectedCorners, calculateReceiptArea]);
 
-    // セーフエリアチェック：4隅すべてが画面の端から3%以上内側にあるか（ヒステリシス付き）
+    // セーフエリアチェック：4隅すべてが画面の端から1.5%以上内側にあるか（ヒステリシス付き）
     const isInSafeArea = useMemo(() => {
         if (!detectedCorners || !videoRef.current) {
             safeAreaHistoryRef.current = [];
@@ -2588,9 +2588,9 @@ export default function Home() {
         const width = video.videoWidth;
         const height = video.videoHeight;
 
-        // ヒステリシス：緑→赤の閾値と赤→緑の閾値を分ける
-        const marginGreenToRed = 0.025; // 2.5%（緑から赤に変わる条件：より厳しい）
-        const marginRedToGreen = 0.035; // 3.5%（赤から緑に変わる条件：より緩い）
+        // ヒステリシス：緑→赤の閾値と赤→緑の閾値を分ける（大幅に緩和）
+        const marginGreenToRed = 0.01; // 1%（緑から赤に変わる条件：より厳しい）
+        const marginRedToGreen = 0.02; // 2%（赤から緑に変わる条件：より緩い）
 
         // 正規化座標（0-1）を実際のピクセル座標に変換
         const pixelCorners = detectedCorners.map(corner => ({
@@ -3933,7 +3933,7 @@ export default function Home() {
                             </p>
                         </div>
 
-                        {/* セーフエリア警告（3%未満の場合のみ表示） */}
+                        {/* セーフエリア警告（1%未満の場合のみ表示） */}
                         {(() => {
                             const corners = detectedCorners || detectedCornersRef.current;
                             if (!corners || corners.length !== 4 || !videoRef.current) return false;
@@ -3943,7 +3943,7 @@ export default function Home() {
 
                             const width = video.videoWidth;
                             const height = video.videoHeight;
-                            const margin = 0.03; // 3%のマージン
+                            const margin = 0.01; // 1%のマージン（警告表示用）
 
                             // 正規化座標（0-1）を実際のピクセル座標に変換
                             const pixelCorners = corners.map(corner => ({
@@ -3951,7 +3951,7 @@ export default function Home() {
                                 y: corner.y * height
                             }));
 
-                            // いずれかの角が3%未満の範囲にあるかチェック
+                            // いずれかの角が1%未満の範囲にあるかチェック
                             const isTooClose = pixelCorners.some(corner => {
                                 const marginX = width * margin;
                                 const marginY = height * margin;
