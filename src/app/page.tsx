@@ -2573,7 +2573,7 @@ export default function Home() {
         return areaPercent >= 5; // 画面の5%以上（検出感度を向上）
     }, [detectedCorners, calculateReceiptArea]);
 
-    // セーフエリアチェック：4隅すべてが画面の端から1.5%以上内側にあるか（ヒステリシス付き）
+    // セーフエリアチェック：4隅すべてが画面の端から1%以上内側にあるか（超緩和・安定化）
     const isInSafeArea = useMemo(() => {
         if (!detectedCorners || !videoRef.current) {
             safeAreaHistoryRef.current = [];
@@ -2588,9 +2588,8 @@ export default function Home() {
         const width = video.videoWidth;
         const height = video.videoHeight;
 
-        // ヒステリシス：緑→赤の閾値と赤→緑の閾値を分ける（大幅に緩和）
-        const marginGreenToRed = 0.01; // 1%（緑から赤に変わる条件：より厳しい）
-        const marginRedToGreen = 0.02; // 2%（赤から緑に変わる条件：より緩い）
+        // 超緩和：1%のマージン（見えてさえいればOK）
+        const margin = 0.01; // 1%
 
         // 正規化座標（0-1）を実際のピクセル座標に変換
         const pixelCorners = detectedCorners.map(corner => ({
@@ -2598,41 +2597,31 @@ export default function Home() {
             y: corner.y * height
         }));
 
+        // 現在の判定：すべての角が1%以上内側にあるか
+        const currentIsSafe = pixelCorners.every(corner => {
+            const marginX = width * margin;
+            const marginY = height * margin;
+            return corner.x >= marginX &&
+                corner.x <= width - marginX &&
+                corner.y >= marginY &&
+                corner.y <= height - marginY;
+        });
+
         // 過去の判定履歴を取得
         const history = safeAreaHistoryRef.current;
-        const currentState = history.length > 0 ? history[history.length - 1] : null;
 
-        // ヒステリシスロジック：現在緑なら緑→赤の閾値、現在赤なら赤→緑の閾値を使用
-        let newState: boolean;
-        if (currentState === null || currentState === true) {
-            // 現在緑または初期状態：緑→赤の条件（より厳しい閾値）
-            newState = pixelCorners.every(corner => {
-                const marginX = width * marginGreenToRed;
-                const marginY = height * marginGreenToRed;
-                return corner.x >= marginX &&
-                    corner.x <= width - marginX &&
-                    corner.y >= marginY &&
-                    corner.y <= height - marginY;
-            });
-        } else {
-            // 現在赤：赤→緑の条件（より緩い閾値）
-            newState = pixelCorners.every(corner => {
-                const marginX = width * marginRedToGreen;
-                const marginY = height * marginRedToGreen;
-                return corner.x >= marginX &&
-                    corner.x <= width - marginX &&
-                    corner.y >= marginY &&
-                    corner.y <= height - marginY;
-            });
-        }
-
-        // 過去5フレームの履歴を更新
-        history.push(newState);
-        if (history.length > 5) {
+        // 過去10フレームの履歴を更新
+        history.push(currentIsSafe);
+        if (history.length > 10) {
             history.shift();
         }
 
-        return newState;
+        // 安定化：過去10フレームのうち7割以上が緑なら緑、そうでなければ赤
+        // これにより、一度緑になったら多少のブレでは赤に戻らない
+        const greenCount = history.filter(h => h === true).length;
+        const threshold = Math.ceil(history.length * 0.7); // 70%以上
+
+        return greenCount >= threshold;
     }, [detectedCorners]);
 
     // レシートのアスペクト比を計算（横倒し判定用）
@@ -3750,7 +3739,7 @@ export default function Home() {
                                                 <path
                                                     d={pathData}
                                                     fill="none"
-                                                    stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"}
+                                                    stroke={isInSafeArea ? "rgba(34, 197, 94, 0.6)" : "rgba(255, 51, 80, 0.6)"}
                                                     strokeWidth="2"
                                                     strokeDasharray="8 4"
                                                     strokeLinecap="round"
@@ -3762,34 +3751,34 @@ export default function Home() {
                                                         <circle
                                                             cx={corner.x}
                                                             cy={corner.y}
-                                                            r="6"
-                                                            fill={isInSafeArea ? "rgba(34, 197, 94, 0.8)" : "rgba(255, 51, 80, 0.8)"}
-                                                            stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"}
-                                                            strokeWidth="1.5"
+                                                            r="5"
+                                                            fill={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"}
+                                                            stroke={isInSafeArea ? "rgba(34, 197, 94, 0.7)" : "rgba(255, 51, 80, 0.7)"}
+                                                            strokeWidth="1"
                                                         />
                                                         {/* L字型マーカー */}
                                                         {index === 0 && ( // 左上
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 15} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 15} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 12} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 12} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
                                                             </>
                                                         )}
                                                         {index === 1 && ( // 右上
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 15} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 15} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 12} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 12} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
                                                             </>
                                                         )}
                                                         {index === 2 && ( // 右下
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 15} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 15} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 12} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 12} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
                                                             </>
                                                         )}
                                                         {index === 3 && ( // 左下
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 15} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 15} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"} strokeWidth="1.5" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 12} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 12} stroke={isInSafeArea ? "rgba(34, 197, 94, 0.5)" : "rgba(255, 51, 80, 0.5)"} strokeWidth="1" />
                                                             </>
                                                         )}
                                                     </g>
@@ -3933,40 +3922,6 @@ export default function Home() {
                             </p>
                         </div>
 
-                        {/* セーフエリア警告（1%未満の場合のみ表示） */}
-                        {(() => {
-                            const corners = detectedCorners || detectedCornersRef.current;
-                            if (!corners || corners.length !== 4 || !videoRef.current) return false;
-
-                            const video = videoRef.current;
-                            if (video.videoWidth === 0 || video.videoHeight === 0) return false;
-
-                            const width = video.videoWidth;
-                            const height = video.videoHeight;
-                            const margin = 0.01; // 1%のマージン（警告表示用）
-
-                            // 正規化座標（0-1）を実際のピクセル座標に変換
-                            const pixelCorners = corners.map(corner => ({
-                                x: corner.x * width,
-                                y: corner.y * height
-                            }));
-
-                            // いずれかの角が1%未満の範囲にあるかチェック
-                            const isTooClose = pixelCorners.some(corner => {
-                                const marginX = width * margin;
-                                const marginY = height * margin;
-                                return corner.x < marginX ||
-                                    corner.x > width - marginX ||
-                                    corner.y < marginY ||
-                                    corner.y > height - marginY;
-                            });
-
-                            return isTooClose;
-                        })() && (
-                                <div className="mb-2 px-4 py-2 bg-red-600/90 text-white text-sm rounded-lg font-medium">
-                                    もう少し離してください
-                                </div>
-                            )}
 
                         {/* バリデーション警告 */}
                         {(() => {
