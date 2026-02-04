@@ -891,23 +891,41 @@ export default function Home() {
                     // 4つの頂点を数学的にソート（左上、右上、右下、左下の順）
                     const srcCorners = sortCorners(rawCorners);
 
-                    // レシートの縦横比を正確に計算（4点の座標から、真正面から見た状態を想定）
+                    // 5%のパディングを追加（見切れ防止）
+                    const minX = Math.min(...srcCorners.map(c => c.x));
+                    const maxX = Math.max(...srcCorners.map(c => c.x));
+                    const minY = Math.min(...srcCorners.map(c => c.y));
+                    const maxY = Math.max(...srcCorners.map(c => c.y));
+                    const width = maxX - minX;
+                    const height = maxY - minY;
+                    const paddingX = width * 0.05; // 5%のパディング
+                    const paddingY = height * 0.05; // 5%のパディング
+
+                    // パディングを適用した座標を計算
+                    const paddedCorners = [
+                        { x: Math.max(0, minX - paddingX), y: Math.max(0, minY - paddingY) }, // 左上
+                        { x: Math.min(img.width, maxX + paddingX), y: Math.max(0, minY - paddingY) }, // 右上
+                        { x: Math.min(img.width, maxX + paddingX), y: Math.min(img.height, maxY + paddingY) }, // 右下
+                        { x: Math.max(0, minX - paddingX), y: Math.min(img.height, maxY + paddingY) }  // 左下
+                    ];
+
+                    // レシートの縦横比を正確に計算（パディング適用後の座標から、真正面から見た状態を想定）
                     // 台形補正後の長方形のアスペクト比を計算
                     const topWidth = Math.sqrt(
-                        Math.pow(srcCorners[1].x - srcCorners[0].x, 2) +
-                        Math.pow(srcCorners[1].y - srcCorners[0].y, 2)
+                        Math.pow(paddedCorners[1].x - paddedCorners[0].x, 2) +
+                        Math.pow(paddedCorners[1].y - paddedCorners[0].y, 2)
                     );
                     const bottomWidth = Math.sqrt(
-                        Math.pow(srcCorners[2].x - srcCorners[3].x, 2) +
-                        Math.pow(srcCorners[2].y - srcCorners[3].y, 2)
+                        Math.pow(paddedCorners[2].x - paddedCorners[3].x, 2) +
+                        Math.pow(paddedCorners[2].y - paddedCorners[3].y, 2)
                     );
                     const leftHeight = Math.sqrt(
-                        Math.pow(srcCorners[3].x - srcCorners[0].x, 2) +
-                        Math.pow(srcCorners[3].y - srcCorners[0].y, 2)
+                        Math.pow(paddedCorners[3].x - paddedCorners[0].x, 2) +
+                        Math.pow(paddedCorners[3].y - paddedCorners[0].y, 2)
                     );
                     const rightHeight = Math.sqrt(
-                        Math.pow(srcCorners[2].x - srcCorners[1].x, 2) +
-                        Math.pow(srcCorners[2].y - srcCorners[1].y, 2)
+                        Math.pow(paddedCorners[2].x - paddedCorners[1].x, 2) +
+                        Math.pow(paddedCorners[2].y - paddedCorners[1].y, 2)
                     );
 
                     // 上辺・下辺の平均幅（W）と左辺・右辺の平均高さ（H）を算出
@@ -960,12 +978,12 @@ export default function Home() {
                     dstCanvas.width = outputWidth;
                     dstCanvas.height = outputHeight;
 
-                    // ソース点とターゲット点を準備
+                    // ソース点とターゲット点を準備（パディング適用後の座標を使用）
                     const srcPoints = window.cv.matFromArray(4, 1, window.cv.CV_32FC2, [
-                        srcCorners[0].x, srcCorners[0].y, // 左上
-                        srcCorners[1].x, srcCorners[1].y, // 右上
-                        srcCorners[2].x, srcCorners[2].y, // 右下
-                        srcCorners[3].x, srcCorners[3].y, // 左下
+                        paddedCorners[0].x, paddedCorners[0].y, // 左上
+                        paddedCorners[1].x, paddedCorners[1].y, // 右上
+                        paddedCorners[2].x, paddedCorners[2].y, // 右下
+                        paddedCorners[3].x, paddedCorners[3].y, // 左下
                     ]);
 
                     // ターゲット点：出力Canvasの四隅
@@ -2506,7 +2524,7 @@ export default function Home() {
                 } finally {
                     setIsOcrProcessing(false);
                 }
-            }, 'image/jpeg');
+            }, 'image/jpeg', 0.95);
         } catch (error) {
             console.error('Failed to capture photo:', error);
             alert('写真の撮影に失敗しました');
@@ -2549,6 +2567,33 @@ export default function Home() {
         const areaPercent = calculateReceiptArea(detectedCorners, video.videoWidth, video.videoHeight);
         return areaPercent >= 5; // 画面の5%以上（検出感度を向上）
     }, [detectedCorners, calculateReceiptArea]);
+
+    // セーフエリアチェック：4隅すべてが画面の端から8%以上内側にあるか
+    const isInSafeArea = useMemo(() => {
+        if (!detectedCorners || !videoRef.current) return false;
+        const video = videoRef.current;
+        if (video.videoWidth === 0 || video.videoHeight === 0) return false;
+
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        const margin = 0.08; // 8%のマージン
+
+        // 正規化座標（0-1）を実際のピクセル座標に変換
+        const pixelCorners = detectedCorners.map(corner => ({
+            x: corner.x * width,
+            y: corner.y * height
+        }));
+
+        // すべての角がセーフエリア内にあるかチェック
+        return pixelCorners.every(corner => {
+            const marginX = width * margin;
+            const marginY = height * margin;
+            return corner.x >= marginX &&
+                corner.x <= width - marginX &&
+                corner.y >= marginY &&
+                corner.y <= height - marginY;
+        });
+    }, [detectedCorners]);
 
     // レシートのアスペクト比を計算（横倒し判定用）
     const receiptAspectRatio = useMemo(() => {
@@ -3661,11 +3706,11 @@ export default function Home() {
                                                 </defs>
                                                 <rect width="100%" height="100%" fill="rgba(0,0,0,0.6)" mask="url(#receipt-mask)" />
 
-                                                {/* レシートの境界線（20%パディング付き） */}
+                                                {/* レシートの境界線（20%パディング付き）- 動的な色変更 */}
                                                 <path
                                                     d={pathData}
                                                     fill="none"
-                                                    stroke="rgba(66, 106, 235, 1)"
+                                                    stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"}
                                                     strokeWidth="3"
                                                     strokeDasharray="8 4"
                                                     strokeLinecap="round"
@@ -3678,33 +3723,33 @@ export default function Home() {
                                                             cx={corner.x}
                                                             cy={corner.y}
                                                             r="8"
-                                                            fill="rgba(66, 106, 235, 0.9)"
-                                                            stroke="rgba(66, 106, 235, 1)"
+                                                            fill={isInSafeArea ? "rgba(34, 197, 94, 0.9)" : "rgba(255, 51, 80, 0.9)"}
+                                                            stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"}
                                                             strokeWidth="2"
                                                         />
                                                         {/* L字型マーカー */}
                                                         {index === 0 && ( // 左上
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
                                                             </>
                                                         )}
                                                         {index === 1 && ( // 右上
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y + 20} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
                                                             </>
                                                         )}
                                                         {index === 2 && ( // 右下
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x - 20} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
                                                             </>
                                                         )}
                                                         {index === 3 && ( // 左下
                                                             <>
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
-                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke="rgba(37, 99, 235, 1)" strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x + 20} y2={corner.y} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
+                                                                <line x1={corner.x} y1={corner.y} x2={corner.x} y2={corner.y - 20} stroke={isInSafeArea ? "rgba(34, 197, 94, 1)" : "rgba(255, 51, 80, 1)"} strokeWidth="2" />
                                                             </>
                                                         )}
                                                     </g>
@@ -3715,15 +3760,6 @@ export default function Home() {
                                 </svg>
                             )}
 
-                        {/* 水平ガイド線（検出されたレシートがある場合も表示） */}
-                        {(() => {
-                            const corners = detectedCorners || detectedCornersRef.current;
-                            return corners && corners.length === 4;
-                        })() && (
-                                <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-25">
-                                    <div className="border-t-2 border-dashed border-custom-blue"></div>
-                                </div>
-                            )}
 
                         {/* デフォルトガイド（レシートが検知できない場合） */}
                         {(() => {
@@ -3837,19 +3873,6 @@ export default function Home() {
                                         </div>
                                     </div>
 
-                                    {/* 水平ガイドメッセージ（常に表示） */}
-                                    <div className="absolute top-20 left-0 right-0 text-center pointer-events-none z-30">
-                                        <div className="inline-block bg-black/60 px-4 py-2 rounded-lg backdrop-blur-sm">
-                                            <p className="text-white text-xs font-medium drop-shadow-lg">
-                                                金額が左から右へ水平になるように撮影してください
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    {/* 水平ガイド線（画面中央） */}
-                                    <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-20">
-                                        <div className="border-t-2 border-dashed border-custom-blue"></div>
-                                    </div>
                                 </div>
                             )}
 
@@ -3863,6 +3886,23 @@ export default function Home() {
 
                     {/* 撮影ボタン（モバイル最適化：画面下部中央、親指で押しやすい大きさ） */}
                     <div className="bg-black pb-8 pt-4 flex flex-col justify-center items-center flex-shrink-0 relative z-20 safe-area-inset-bottom">
+                        {/* ガイドメッセージ */}
+                        <div className="mb-2 px-4 py-2 bg-black/70 text-white text-sm rounded-lg backdrop-blur-sm">
+                            <p className="text-center">
+                                四隅すべてを枠内に収め、文字が水平になるように撮影してください
+                            </p>
+                        </div>
+
+                        {/* セーフエリア警告 */}
+                        {(() => {
+                            const corners = detectedCorners || detectedCornersRef.current;
+                            return corners && corners.length === 4 && !isInSafeArea;
+                        })() && (
+                                <div className="mb-2 px-4 py-2 bg-red-600/90 text-white text-sm rounded-lg font-medium">
+                                    もう少し離してください
+                                </div>
+                            )}
+
                         {/* バリデーション警告 */}
                         {(() => {
                             // detectedCornersRefも確認（状態更新の遅延を考慮）
