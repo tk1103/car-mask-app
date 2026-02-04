@@ -3109,11 +3109,11 @@ export default function Home() {
     // 勘定科目のバッジスタイルを取得
     const getExpenseCategoryBadge = (category: ExpenseCategory | undefined) => {
         const categoryStyles: Record<ExpenseCategory, { bg: string; text: string }> = {
-            '仕入高': { bg: 'bg-blue-600', text: 'text-white' },
-            '広告宣伝費': { bg: 'bg-blue-600', text: 'text-white' },
+            '仕入高': { bg: 'bg-custom-blue', text: 'text-white' },
+            '広告宣伝費': { bg: 'bg-custom-blue', text: 'text-white' },
             '消耗品費': { bg: 'bg-gray-500', text: 'text-white' },
-            '会議費': { bg: 'bg-blue-600', text: 'text-white' },
-            '接待交際費': { bg: 'bg-blue-600', text: 'text-white' },
+            '会議費': { bg: 'bg-custom-blue', text: 'text-white' },
+            '接待交際費': { bg: 'bg-custom-blue', text: 'text-white' },
             '旅費交通費': { bg: 'bg-gray-700', text: 'text-white' },
             '通信費': { bg: 'bg-gray-500', text: 'text-white' },
             '支払手数料': { bg: 'bg-gray-700', text: 'text-white' },
@@ -3140,10 +3140,10 @@ export default function Home() {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-100">
                 <div className="text-center">
-                    <p className="text-red-600 mb-4">{error}</p>
+                    <p className="text-custom-red mb-4">{error}</p>
                     <button
                         onClick={loadReceipts}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        className="px-4 py-2 bg-custom-blue text-white rounded-lg transition-colors"
                     >
                         再試行
                     </button>
@@ -3163,14 +3163,14 @@ export default function Home() {
                             <div className="flex items-center gap-2">
                                 <button
                                     onClick={clearAllReceipts}
-                                    className="flex items-center gap-1.5 px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm text-sm"
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-custom-red text-white rounded-lg transition-colors shadow-sm text-sm"
                                 >
                                     <X size={14} />
                                     <span>データクリア</span>
                                 </button>
                                 <button
                                     onClick={() => setShowExportModal(true)}
-                                    className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm text-sm"
+                                    className="flex items-center gap-1.5 px-3 py-1 bg-custom-blue text-white rounded-lg transition-colors shadow-sm text-sm"
                                 >
                                     <Download size={14} />
                                     <span>エクスポート</span>
@@ -3188,7 +3188,7 @@ export default function Home() {
                                 <div className="text-xs text-gray-500 font-medium mb-1">
                                     Total {currency}
                                 </div>
-                                <div className="text-2xl font-bold text-blue-600">
+                                <div className="text-2xl font-bold text-custom-blue">
                                     {formatAmount(amount, currency)}
                                 </div>
                             </div>
@@ -3217,7 +3217,7 @@ export default function Home() {
                             {/* 追加のスキャンライン効果 */}
                             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-600/20 to-transparent animate-scan" style={{ animationDelay: '0.5s' }}></div>
                         </div>
-                        <Loader2 className="animate-spin text-blue-600 relative z-10" size={32} />
+                        <Loader2 className="animate-spin text-custom-blue relative z-10" size={32} />
                         <p className="text-gray-900 font-medium relative z-10">画像を圧縮・送信中...</p>
                     </div>
                 </div>
@@ -3271,7 +3271,7 @@ export default function Home() {
                                         <h3 className="text-sm font-semibold text-gray-700 mb-2">画像エクスポート</h3>
                                         <button
                                             onClick={() => exportImages(false)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">画像をZIPでエクスポート（現在表示中）</div>
                                             <div className="text-xs text-gray-500 mt-1">撮影したサイズのまま画像をZIPファイルでダウンロード</div>
@@ -3294,7 +3294,7 @@ export default function Home() {
                                         <h3 className="text-sm font-semibold text-gray-700 mb-2">CSVエクスポート</h3>
                                         <button
                                             onClick={() => exportToCSV('generic', false)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">汎用CSV（現在表示中）</div>
                                             <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
@@ -3304,7 +3304,7 @@ export default function Home() {
                                         </button>
                                         <button
                                             onClick={() => exportToCSV('generic', true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">汎用CSV（全データ）</div>
                                             <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
@@ -3312,7 +3312,7 @@ export default function Home() {
                                         </button>
                                         <button
                                             onClick={() => exportToCSV('freee', false)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">freee形式（現在表示中）</div>
                                             <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
@@ -3322,7 +3322,7 @@ export default function Home() {
                                         </button>
                                         <button
                                             onClick={() => exportToCSV('freee', true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">freee形式（全データ）</div>
                                             <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
@@ -3330,7 +3330,7 @@ export default function Home() {
                                         </button>
                                         <button
                                             onClick={() => exportToCSV('moneyforward', false)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">マネーフォワード形式（現在表示中）</div>
                                             <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
@@ -3340,7 +3340,7 @@ export default function Home() {
                                         </button>
                                         <button
                                             onClick={() => exportToCSV('moneyforward', true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors"
+                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
                                             <div className="font-semibold text-gray-900">マネーフォワード形式（全データ）</div>
                                             <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
@@ -3533,7 +3533,7 @@ export default function Home() {
                                 </button>
                                 <button
                                     onClick={handleUpdateReceipt}
-                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                                    className="flex-1 px-4 py-2 bg-custom-blue text-white rounded-lg transition-colors font-medium"
                                 >
                                     保存
                                 </button>
@@ -3665,7 +3665,7 @@ export default function Home() {
                                                 <path
                                                     d={pathData}
                                                     fill="none"
-                                                    stroke="rgba(37, 99, 235, 1)"
+                                                    stroke="rgba(66, 106, 235, 1)"
                                                     strokeWidth="3"
                                                     strokeDasharray="8 4"
                                                     strokeLinecap="round"
@@ -3678,8 +3678,8 @@ export default function Home() {
                                                             cx={corner.x}
                                                             cy={corner.y}
                                                             r="8"
-                                                            fill="rgba(37, 99, 235, 0.9)"
-                                                            stroke="rgba(37, 99, 235, 1)"
+                                                            fill="rgba(66, 106, 235, 0.9)"
+                                                            stroke="rgba(66, 106, 235, 1)"
                                                             strokeWidth="2"
                                                         />
                                                         {/* L字型マーカー */}
@@ -3721,7 +3721,7 @@ export default function Home() {
                             return corners && corners.length === 4;
                         })() && (
                                 <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-25">
-                                    <div className="border-t-2 border-dashed border-blue-500"></div>
+                                    <div className="border-t-2 border-dashed border-custom-blue"></div>
                                 </div>
                             )}
 
@@ -3744,28 +3744,28 @@ export default function Home() {
                                             aspectRatio: '1 / 1'
                                         }}>
                                             {/* レシート用ガイド枠の境界線（点線の矩形） */}
-                                            <div className="absolute inset-0 border-2 border-dashed border-blue-500 rounded-lg shadow-lg"></div>
+                                            <div className="absolute inset-0 border-2 border-dashed border-custom-blue rounded-lg shadow-lg"></div>
 
                                             {/* L字型のフォーカス・マーカー（四隅） */}
                                             {/* 左上 */}
                                             <div className="absolute top-0 left-0 w-12 h-12">
-                                                <div className="absolute top-0 left-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
-                                                <div className="absolute top-0 left-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 left-0 w-6 h-1 bg-custom-blue rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 left-0 w-1 h-6 bg-custom-blue rounded-full shadow-lg"></div>
                                             </div>
                                             {/* 右上 */}
                                             <div className="absolute top-0 right-0 w-12 h-12">
-                                                <div className="absolute top-0 right-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
-                                                <div className="absolute top-0 right-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 right-0 w-6 h-1 bg-custom-blue rounded-full shadow-lg"></div>
+                                                <div className="absolute top-0 right-0 w-1 h-6 bg-custom-blue rounded-full shadow-lg"></div>
                                             </div>
                                             {/* 右下 */}
                                             <div className="absolute bottom-0 right-0 w-12 h-12">
-                                                <div className="absolute bottom-0 right-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
-                                                <div className="absolute bottom-0 right-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 right-0 w-6 h-1 bg-custom-blue rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 right-0 w-1 h-6 bg-custom-blue rounded-full shadow-lg"></div>
                                             </div>
                                             {/* 左下 */}
                                             <div className="absolute bottom-0 left-0 w-12 h-12">
-                                                <div className="absolute bottom-0 left-0 w-6 h-1 bg-blue-500 rounded-full shadow-lg"></div>
-                                                <div className="absolute bottom-0 left-0 w-1 h-6 bg-blue-500 rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 left-0 w-6 h-1 bg-custom-blue rounded-full shadow-lg"></div>
+                                                <div className="absolute bottom-0 left-0 w-1 h-6 bg-custom-blue rounded-full shadow-lg"></div>
                                             </div>
                                         </div>
                                     </div>
@@ -3848,7 +3848,7 @@ export default function Home() {
 
                                     {/* 水平ガイド線（画面中央） */}
                                     <div className="absolute left-0 right-0 top-1/2 transform -translate-y-1/2 pointer-events-none z-20">
-                                        <div className="border-t-2 border-dashed border-blue-500"></div>
+                                        <div className="border-t-2 border-dashed border-custom-blue"></div>
                                     </div>
                                 </div>
                             )}
@@ -3918,7 +3918,7 @@ export default function Home() {
                 <div className="fixed inset-0 z-50 bg-black flex flex-col">
                     {/* 自動解析中のメッセージ */}
                     {isOcrProcessing && (
-                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-60 bg-blue-600 text-white px-6 py-3 rounded-lg backdrop-blur-sm shadow-lg">
+                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-60 bg-custom-blue text-white px-6 py-3 rounded-lg backdrop-blur-sm shadow-lg">
                             <div className="flex items-center gap-3">
                                 <Loader2 className="animate-spin" size={20} />
                                 <span className="font-medium">解析中...</span>
@@ -3952,7 +3952,7 @@ export default function Home() {
                         <button
                             onClick={startOcrAnalysis}
                             disabled={isOcrProcessing}
-                            className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex-1 px-6 py-3 bg-custom-blue text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {isOcrProcessing ? (
                                 <span className="flex items-center justify-center gap-2">
@@ -3972,7 +3972,7 @@ export default function Home() {
                 <div className="fixed bottom-6 right-6 z-40">
                     <button
                         onClick={startCamera}
-                        className="w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
+                        className="w-14 h-14 bg-custom-blue text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
                         aria-label="カメラを開く"
                     >
                         <Camera size={24} />
@@ -4073,7 +4073,7 @@ export default function Home() {
                                             <div className="flex items-center gap-4">
                                                 <span className="text-sm text-gray-500">合計:</span>
                                                 {Object.entries(monthlyTotal).map(([currency, amount]) => (
-                                                    <span key={currency} className="text-lg font-semibold text-blue-600">
+                                                    <span key={currency} className="text-lg font-semibold text-custom-blue">
                                                         {formatAmount(amount, currency)}
                                                     </span>
                                                 ))}
@@ -4159,7 +4159,7 @@ export default function Home() {
                                                                         e.stopPropagation();
                                                                         openEditModal(receipt);
                                                                     }}
-                                                                    className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                    className="flex-1 px-3 py-1.5 bg-custom-blue text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                     aria-label="編集"
                                                                     type="button"
                                                                 >
@@ -4173,7 +4173,7 @@ export default function Home() {
                                                                             deleteReceipt(receipt.id);
                                                                         }
                                                                     }}
-                                                                    className="flex-1 px-3 py-1.5 bg-red-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
+                                                                    className="flex-1 px-3 py-1.5 bg-custom-red text-white text-xs rounded transition-colors flex items-center justify-center gap-1"
                                                                     aria-label="削除"
                                                                     type="button"
                                                                 >

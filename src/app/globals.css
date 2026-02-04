@@ -10,6 +10,36 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-custom-red: #ff3350;
+  --color-custom-blue: #426aeb;
+}
+
+.bg-custom-red {
+  background-color: #ff3350;
+}
+
+.bg-custom-red:hover {
+  background-color: #e02a45;
+}
+
+.text-custom-red {
+  color: #ff3350;
+}
+
+.bg-custom-blue {
+  background-color: #426aeb;
+}
+
+.bg-custom-blue:hover {
+  background-color: #3558d4;
+}
+
+.text-custom-blue {
+  color: #426aeb;
+}
+
+.border-custom-blue {
+  border-color: #426aeb;
 }
 
 @media (prefers-color-scheme: dark) {
