@@ -115,7 +115,9 @@ export async function POST(request: NextRequest) {
                         },
                         rotation_needed: {
                             type: "number" as const,
-                            enum: [0, 1, 2, 3]
+                            minimum: 0,
+                            maximum: 3,
+                            description: "Number of 90-degree clockwise rotations needed (0, 1, 2, or 3)"
                         }
                     },
                     required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners", "expenseCategory", "categoryReason", "confidenceScore", "rotation_needed"]
