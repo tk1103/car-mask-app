@@ -3576,11 +3576,27 @@ export default function Home() {
                         <div className="w-full md:w-1/2 bg-gray-100 flex flex-col items-center justify-center p-4 overflow-auto min-h-0">
                             <div className="flex-1 flex items-center justify-center w-full">
                                 {(() => {
-                                    const imageUrl = editingReceipt.id
-                                        ? (imageUrlsRef.current.get(editingReceipt.id) || URL.createObjectURL(editingReceipt.image))
-                                        : URL.createObjectURL(editingReceipt.image);
-                                    if (editingReceipt.id && !imageUrlsRef.current.has(editingReceipt.id)) {
-                                        imageUrlsRef.current.set(editingReceipt.id, imageUrl);
+                                    // editingReceipt.idが変更されたときだけURLを生成/取得
+                                    // useMemoを使わず、editingReceipt.idに基づいてキャッシュから取得
+                                    let imageUrl: string;
+                                    if (editingReceipt.id) {
+                                        // 既存のレシートの場合、キャッシュから取得または新規作成
+                                        const cachedUrl = imageUrlsRef.current.get(editingReceipt.id);
+                                        if (cachedUrl) {
+                                            imageUrl = cachedUrl;
+                                        } else {
+                                            imageUrl = URL.createObjectURL(editingReceipt.image);
+                                            imageUrlsRef.current.set(editingReceipt.id, imageUrl);
+                                        }
+                                    } else {
+                                        // 新規レシートの場合、一時的なキーを使用してキャッシュ
+                                        const cachedUrl = imageUrlsRef.current.get(-1);
+                                        if (cachedUrl) {
+                                            imageUrl = cachedUrl;
+                                        } else {
+                                            imageUrl = URL.createObjectURL(editingReceipt.image);
+                                            imageUrlsRef.current.set(-1, imageUrl);
+                                        }
                                     }
                                     return (
                                         <img
