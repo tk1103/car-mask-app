@@ -1302,13 +1302,11 @@ export default function Home() {
                                     return;
                                 }
 
-                                // サイズ制限を超える場合は品質を下げて再試行
+                                // サイズ制限を超える場合は品質を下げて再試行（0.1刻みで調整して再試行回数を削減）
                                 if (blob.size > maxSizeKB * 1024 && quality > minQuality) {
-                                    const newQuality = Math.max(minQuality, quality - 0.05);
-                                    console.log(`Image size ${(blob.size / 1024).toFixed(0)}KB exceeds ${maxSizeKB}KB, reducing quality to ${newQuality.toFixed(2)}`);
+                                    const newQuality = Math.max(minQuality, quality - 0.1);
                                     compressWithQuality(newQuality).then(resolve).catch(reject);
                                 } else {
-                                    console.log(`Image compressed: ${(blob.size / 1024).toFixed(0)}KB, quality: ${quality.toFixed(2)}, landscape: ${isLandscape}, aspectRatio: ${aspectRatio.toFixed(2)}`);
                                     resolve(blob);
                                 }
                             },
@@ -1397,12 +1395,12 @@ export default function Home() {
         if (!file) return;
 
         try {
-            // 【二重圧縮の防止】処理順序を最適化
-            // 1. まず元の高解像度画像を読み込む（台形補正用）
-            const originalImage = await loadImageForCorrection(file);
-
-            // 2. OCR用にインテリジェントな圧縮（長辺1200px、品質0.75-0.8、400KB以下に調整）
-            const ocrImageBlob = await compressImageIntelligently(file);
+            // 【パフォーマンス最適化】画像読み込み処理を並列化
+            // 1. 元の高解像度画像の読み込みとOCR用画像の圧縮を並列実行
+            const [originalImage, ocrImageBlob] = await Promise.all([
+                loadImageForCorrection(file),
+                compressImageIntelligently(file)
+            ]);
 
             const db = getDb();
             if (!db) {
@@ -1435,15 +1433,12 @@ export default function Home() {
             let finalImageBlob = originalImage.blob; // 元の高解像度画像をデフォルトに
             if (corners && corners.length === 4) {
                 try {
-                    console.log('Applying perspective correction with corners:', corners);
-                    console.log('Using original high-resolution image for correction:', originalImage.width, 'x', originalImage.height);
                     finalImageBlob = await applyPerspectiveCorrection(
                         originalImage.blob, // 元の高解像度画像を使用
                         corners,
                         originalImage.width,
                         originalImage.height
                     );
-                    console.log('Perspective correction applied successfully');
                 } catch (correctionError) {
                     console.warn('Failed to apply perspective correction, using original image:', correctionError);
                     // エラー時は元の高解像度画像を使用
@@ -1453,9 +1448,7 @@ export default function Home() {
             // 5. テキストの向きに基づいて画像を回転（rotation_neededに基づく）
             if (rotation_needed !== undefined && rotation_needed !== null && rotation_needed !== 0) {
                 try {
-                    console.log(`Rotating image for text orientation: rotation_needed=${rotation_needed}`);
                     finalImageBlob = await rotateImageForTextOrientation(finalImageBlob, rotation_needed);
-                    console.log('Image rotation for text orientation applied successfully');
                 } catch (rotationError) {
                     console.warn('Failed to rotate image for text orientation, using original image:', rotationError);
                     // エラー時は回転前の画像を使用
