@@ -3651,11 +3651,10 @@ export default function Home() {
                             <div className="mt-4 flex justify-center">
                                 <button
                                     onClick={handleRotateImage}
-                                    className="flex items-center gap-2 px-6 py-3 bg-custom-blue text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg font-medium"
+                                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
                                     title="画像を右に90度回転"
                                 >
-                                    <RotateCw size={20} className="text-white" />
-                                    <span className="text-base">右に90度回転</span>
+                                    <RotateCw size={24} className="text-gray-700" />
                                 </button>
                             </div>
                         </div>
