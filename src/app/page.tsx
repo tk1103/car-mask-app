@@ -3111,28 +3111,35 @@ export default function Home() {
 
             // 更新されたレシートの画像URLを強制的に再生成（リロード不要で画像を表示するため）
             if (updatedReceiptId) {
-                // 少し遅延を入れて、loadReceipts()の完了を確実に待つ
-                setTimeout(() => {
-                    const db = getDb();
-                    if (db) {
-                        db.receipts.get(updatedReceiptId).then((updatedReceipt) => {
-                            if (updatedReceipt && updatedReceipt.image) {
-                                // 古いURLがあれば削除
-                                const oldUrl = imageUrlsRef.current.get(updatedReceiptId);
-                                if (oldUrl) {
-                                    URL.revokeObjectURL(oldUrl);
-                                }
-                                // 新しい画像からURLを生成
-                                const newUrl = URL.createObjectURL(updatedReceipt.image);
-                                imageUrlsRef.current.set(updatedReceiptId, newUrl);
-                                // レシートリストを強制的に再レンダリング
-                                setReceipts(prev => [...prev]);
+                const db = getDb();
+                if (db) {
+                    try {
+                        const updatedReceipt = await db.receipts.get(updatedReceiptId);
+                        if (updatedReceipt && updatedReceipt.image) {
+                            // 古いURLがあれば削除
+                            const oldUrl = imageUrlsRef.current.get(updatedReceiptId);
+                            if (oldUrl) {
+                                URL.revokeObjectURL(oldUrl);
                             }
-                        }).catch((error) => {
-                            console.error('Failed to reload receipt image:', error);
-                        });
+                            // 新しい画像からURLを生成
+                            const newUrl = URL.createObjectURL(updatedReceipt.image);
+                            imageUrlsRef.current.set(updatedReceiptId, newUrl);
+
+                            // レシートリストを強制的に再レンダリング（更新されたレシートを新しい参照で置き換え）
+                            setReceipts(prev => {
+                                return prev.map(receipt => {
+                                    if (receipt.id === updatedReceiptId) {
+                                        // 更新されたレシートを新しいオブジェクト参照で返す
+                                        return { ...updatedReceipt };
+                                    }
+                                    return receipt;
+                                });
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Failed to reload receipt image:', error);
                     }
-                }, 100);
+                }
             }
         } catch (error) {
             console.error('Failed to update receipt:', error);
@@ -4350,9 +4357,12 @@ export default function Home() {
                                                     imageUrlsRef.current.set(receipt.id, imageUrl);
                                                 }
 
+                                                // 画像のサイズをkeyに含めて、画像が更新されたときに強制的に再レンダリング
+                                                const imageKey = `${receipt.id}-${receipt.image.size}`;
+
                                                 return (
                                                     <div
-                                                        key={receipt.id}
+                                                        key={imageKey}
                                                         className="relative bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col"
                                                         style={{ aspectRatio: '3/4' }}
                                                     >
@@ -4480,9 +4490,12 @@ export default function Home() {
                                                 imageUrlsRef.current.set(receipt.id, imageUrl);
                                             }
 
+                                            // 画像のサイズをkeyに含めて、画像が更新されたときに強制的に再レンダリング
+                                            const imageKey = `${receipt.id}-${receipt.image.size}`;
+
                                             return (
                                                 <div
-                                                    key={receipt.id}
+                                                    key={imageKey}
                                                     className="relative bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col"
                                                     style={{ aspectRatio: '3/4' }}
                                                 >
