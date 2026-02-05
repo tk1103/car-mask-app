@@ -3616,33 +3616,34 @@ export default function Home() {
                                     );
                                 })()}
                             </div>
-                            {/* 回転ボタン */}
-                            <div className="mt-4 flex justify-center">
-                                <button
-                                    onClick={handleRotateImage}
-                                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
-                                    title="画像を90度回転"
-                                >
-                                    <RotateCw size={20} className="text-gray-700" />
-                                    <span className="text-sm text-gray-700">回転</span>
-                                </button>
-                            </div>
                         </div>
 
                         {/* 右側: 編集フォーム */}
                         <div className="w-full md:w-1/2 flex flex-col max-h-[90vh] overflow-y-auto">
                             <div className="sticky top-0 bg-white border-b border-gray-300 px-6 py-4 flex items-center justify-between">
                                 <h2 className="text-xl font-bold text-gray-900">レシートを編集</h2>
-                                <button
-                                    onClick={() => {
-                                        setEditingReceipt(null);
-                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
-                                        setImageRotation(0);
-                                    }}
-                                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                                >
-                                    <X size={24} className="text-gray-500" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    {/* 回転ボタン */}
+                                    <button
+                                        onClick={handleRotateImage}
+                                        className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                                        title="画像を90度回転"
+                                    >
+                                        <RotateCw size={18} className="text-gray-700" />
+                                        <span className="text-sm text-gray-700">回転</span>
+                                    </button>
+                                    {/* 閉じるボタン */}
+                                    <button
+                                        onClick={() => {
+                                            setEditingReceipt(null);
+                                            setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
+                                            setImageRotation(0);
+                                        }}
+                                        className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                    >
+                                        <X size={24} className="text-gray-500" />
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="p-6 space-y-4 flex-1">
