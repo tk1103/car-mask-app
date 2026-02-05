@@ -1514,8 +1514,6 @@ export default function Home() {
             setShowSaveSuccess(true);
             setTimeout(() => {
                 setShowSaveSuccess(false);
-                // 保存完了後、編集画面を閉じてレシート一覧に戻る
-                setEditingReceipt(null);
             }, 3000); // 3秒間表示
 
             await loadReceipts();
@@ -2565,8 +2563,6 @@ export default function Home() {
                     setShowSaveSuccess(true);
                     setTimeout(() => {
                         setShowSaveSuccess(false);
-                        // 保存完了後、編集画面を閉じてレシート一覧に戻る
-                        setEditingReceipt(null);
                     }, 3000); // 3秒間表示
 
                     await loadReceipts();
@@ -2928,8 +2924,6 @@ export default function Home() {
                     setShowSaveSuccess(true);
                     setTimeout(() => {
                         setShowSaveSuccess(false);
-                        // 保存完了後、編集画面を閉じてレシート一覧に戻る
-                        setEditingReceipt(null);
                     }, 3000); // 3秒間表示
 
                     await loadReceipts();
@@ -3069,8 +3063,6 @@ export default function Home() {
             setShowSaveSuccess(true);
             setTimeout(() => {
                 setShowSaveSuccess(false);
-                // 保存完了後、編集画面を閉じてレシート一覧に戻る
-                setEditingReceipt(null);
             }, 3000); // 3秒間表示
 
             await loadReceipts();
