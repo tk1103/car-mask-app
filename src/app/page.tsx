@@ -235,6 +235,9 @@ export default function Home() {
 
             localStorage.setItem('apiUsageCount', JSON.stringify(usage));
             setApiUsageCount(usage);
+
+            // コンソールに使用回数を出力
+            console.log(`[API Usage] 本日のAPI呼び出し回数: ${usage.count}/20回`);
         } catch (error) {
             console.error('Failed to increment API usage count:', error);
         }
@@ -1167,13 +1170,29 @@ export default function Home() {
             const formData = new FormData();
             formData.append('image', imageBlob, 'receipt.jpg');
 
+            // API呼び出し開始時刻を記録
+            const startTime = performance.now();
+            console.log('[Gemini API] Request Started');
+            console.log(`[Gemini API] Image size: ${(imageBlob.size / 1024).toFixed(2)} KB`);
+
             // APIエンドポイントにリクエスト
             const response = await fetch('/api/ocr', {
                 method: 'POST',
                 body: formData,
             });
 
+            // API呼び出し終了時刻を記録
+            const endTime = performance.now();
+            const duration = Math.round(endTime - startTime);
+
             if (!response.ok) {
+                // API呼び出し失敗時のログ出力
+                const endTime = performance.now();
+                const duration = Math.round(endTime - startTime);
+                console.error(`[Gemini API] Request Failed`);
+                console.error(`[Gemini API] Duration: ${duration}ms`);
+                console.error(`[Gemini API] Status: ${response.status} ${response.statusText}`);
+
                 // エラーレスポンスを取得（空の場合も考慮）
                 let errorData: any = {};
                 let responseText = '';
@@ -1181,6 +1200,7 @@ export default function Home() {
                 try {
                     // レスポンスボディをテキストとして取得
                     responseText = await response.text();
+                    console.error('[Gemini API] Error response text:', responseText);
                     console.log('Raw error response text:', responseText);
 
                     if (responseText && responseText.trim() !== '') {
@@ -1284,6 +1304,18 @@ export default function Home() {
             }
 
             const data = await response.json();
+
+            // API呼び出し成功時のログ出力
+            console.log(`[Gemini API] Request Completed Successfully`);
+            console.log(`[Gemini API] Duration: ${duration}ms`);
+            console.log(`[Gemini API] Status: ${response.status} ${response.statusText}`);
+            console.log(`[Gemini API] Response data:`, {
+                vendor: data.vendor,
+                amount: data.amount,
+                currency: data.currency,
+                date: data.date,
+                time: data.time
+            });
             console.log('OCR API response:', data);
 
             // APIリクエスト成功時にカウントを増やす
@@ -3747,10 +3779,10 @@ export default function Home() {
                                             <div className="flex items-center justify-between mb-2">
                                                 <span className="text-sm font-medium text-gray-700">本日の使用回数</span>
                                                 <span className={`text-lg font-bold ${currentCount >= 20
-                                                        ? 'text-red-600'
-                                                        : currentCount >= 15
-                                                            ? 'text-yellow-600'
-                                                            : 'text-gray-900'
+                                                    ? 'text-red-600'
+                                                    : currentCount >= 15
+                                                        ? 'text-yellow-600'
+                                                        : 'text-gray-900'
                                                     }`}>
                                                     {currentCount}/20回
                                                 </span>
@@ -3759,10 +3791,10 @@ export default function Home() {
                                             <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
                                                 <div
                                                     className={`h-full transition-all duration-300 ${currentCount >= 20
-                                                            ? 'bg-red-500'
-                                                            : currentCount >= 15
-                                                                ? 'bg-yellow-500'
-                                                                : 'bg-blue-500'
+                                                        ? 'bg-red-500'
+                                                        : currentCount >= 15
+                                                            ? 'bg-yellow-500'
+                                                            : 'bg-blue-500'
                                                         }`}
                                                     style={{ width: `${Math.min((currentCount / 20) * 100, 100)}%` }}
                                                 />
@@ -3792,6 +3824,9 @@ export default function Home() {
                                             </p>
                                             <p className="text-xs text-gray-500 mt-1">
                                                 最終更新: {currentDate}
+                                            </p>
+                                            <p className="text-xs text-gray-400 mt-2 italic">
+                                                💡 詳細なログはブラウザの開発者ツール（F12）のコンソールで確認できます。
                                             </p>
                                         </div>
                                     </div>
