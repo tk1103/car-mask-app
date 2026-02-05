@@ -42,7 +42,12 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        console.log('API key found, length:', apiKey.length, 'starts with:', apiKey.substring(0, 10) + '...');
+        // 本番環境ではAPIキーの情報をログに出力しない（セキュリティのため）
+        if (process.env.NODE_ENV === 'development') {
+            console.log('API key found, length:', apiKey.length, 'starts with:', apiKey.substring(0, 10) + '...');
+        } else {
+            console.log('API key found and configured');
+        }
 
         const formData = await request.formData();
         const imageFile = formData.get('image') as File | null;
@@ -697,12 +702,18 @@ RETURN:
             console.error('Error properties:', Object.getOwnPropertyNames(error));
         }
 
-        // APIキーの状態を再確認
-        console.error('API Key check at error time:', {
-            hasApiKey: !!process.env.GEMINI_API_KEY,
-            apiKeyLength: process.env.GEMINI_API_KEY?.length || 0,
-            apiKeyPrefix: process.env.GEMINI_API_KEY?.substring(0, 10) || 'N/A'
-        });
+        // APIキーの状態を再確認（本番環境では詳細を出力しない）
+        if (process.env.NODE_ENV === 'development') {
+            console.error('API Key check at error time:', {
+                hasApiKey: !!process.env.GEMINI_API_KEY,
+                apiKeyLength: process.env.GEMINI_API_KEY?.length || 0,
+                apiKeyPrefix: process.env.GEMINI_API_KEY?.substring(0, 10) || 'N/A'
+            });
+        } else {
+            console.error('API Key check at error time:', {
+                hasApiKey: !!process.env.GEMINI_API_KEY
+            });
+        }
 
         console.error('=== OCR API ERROR END ===');
 
