@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { getDb, Receipt, ExpenseCategory } from '../lib/db';
-import { Camera, X, Edit2, Loader2, Download, ChevronDown, RotateCw } from 'lucide-react';
+import { Camera, X, Edit2, Loader2, Download, ChevronDown, RotateCw, CheckCircle } from 'lucide-react';
 import Script from 'next/script';
 
 // OpenCV.jsの型定義
@@ -76,6 +76,8 @@ export default function Home() {
     const [error, setError] = useState<string | null>(null);
     const [isOcrProcessing, setIsOcrProcessing] = useState(false);
     const [ocrWarning, setOcrWarning] = useState<string | null>(null);
+    const [showFlash, setShowFlash] = useState(false); // 撮影時のフラッシュアニメーション
+    const [showSaveSuccess, setShowSaveSuccess] = useState(false); // 保存完了メッセージ
     const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
     const [editForm, setEditForm] = useState<{
         vendor: string;
@@ -1507,6 +1509,15 @@ export default function Home() {
             };
 
             await db.receipts.add(receipt);
+
+            // 保存完了メッセージを表示
+            setShowSaveSuccess(true);
+            setTimeout(() => {
+                setShowSaveSuccess(false);
+                // 保存完了後、編集画面を閉じてレシート一覧に戻る
+                setEditingReceipt(null);
+            }, 3000); // 3秒間表示
+
             await loadReceipts();
         } catch (error) {
             console.error('Failed to save receipt:', error);
@@ -2434,6 +2445,12 @@ export default function Home() {
 
         stopCamera();
 
+        // 撮影直後にフラッシュアニメーションを表示
+        setShowFlash(true);
+        setTimeout(() => {
+            setShowFlash(false);
+        }, 300); // フラッシュアニメーションの時間（300ms）
+
         // OCR処理を開始
         setIsOcrProcessing(true);
         setOcrWarning(null);
@@ -2543,6 +2560,15 @@ export default function Home() {
                     };
 
                     await db.receipts.add(receipt);
+
+                    // 保存完了メッセージを表示
+                    setShowSaveSuccess(true);
+                    setTimeout(() => {
+                        setShowSaveSuccess(false);
+                        // 保存完了後、編集画面を閉じてレシート一覧に戻る
+                        setEditingReceipt(null);
+                    }, 3000); // 3秒間表示
+
                     await loadReceipts();
                 } catch (error) {
                     console.error('Failed to save receipt:', error);
@@ -2765,6 +2791,10 @@ export default function Home() {
 
         stopCamera();
 
+        // 撮影時のフラッシュアニメーション
+        setShowFlash(true);
+        setTimeout(() => setShowFlash(false), 300); // フラッシュアニメーションの時間（300ms）
+
         // プレビュー画像を表示し、自動的にOCR解析を開始
         canvas.toBlob(async (blob) => {
             if (blob) {
@@ -2893,6 +2923,15 @@ export default function Home() {
                     };
 
                     await db.receipts.add(receipt);
+
+                    // 保存完了メッセージを表示
+                    setShowSaveSuccess(true);
+                    setTimeout(() => {
+                        setShowSaveSuccess(false);
+                        // 保存完了後、編集画面を閉じてレシート一覧に戻る
+                        setEditingReceipt(null);
+                    }, 3000); // 3秒間表示
+
                     await loadReceipts();
 
                     // プレビューをクリア
@@ -3025,6 +3064,15 @@ export default function Home() {
             };
 
             await db.receipts.add(receipt);
+
+            // 保存完了メッセージを表示
+            setShowSaveSuccess(true);
+            setTimeout(() => {
+                setShowSaveSuccess(false);
+                // 保存完了後、編集画面を閉じてレシート一覧に戻る
+                setEditingReceipt(null);
+            }, 3000); // 3秒間表示
+
             await loadReceipts();
 
             // プレビューをクリア（URLはuseEffectで自動的に解放される）
@@ -3094,6 +3142,12 @@ export default function Home() {
                 }
                 imageUrlsRef.current.delete(updatedReceiptId);
             }
+
+            // 保存完了メッセージを表示
+            setShowSaveSuccess(true);
+            setTimeout(() => {
+                setShowSaveSuccess(false);
+            }, 3000); // 3秒間表示
 
             setEditingReceipt(null);
             setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
@@ -3440,18 +3494,39 @@ export default function Home() {
                 </div>
             </header>
 
+            {/* 撮影時のフラッシュアニメーション */}
+            {showFlash && (
+                <div
+                    className="fixed inset-0 z-60 bg-white pointer-events-none"
+                    style={{
+                        animation: 'flash 0.3s ease-out'
+                    }}
+                />
+            )}
+
             {/* OCR処理中のインジケーター（スキャンアニメーション付き） */}
             {isOcrProcessing && (
                 <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
-                    <div className="bg-white rounded-lg p-6 flex flex-col items-center gap-4 relative overflow-hidden w-full max-w-sm mx-4">
+                    <div className="bg-white rounded-lg p-8 flex flex-col items-center gap-4 relative overflow-hidden w-full max-w-sm mx-4 shadow-xl">
                         {/* スキャンアニメーション（切り抜いた範囲がスキャンされるような光るラインが上下に動く） */}
                         <div className="absolute inset-0 overflow-hidden rounded-lg">
                             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-600/40 to-transparent animate-scan"></div>
                             {/* 追加のスキャンライン効果 */}
                             <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-600/20 to-transparent animate-scan" style={{ animationDelay: '0.5s' }}></div>
                         </div>
-                        <Loader2 className="animate-spin text-custom-blue relative z-10" size={32} />
-                        <p className="text-gray-900 font-medium relative z-10">画像を圧縮・送信中...</p>
+                        <Loader2 className="animate-spin text-custom-blue relative z-10" size={40} />
+                        <p className="text-gray-900 font-semibold text-lg relative z-10">レシートを解析中...</p>
+                        <p className="text-gray-600 text-sm relative z-10">しばらくお待ちください</p>
+                    </div>
+                </div>
+            )}
+
+            {/* 保存完了メッセージ */}
+            {showSaveSuccess && (
+                <div className="fixed inset-0 z-60 bg-black/50 flex items-center justify-center pointer-events-none">
+                    <div className="bg-white rounded-lg p-8 flex flex-col items-center gap-4 shadow-2xl animate-scale-in">
+                        <CheckCircle className="text-green-500" size={64} />
+                        <p className="text-gray-900 font-bold text-2xl">保存完了！</p>
                     </div>
                 </div>
             )}
