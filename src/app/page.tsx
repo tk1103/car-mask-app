@@ -1252,9 +1252,30 @@ export default function Home() {
             img.onload = () => {
                 let width = img.width;
                 let height = img.height;
+                const isLandscape = width > height;
+                const aspectRatio = width / height;
 
-                // 長辺を1200pxにリサイズ（解析速度向上のため最適化）
-                const maxDimension = 1200;
+                // 横長画像（スマホ横向き）の場合、より高い解像度を維持
+                // 縦長画像: 長辺1200px、横長画像: 長辺1600px（文字読み取り精度向上のため）
+                let maxDimension: number;
+                let maxSizeKB: number;
+                let minQuality: number;
+                let initialQuality: number;
+
+                if (isLandscape && aspectRatio > 1.3) {
+                    // 横長画像（アスペクト比1.3以上）の場合、より高品質に
+                    maxDimension = 1600;
+                    maxSizeKB = 400; // 横長画像はサイズ制限を緩和
+                    minQuality = 0.80; // 最低品質を高く設定
+                    initialQuality = 0.90; // 初期品質を高く設定
+                } else {
+                    // 縦長画像または正方形の場合
+                    maxDimension = 1200;
+                    maxSizeKB = 200;
+                    minQuality = 0.75;
+                    initialQuality = 0.85;
+                }
+
                 if (width > height) {
                     if (width > maxDimension) {
                         height = (height * maxDimension) / width;
@@ -1271,7 +1292,7 @@ export default function Home() {
                 canvas.height = height;
                 ctx.drawImage(img, 0, 0, width, height);
 
-                // 品質を段階的に調整して200KB程度に抑える
+                // 品質を段階的に調整
                 const compressWithQuality = (quality: number): Promise<Blob> => {
                     return new Promise((resolve, reject) => {
                         canvas.toBlob(
@@ -1281,13 +1302,13 @@ export default function Home() {
                                     return;
                                 }
 
-                                // 200KB超の場合は品質を下げて再試行（解析速度向上のため200KB以下を目標）
-                                if (blob.size > 200 * 1024 && quality > 0.75) {
-                                    const newQuality = Math.max(0.75, quality - 0.05);
-                                    console.log(`Image size ${(blob.size / 1024).toFixed(0)}KB exceeds 200KB, reducing quality to ${newQuality}`);
+                                // サイズ制限を超える場合は品質を下げて再試行
+                                if (blob.size > maxSizeKB * 1024 && quality > minQuality) {
+                                    const newQuality = Math.max(minQuality, quality - 0.05);
+                                    console.log(`Image size ${(blob.size / 1024).toFixed(0)}KB exceeds ${maxSizeKB}KB, reducing quality to ${newQuality.toFixed(2)}`);
                                     compressWithQuality(newQuality).then(resolve).catch(reject);
                                 } else {
-                                    console.log(`Image compressed: ${(blob.size / 1024).toFixed(0)}KB, quality: ${quality}`);
+                                    console.log(`Image compressed: ${(blob.size / 1024).toFixed(0)}KB, quality: ${quality.toFixed(2)}, landscape: ${isLandscape}, aspectRatio: ${aspectRatio.toFixed(2)}`);
                                     resolve(blob);
                                 }
                             },
@@ -1297,8 +1318,8 @@ export default function Home() {
                     });
                 };
 
-                // 初期品質0.85から開始（解析速度と品質のバランスを最適化）
-                compressWithQuality(0.85)
+                // 初期品質から開始
+                compressWithQuality(initialQuality)
                     .then((blob) => {
                         if (objectUrl) {
                             URL.revokeObjectURL(objectUrl);
