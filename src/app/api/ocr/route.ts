@@ -330,22 +330,26 @@ H. CORNERS:
    - Normalized coordinates (0-1000 range)
    - These should mark the physical edges of the receipt paper
 
-I. ROTATION_NEEDED (CRITICAL - TEXT ORIENTATION DETECTION):
+I. ROTATION_NEEDED (CONSERVATIVE - TEXT ORIENTATION DETECTION):
    - Analyze the orientation of text lines in the receipt image, specifically focusing on:
      * Price amounts (numbers with currency symbols)
      * Item names and descriptions
      * Text that should be read horizontally (left to right)
    - Determine how many 90-degree clockwise rotations the image needs to make the text horizontal and readable
    - Return 'rotation_needed' as a number:
-     * 0: Text is already horizontal and readable (no rotation needed)
+     * 0: Text is already horizontal and readable (no rotation needed) - DEFAULT if uncertain
      * 1: Image is rotated 90 degrees clockwise (needs 270-degree counter-clockwise rotation to correct)
      * 2: Image is rotated 180 degrees (upside down, needs 180-degree rotation to correct)
      * 3: Image is rotated 90 degrees counter-clockwise (needs 90-degree clockwise rotation to correct)
+   - IMPORTANT: Be conservative - if you are uncertain about the rotation, return 0 (no rotation)
    - IMPORTANT: Base your judgment on the actual text orientation, NOT on the physical shape of the receipt or logo orientation
+   - IMPORTANT: Only return 1, 2, or 3 if you are VERY CONFIDENT that the text is clearly rotated
+   - If the text orientation is ambiguous or unclear, return 0 to avoid incorrect automatic rotation
    - Example: If a long receipt is photographed sideways but the prices are readable horizontally, return 0
-   - Example: If prices appear vertically (rotated 90 degrees), return 1
-   - Example: If prices appear upside down, return 2
-   - Example: If prices appear rotated 90 degrees counter-clockwise, return 3
+   - Example: If prices appear clearly vertically (rotated 90 degrees) and you are confident, return 1
+   - Example: If prices appear clearly upside down and you are confident, return 2
+   - Example: If prices appear clearly rotated 90 degrees counter-clockwise and you are confident, return 3
+   - When in doubt, return 0 (no rotation) - the user can manually rotate if needed
 
 QUALITY REQUIREMENTS:
 - Read every character carefully, especially numbers
