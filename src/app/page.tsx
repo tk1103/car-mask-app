@@ -2254,34 +2254,37 @@ export default function Home() {
                             console.log('[Detection] Setting detected corners:', finalCorners, 'frame:', frameCount, 'centroidStable:', isCentroidStable, 'stableCount:', stableFrameCountRef.current);
                         }
 
-                        // 自動キャプチャ条件: 4頂点が検出され、重心の移動が5px以内で10フレーム続いたら0.3秒後に自動キャプチャ
-                        if (isCentroidStable && stableFrameCountRef.current >= STABLE_FRAME_THRESHOLD) {
-                            const now = Date.now();
-                            if (stableDetectionStartRef.current === null) {
-                                stableDetectionStartRef.current = now;
-                                if (frameCount % 30 === 0) {
-                                    console.log('[Detection] Stable detection started, waiting 0.3s for auto-capture');
-                                }
-                            } else if (now - stableDetectionStartRef.current >= 300) {
-                                // 0.3秒間安定していたら自動キャプチャ
-                                console.log('[Detection] Auto capture triggered after 0.3s stable detection');
-                                stableDetectionStartRef.current = null;
-                                stableFrameCountRef.current = 0;
-                                cornersHistoryRef.current = [];
-                                centroidHistoryRef.current = [];
-                                // 検出ループを一時停止してからキャプチャ
-                                if (detectionAnimationFrameRef.current !== null) {
-                                    cancelAnimationFrame(detectionAnimationFrameRef.current);
-                                    detectionAnimationFrameRef.current = null;
-                                }
-                                // capturePhoto関数を呼び出す（detectedCornersは既に設定されている）
-                                capturePhoto();
-                                return;
-                            }
-                        } else {
-                            // 安定条件を満たしていない場合はリセット
-                            stableDetectionStartRef.current = null;
-                        }
+                        // 自動キャプチャ機能は無効化（ユーザーが手動で撮影ボタンを押す必要がある）
+                        // 自動キャプチャ条件のチェックをコメントアウト
+                        // if (isCentroidStable && stableFrameCountRef.current >= STABLE_FRAME_THRESHOLD) {
+                        //     const now = Date.now();
+                        //     if (stableDetectionStartRef.current === null) {
+                        //         stableDetectionStartRef.current = now;
+                        //         if (frameCount % 30 === 0) {
+                        //             console.log('[Detection] Stable detection started, waiting 0.3s for auto-capture');
+                        //         }
+                        //     } else if (now - stableDetectionStartRef.current >= 300) {
+                        //         // 0.3秒間安定していたら自動キャプチャ
+                        //         console.log('[Detection] Auto capture triggered after 0.3s stable detection');
+                        //         stableDetectionStartRef.current = null;
+                        //         stableFrameCountRef.current = 0;
+                        //         cornersHistoryRef.current = [];
+                        //         centroidHistoryRef.current = [];
+                        //         // 検出ループを一時停止してからキャプチャ
+                        //         if (detectionAnimationFrameRef.current !== null) {
+                        //             cancelAnimationFrame(detectionAnimationFrameRef.current);
+                        //             detectionAnimationFrameRef.current = null;
+                        //         }
+                        //         // capturePhoto関数を呼び出す（detectedCornersは既に設定されている）
+                        //         capturePhoto();
+                        //         return;
+                        //     }
+                        // } else {
+                        //     // 安定条件を満たしていない場合はリセット
+                        //     stableDetectionStartRef.current = null;
+                        // }
+
+                        // 自動キャプチャを無効化したため、安定検出のタイマーもリセットしない（検出表示は継続）
                     } else {
                         // レシートが検知できない場合
                         stableFrameCountRef.current = 0;
