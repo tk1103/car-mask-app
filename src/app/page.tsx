@@ -76,6 +76,7 @@ export default function Home() {
     const [error, setError] = useState<string | null>(null);
     const [isOcrProcessing, setIsOcrProcessing] = useState(false);
     const [ocrWarning, setOcrWarning] = useState<string | null>(null);
+    const [ocrErrorType, setOcrErrorType] = useState<'quota' | 'service_unavailable' | 'auth' | 'other' | null>(null); // エラーの種類
     const [showFlash, setShowFlash] = useState(false); // 撮影時のフラッシュアニメーション
     const [showSaveSuccess, setShowSaveSuccess] = useState(false); // 保存完了メッセージ
     const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
@@ -1093,6 +1094,7 @@ export default function Home() {
             if (!skipStateUpdate) {
                 setIsOcrProcessing(true);
                 setOcrWarning(null);
+                setOcrErrorType(null);
             }
 
             // FormDataを作成して画像を送信
@@ -1148,10 +1150,14 @@ export default function Home() {
                     errorData.message ||
                     errorData.error;
 
+                // エラーの種類を判定
+                let errorType: 'quota' | 'service_unavailable' | 'auth' | 'other' = 'other';
+
                 // エラーデータが空の場合、ステータスコードから推測
                 if (!errorMessage || Object.keys(errorData).length === 0) {
                     if (response.status === 503) {
                         errorMessage = 'モデルが過負荷のため、しばらく待ってから再度お試しください。';
+                        errorType = 'service_unavailable';
                     } else if (response.status === 429) {
                         // クォータ超過エラーの詳細を取得
                         const quotaLimit = errorData.quotaLimit || '20';
@@ -1159,24 +1165,53 @@ export default function Home() {
                         if (retryAfter) {
                             const minutes = Math.floor(retryAfter / 60);
                             const seconds = retryAfter % 60;
-                            errorMessage = `無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。${minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}後に再度お試しください。`;
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n${minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}後に再度お試しください。`;
                         } else {
-                            errorMessage = `無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。明日に再度お試しください。`;
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n明日に再度お試しください。`;
                         }
+                        errorType = 'quota';
                     } else if (response.status === 401 || response.status === 403) {
                         errorMessage = 'APIキーの設定を確認してください。';
+                        errorType = 'auth';
                     } else if (response.status === 500) {
                         errorMessage = 'サーバーエラーが発生しました。APIキーの設定を確認してください。';
+                        errorType = 'auth';
                     } else if (response.status === 404) {
                         errorMessage = 'APIエンドポイントが見つかりません';
+                        errorType = 'other';
                     } else {
                         errorMessage = 'OCR処理に失敗しました';
+                        errorType = 'other';
+                    }
+                } else {
+                    // エラーデータからエラーの種類を判定
+                    if (errorData.type === 'QuotaExceededError' || response.status === 429) {
+                        errorType = 'quota';
+                        const quotaLimit = errorData.quotaLimit || '20';
+                        const retryAfter = errorData.retryAfter;
+                        if (retryAfter) {
+                            const minutes = Math.floor(retryAfter / 60);
+                            const seconds = retryAfter % 60;
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n${minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}後に再度お試しください。`;
+                        } else {
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n明日に再度お試しください。`;
+                        }
+                    } else if (errorData.type === 'ServiceUnavailableError' || response.status === 503) {
+                        errorType = 'service_unavailable';
+                    } else if (errorData.type === 'AuthenticationError' || response.status === 401 || response.status === 403) {
+                        errorType = 'auth';
                     }
                 }
 
                 // ユーザーに警告を表示
+                setOcrErrorType(errorType);
                 setOcrWarning(errorMessage);
-                setTimeout(() => setOcrWarning(null), 10000); // 10秒後に警告を消す
+                // 回数制限エラーの場合は表示時間を延長（30秒）
+                const displayTime = errorType === 'quota' ? 30000 : 10000;
+                setTimeout(() => {
+                    setOcrWarning(null);
+                    setOcrErrorType(null);
+                }, displayTime);
 
                 // 詳細なエラーメッセージをスロー
                 throw new Error(`OCR API error (${response.status}): ${response.statusText} - ${errorMessage}`);
@@ -1218,8 +1253,24 @@ export default function Home() {
 
             // エラーメッセージをユーザーに表示
             if (!skipStateUpdate) {
+                // エラーメッセージからエラーの種類を推測
+                const lowerErrorMessage = errorMessage.toLowerCase();
+                let errorType: 'quota' | 'service_unavailable' | 'auth' | 'other' = 'other';
+                if (lowerErrorMessage.includes('429') || lowerErrorMessage.includes('quota') || lowerErrorMessage.includes('rate limit')) {
+                    errorType = 'quota';
+                } else if (lowerErrorMessage.includes('503') || lowerErrorMessage.includes('overloaded') || lowerErrorMessage.includes('service unavailable')) {
+                    errorType = 'service_unavailable';
+                } else if (lowerErrorMessage.includes('api key') || lowerErrorMessage.includes('auth') || lowerErrorMessage.includes('unauthorized')) {
+                    errorType = 'auth';
+                }
+
+                setOcrErrorType(errorType);
                 setOcrWarning(`OCR処理に失敗しました: ${errorMessage}`);
-                setTimeout(() => setOcrWarning(null), 10000);
+                const displayTime = errorType === 'quota' ? 30000 : 10000;
+                setTimeout(() => {
+                    setOcrWarning(null);
+                    setOcrErrorType(null);
+                }, displayTime);
             }
 
             // エラー情報を含めて返す
@@ -2452,6 +2503,7 @@ export default function Home() {
         // OCR処理を開始
         setIsOcrProcessing(true);
         setOcrWarning(null);
+        setOcrErrorType(null);
 
         try {
             canvas.toBlob(async (blob) => {
@@ -2805,6 +2857,7 @@ export default function Home() {
                 try {
                     setIsOcrProcessing(true);
                     setOcrWarning(null);
+                    setOcrErrorType(null);
 
                     // OCR用にインテリジェントな圧縮
                     const ocrImageBlob = await compressImageIntelligently(
@@ -2950,6 +3003,7 @@ export default function Home() {
 
         setIsOcrProcessing(true);
         setOcrWarning(null);
+        setOcrErrorType(null);
 
         try {
             const originalBlob = previewImage.blob;
@@ -3525,19 +3579,58 @@ export default function Home() {
 
             {/* OCR警告メッセージ */}
             {ocrWarning && (
-                <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-gray-100 border border-gray-300 rounded-lg shadow-lg p-4 max-w-md mx-4">
+                <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 rounded-lg shadow-lg p-4 max-w-md mx-4 ${ocrErrorType === 'quota'
+                        ? 'bg-red-50 border-2 border-red-500'
+                        : ocrErrorType === 'service_unavailable'
+                            ? 'bg-yellow-50 border-2 border-yellow-500'
+                            : ocrErrorType === 'auth'
+                                ? 'bg-orange-50 border-2 border-orange-500'
+                                : 'bg-gray-100 border border-gray-300'
+                    }`}>
                     <div className="flex items-start gap-3">
                         <div className="flex-shrink-0">
-                            <svg className="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                            </svg>
+                            {ocrErrorType === 'quota' ? (
+                                <svg className="w-6 h-6 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                </svg>
+                            ) : ocrErrorType === 'service_unavailable' ? (
+                                <svg className="w-6 h-6 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                            ) : (
+                                <svg className="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                            )}
                         </div>
                         <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-700">{ocrWarning}</p>
+                            {ocrErrorType === 'quota' && (
+                                <div className="mb-2">
+                                    <p className="text-sm font-bold text-red-800">APIの利用制限に達しました</p>
+                                </div>
+                            )}
+                            <p className={`text-sm font-medium whitespace-pre-line ${ocrErrorType === 'quota'
+                                    ? 'text-red-700'
+                                    : ocrErrorType === 'service_unavailable'
+                                        ? 'text-yellow-700'
+                                        : ocrErrorType === 'auth'
+                                            ? 'text-orange-700'
+                                            : 'text-gray-700'
+                                }`}>{ocrWarning}</p>
                         </div>
                         <button
-                            onClick={() => setOcrWarning(null)}
-                            className="flex-shrink-0 text-gray-500 hover:text-gray-700"
+                            onClick={() => {
+                                setOcrWarning(null);
+                                setOcrErrorType(null);
+                            }}
+                            className={`flex-shrink-0 hover:opacity-70 ${ocrErrorType === 'quota'
+                                    ? 'text-red-600'
+                                    : ocrErrorType === 'service_unavailable'
+                                        ? 'text-yellow-600'
+                                        : ocrErrorType === 'auth'
+                                            ? 'text-orange-600'
+                                            : 'text-gray-500'
+                                }`}
                         >
                             <X size={18} />
                         </button>
