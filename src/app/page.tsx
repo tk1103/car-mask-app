@@ -178,16 +178,6 @@ export default function Home() {
         }
     }, []);
 
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            loadReceipts();
-            // API使用回数をローカルストレージから読み込む
-            loadApiUsageCount();
-        } else {
-            setIsLoading(false);
-        }
-    }, [loadReceipts]);
-
     // API使用回数をローカルストレージから読み込む
     const loadApiUsageCount = useCallback(() => {
         if (typeof window === 'undefined') return;
@@ -249,6 +239,16 @@ export default function Home() {
             console.error('Failed to increment API usage count:', error);
         }
     }, []);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            loadReceipts();
+            // API使用回数をローカルストレージから読み込む
+            loadApiUsageCount();
+        } else {
+            setIsLoading(false);
+        }
+    }, [loadReceipts, loadApiUsageCount]);
 
     // 合計金額を計算（通貨ごとに分けて）
     const totalAmountByCurrency = receipts.reduce((acc, receipt) => {
@@ -3566,10 +3566,10 @@ export default function Home() {
                             <button
                                 onClick={() => setShowApiUsageModal(true)}
                                 className={`p-1.5 rounded-full transition-colors ${apiUsageCount && apiUsageCount.count >= 20
-                                        ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                                        : apiUsageCount && apiUsageCount.count >= 15
-                                            ? 'bg-yellow-100 text-yellow-600 hover:bg-yellow-200'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                                    : apiUsageCount && apiUsageCount.count >= 15
+                                        ? 'bg-yellow-100 text-yellow-600 hover:bg-yellow-200'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                     }`}
                                 title="API使用状況を確認"
                             >
@@ -3736,62 +3736,67 @@ export default function Home() {
                             </button>
                         </div>
                         <div className="px-6 py-6">
-                            {apiUsageCount ? (
-                                <div className="space-y-4">
-                                    <div>
-                                        <div className="flex items-center justify-between mb-2">
-                                            <span className="text-sm font-medium text-gray-700">本日の使用回数</span>
-                                            <span className={`text-lg font-bold ${apiUsageCount.count >= 20
-                                                    ? 'text-red-600'
-                                                    : apiUsageCount.count >= 15
-                                                        ? 'text-yellow-600'
-                                                        : 'text-gray-900'
-                                                }`}>
-                                                {apiUsageCount.count}/20回
-                                            </span>
+                            {(() => {
+                                // モーダルが開いた時に最新の使用回数を読み込む
+                                const currentCount = apiUsageCount?.count ?? 0;
+                                const currentDate = apiUsageCount?.date ?? new Date().toISOString().split('T')[0];
+
+                                return (
+                                    <div className="space-y-4">
+                                        <div>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className="text-sm font-medium text-gray-700">本日の使用回数</span>
+                                                <span className={`text-lg font-bold ${currentCount >= 20
+                                                        ? 'text-red-600'
+                                                        : currentCount >= 15
+                                                            ? 'text-yellow-600'
+                                                            : 'text-gray-900'
+                                                    }`}>
+                                                    {currentCount}/20回
+                                                </span>
+                                            </div>
+                                            {/* プログレスバー */}
+                                            <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                                                <div
+                                                    className={`h-full transition-all duration-300 ${currentCount >= 20
+                                                            ? 'bg-red-500'
+                                                            : currentCount >= 15
+                                                                ? 'bg-yellow-500'
+                                                                : 'bg-blue-500'
+                                                        }`}
+                                                    style={{ width: `${Math.min((currentCount / 20) * 100, 100)}%` }}
+                                                />
+                                            </div>
                                         </div>
-                                        {/* プログレスバー */}
-                                        <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                                            <div
-                                                className={`h-full transition-all duration-300 ${apiUsageCount.count >= 20
-                                                        ? 'bg-red-500'
-                                                        : apiUsageCount.count >= 15
-                                                            ? 'bg-yellow-500'
-                                                            : 'bg-blue-500'
-                                                    }`}
-                                                style={{ width: `${Math.min((apiUsageCount.count / 20) * 100, 100)}%` }}
-                                            />
+                                        <div className="pt-4 border-t border-gray-200">
+                                            <p className="text-sm text-gray-600 mb-2">
+                                                <strong>無料プランの制限:</strong> 1日あたり20リクエストまで
+                                            </p>
+                                            {currentCount >= 20 ? (
+                                                <p className="text-sm text-red-600 font-medium">
+                                                    ⚠️ 本日の利用制限に達しました。明日までお待ちください。
+                                                </p>
+                                            ) : currentCount >= 15 ? (
+                                                <p className="text-sm text-yellow-600 font-medium">
+                                                    ⚠️ 残り{20 - currentCount}回です。制限に近づいています。
+                                                </p>
+                                            ) : (
+                                                <p className="text-sm text-gray-600">
+                                                    残り{20 - currentCount}回利用できます。
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div className="pt-4 border-t border-gray-200">
+                                            <p className="text-xs text-gray-500">
+                                                使用回数は日付が変わると自動的にリセットされます。
+                                            </p>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                最終更新: {currentDate}
+                                            </p>
                                         </div>
                                     </div>
-                                    <div className="pt-4 border-t border-gray-200">
-                                        <p className="text-sm text-gray-600 mb-2">
-                                            <strong>無料プランの制限:</strong> 1日あたり20リクエストまで
-                                        </p>
-                                        {apiUsageCount.count >= 20 ? (
-                                            <p className="text-sm text-red-600 font-medium">
-                                                ⚠️ 本日の利用制限に達しました。明日までお待ちください。
-                                            </p>
-                                        ) : apiUsageCount.count >= 15 ? (
-                                            <p className="text-sm text-yellow-600 font-medium">
-                                                ⚠️ 残り{20 - apiUsageCount.count}回です。制限に近づいています。
-                                            </p>
-                                        ) : (
-                                            <p className="text-sm text-gray-600">
-                                                残り{20 - apiUsageCount.count}回利用できます。
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div className="pt-4 border-t border-gray-200">
-                                        <p className="text-xs text-gray-500">
-                                            使用回数は日付が変わると自動的にリセットされます。
-                                        </p>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="text-center py-8">
-                                    <p className="text-gray-600">API使用状況を読み込んでいます...</p>
-                                </div>
-                            )}
+                                );
+                            })()}
                         </div>
                     </div>
                 </div>
