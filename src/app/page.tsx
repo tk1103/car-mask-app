@@ -3093,18 +3093,47 @@ export default function Home() {
             });
 
             // 画像URLのキャッシュをクリア（回転後の画像を表示するため）
-            if (editingReceipt.id && imageUrlsRef.current.has(editingReceipt.id)) {
-                const oldUrl = imageUrlsRef.current.get(editingReceipt.id);
+            const updatedReceiptId = editingReceipt.id;
+            if (updatedReceiptId && imageUrlsRef.current.has(updatedReceiptId)) {
+                const oldUrl = imageUrlsRef.current.get(updatedReceiptId);
                 if (oldUrl) {
                     URL.revokeObjectURL(oldUrl);
                 }
-                imageUrlsRef.current.delete(editingReceipt.id);
+                imageUrlsRef.current.delete(updatedReceiptId);
             }
 
             setEditingReceipt(null);
             setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
             setImageRotation(0);
+
+            // レシートリストを再読み込み
             await loadReceipts();
+
+            // 更新されたレシートの画像URLを強制的に再生成（リロード不要で画像を表示するため）
+            if (updatedReceiptId) {
+                // 少し遅延を入れて、loadReceipts()の完了を確実に待つ
+                setTimeout(() => {
+                    const db = getDb();
+                    if (db) {
+                        db.receipts.get(updatedReceiptId).then((updatedReceipt) => {
+                            if (updatedReceipt && updatedReceipt.image) {
+                                // 古いURLがあれば削除
+                                const oldUrl = imageUrlsRef.current.get(updatedReceiptId);
+                                if (oldUrl) {
+                                    URL.revokeObjectURL(oldUrl);
+                                }
+                                // 新しい画像からURLを生成
+                                const newUrl = URL.createObjectURL(updatedReceipt.image);
+                                imageUrlsRef.current.set(updatedReceiptId, newUrl);
+                                // レシートリストを強制的に再レンダリング
+                                setReceipts(prev => [...prev]);
+                            }
+                        }).catch((error) => {
+                            console.error('Failed to reload receipt image:', error);
+                        });
+                    }
+                }, 100);
+            }
         } catch (error) {
             console.error('Failed to update receipt:', error);
             alert('更新に失敗しました');
