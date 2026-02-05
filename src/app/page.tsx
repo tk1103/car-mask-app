@@ -1840,10 +1840,10 @@ export default function Home() {
                 window.cv.GaussianBlur(medianBlurred, gaussianBlurred, new window.cv.Size(21, 21), 0);
                 medianBlurred.delete();
 
-                // 2. 二値化しきい値の固定化：背景が複雑な場合、adaptiveThresholdは逆効果
-                // 明るいレシート（120以上）だけを白く、それ以外を真っ黒に切り捨てる（閾値を下げて検出感度を向上）
+                // 2. 二値化しきい値の固定化：検出感度を大幅に向上
+                // 閾値を100に下げて、より多くのレシートを検出可能に（暗いレシートも検出）
                 thresholded = new window.cv.Mat();
-                window.cv.threshold(gaussianBlurred, thresholded, 120, 255, window.cv.THRESH_BINARY);
+                window.cv.threshold(gaussianBlurred, thresholded, 100, 255, window.cv.THRESH_BINARY);
                 gaussianBlurred.delete();
 
                 // 3. オープニング処理：レシートと繋がってしまっている「細い背景の線」を一度断ち切る
@@ -1939,22 +1939,15 @@ export default function Home() {
                         continue;
                     }
 
-                    // 画面上部10%を無視：画面の最上部には通常、顔や背景がある（さらに緩和して検出感度向上）
+                    // 画面上部5%を無視：画面の最上部には通常、顔や背景がある（見切れ防止のため緩和）
                     const centerY = rotatedRect.center.y;
-                    if (centerY < height * 0.1) {
+                    if (centerY < height * 0.05) {
                         cnt.delete();
                         continue;
                     }
 
-                    // 画面の中央付近にある輪郭を優先：画面の端（上下左右2%以内）に触れているものは無視（さらに緩和して検出感度向上）
-                    const centerX = rotatedRect.center.x;
-                    const marginX = width * 0.02;
-                    const marginY = height * 0.02;
-                    if (centerX < marginX || centerX > width - marginX ||
-                        centerY < marginY || centerY > height - marginY) {
-                        cnt.delete();
-                        continue;
-                    }
+                    // 画面端のマージンチェックを削除：レシートが見切れないように、画面端でも検出可能にする
+                    // 画面端にレシートがある場合でも検出できるようにする（見切れ防止のため）
 
                     // 面積の絶対評価：最大の面積を持つものを選ぶ
                     const totalScore = areaPercent;
@@ -2076,6 +2069,14 @@ export default function Home() {
 
                             // 時計回りにソート
                             bestCorners = sortCornersClockwise(points);
+
+                            // 見切れ防止：検出されたコーナーが画面外に出ないように調整
+                            if (bestCorners && bestCorners.length === 4) {
+                                bestCorners = bestCorners.map(corner => ({
+                                    x: Math.max(0, Math.min(1, corner.x)), // 0-1の範囲に制限
+                                    y: Math.max(0, Math.min(1, corner.y))  // 0-1の範囲に制限
+                                }));
+                            }
 
                             if (bestCorners && bestCorners.length === 4 && Math.random() < 0.1) {
                                 console.log('[Detection] Successfully detected corners:', bestCorners);
@@ -2612,8 +2613,8 @@ export default function Home() {
         const width = video.videoWidth;
         const height = video.videoHeight;
 
-        // 超緩和：1%のマージン（見えてさえいればOK）
-        const margin = 0.01; // 1%
+        // 見切れ防止のため、マージンを0.5%に緩和（画面端に近くても検出可能に）
+        const margin = 0.005; // 0.5%
 
         // 正規化座標（0-1）を実際のピクセル座標に変換
         const pixelCorners = detectedCorners.map(corner => ({
@@ -2621,10 +2622,16 @@ export default function Home() {
             y: corner.y * height
         }));
 
-        // 現在の判定：すべての角が1%以上内側にあるか
+        // 現在の判定：すべての角が0.5%以上内側にあるか（見切れ防止）
+        // ただし、画面外に出ている場合はNG
         const currentIsSafe = pixelCorners.every(corner => {
             const marginX = width * margin;
             const marginY = height * margin;
+            // 画面外に出ていないことを確認
+            if (corner.x < 0 || corner.x > width || corner.y < 0 || corner.y > height) {
+                return false; // 画面外はNG
+            }
+            // 画面端から0.5%以上内側にあることを確認
             return corner.x >= marginX &&
                 corner.x <= width - marginX &&
                 corner.y >= marginY &&
