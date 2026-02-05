@@ -3647,22 +3647,22 @@ export default function Home() {
                                     );
                                 })()}
                             </div>
-                            {/* 回転ボタン（画像プレビューの下に配置） */}
-                            <div className="mt-4 flex justify-center">
-                                <button
-                                    onClick={handleRotateImage}
-                                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-                                    title="画像を右に90度回転"
-                                >
-                                    <RotateCw size={24} className="text-gray-700" />
-                                </button>
-                            </div>
                         </div>
 
                         {/* 右側: 編集フォーム */}
                         <div className="w-full md:w-1/2 flex flex-col max-h-[90vh] overflow-y-auto">
                             <div className="sticky top-0 bg-white border-b border-gray-300 px-6 py-4 flex items-center justify-between">
-                                <h2 className="text-xl font-bold text-gray-900">レシートを編集</h2>
+                                <div className="flex items-center gap-3">
+                                    <h2 className="text-xl font-bold text-gray-900">レシートを編集</h2>
+                                    {/* 回転ボタン（タイトルの隣に配置） */}
+                                    <button
+                                        onClick={handleRotateImage}
+                                        className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                        title="画像を右に90度回転"
+                                    >
+                                        <RotateCw size={20} className="text-gray-700" />
+                                    </button>
+                                </div>
                                 {/* 閉じるボタン */}
                                 <button
                                     onClick={() => {
