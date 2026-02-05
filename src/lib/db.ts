@@ -28,6 +28,7 @@ export interface Receipt {
     expenseCategory?: ExpenseCategory; // 勘定科目
     categoryReason?: string; // 勘定科目判定の理由
     confidenceScore?: number; // 判定の信頼度（0.0-1.0）
+    rotation_needed?: number; // 画像の回転が必要な場合の値（0: 回転不要, 1: 270度反時計回り, 2: 180度, 3: 90度時計回り）
 }
 
 export class MyDatabase extends Dexie {

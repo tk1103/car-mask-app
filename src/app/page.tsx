@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { getDb, Receipt, ExpenseCategory } from '../lib/db';
-import { Camera, X, Edit2, Loader2, Download, ChevronDown } from 'lucide-react';
+import { Camera, X, Edit2, Loader2, Download, ChevronDown, RotateCw } from 'lucide-react';
 import Script from 'next/script';
 
 // OpenCV.jsの型定義
@@ -90,6 +90,7 @@ export default function Home() {
         date: '',
         expenseCategory: '雑費'
     });
+    const [imageRotation, setImageRotation] = useState<number>(0); // 画像の回転角度（0, 90, 180, 270）
     const [isOpenCvReady, setIsOpenCvReady] = useState(false);
     const [expandedImage, setExpandedImage] = useState<{ url: string; receipt: Receipt } | null>(null);
     const [sortBy, setSortBy] = useState<'timestamp' | 'receiptDate'>('receiptDate'); // ソート基準：撮影時間 or レシート日時
@@ -1488,6 +1489,7 @@ export default function Home() {
                 expenseCategory: (extractedExpenseCategory ?? '雑費') as ExpenseCategory, // 勘定科目
                 categoryReason: extractedCategoryReason,
                 confidenceScore: extractedConfidenceScore,
+                rotation_needed: rotation_needed, // 画像の回転が必要な場合の値（画像は既に回転済み）
             };
 
             await db.receipts.add(receipt);
@@ -2519,6 +2521,7 @@ export default function Home() {
                         expenseCategory: (extractedExpenseCategory ?? '雑費') as ExpenseCategory,
                         categoryReason: extractedCategoryReason,
                         confidenceScore: extractedConfidenceScore,
+                        rotation_needed: rotation_needed, // 画像の回転が必要な場合の値（画像は既に回転済み）
                     };
 
                     await db.receipts.add(receipt);
@@ -2862,6 +2865,7 @@ export default function Home() {
                         expenseCategory: (extractedExpenseCategory ?? '雑費') as ExpenseCategory,
                         categoryReason: extractedCategoryReason,
                         confidenceScore: extractedConfidenceScore,
+                        rotation_needed: rotation_needed, // 画像の回転が必要な場合の値（画像は既に回転済み）
                     };
 
                     await db.receipts.add(receipt);
@@ -2993,6 +2997,7 @@ export default function Home() {
                 currency: extractedCurrency || 'JPY',
                 corners: corners,
                 expenseCategory: extractedExpenseCategory || '雑費',
+                rotation_needed: rotation_needed, // 画像の回転が必要な場合の値（画像は既に回転済み）
             };
 
             await db.receipts.add(receipt);
@@ -3034,6 +3039,17 @@ export default function Home() {
                 }
             }
 
+            // 画像が回転されている場合は、実際に画像を回転させて保存
+            let imageToSave = editingReceipt.image;
+            if (imageRotation !== 0) {
+                try {
+                    imageToSave = await rotateImage(editingReceipt.image, imageRotation);
+                } catch (error) {
+                    console.error('Failed to rotate image:', error);
+                    alert('画像の回転に失敗しました。元の画像で保存します。');
+                }
+            }
+
             await db.receipts.update(editingReceipt.id, {
                 vendor: editForm.vendor,
                 amount: editForm.amount,
@@ -3042,10 +3058,21 @@ export default function Home() {
                 time: timeStr,
                 receiptDate: receiptDate,
                 expenseCategory: editForm.expenseCategory,
+                image: imageToSave,
             });
+
+            // 画像URLのキャッシュをクリア（回転後の画像を表示するため）
+            if (editingReceipt.id && imageUrlsRef.current.has(editingReceipt.id)) {
+                const oldUrl = imageUrlsRef.current.get(editingReceipt.id);
+                if (oldUrl) {
+                    URL.revokeObjectURL(oldUrl);
+                }
+                imageUrlsRef.current.delete(editingReceipt.id);
+            }
 
             setEditingReceipt(null);
             setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
+            setImageRotation(0);
             await loadReceipts();
         } catch (error) {
             console.error('Failed to update receipt:', error);
@@ -3083,6 +3110,78 @@ export default function Home() {
             date: dateStr,
             expenseCategory: (receipt.expenseCategory ?? '雑費') as ExpenseCategory,
         });
+
+        // 画像回転角度を初期化（初期状態では0度）
+        setImageRotation(0);
+    };
+
+    // 画像を回転させる関数（Canvasを使用して実際に画像を回転）
+    const rotateImage = async (imageBlob: Blob, angle: number): Promise<Blob> => {
+        if (angle === 0 || angle === 360) {
+            return imageBlob;
+        }
+
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            if (!ctx) {
+                reject(new Error('Canvas context not available'));
+                return;
+            }
+
+            img.onload = () => {
+                try {
+                    let newWidth = img.width;
+                    let newHeight = img.height;
+
+                    // 90度または270度の場合は幅と高さを入れ替え
+                    if (angle === 90 || angle === 270) {
+                        newWidth = img.height;
+                        newHeight = img.width;
+                    }
+
+                    canvas.width = newWidth;
+                    canvas.height = newHeight;
+
+                    // 回転の中心を設定
+                    ctx.translate(newWidth / 2, newHeight / 2);
+                    ctx.rotate((angle * Math.PI) / 180);
+                    ctx.translate(-img.width / 2, -img.height / 2);
+
+                    // 画像を描画
+                    ctx.drawImage(img, 0, 0);
+
+                    // Blobに変換
+                    canvas.toBlob(
+                        (blob) => {
+                            if (blob) {
+                                resolve(blob);
+                            } else {
+                                reject(new Error('Failed to convert canvas to blob'));
+                            }
+                        },
+                        'image/jpeg',
+                        0.95 // 高画質
+                    );
+                } catch (error) {
+                    console.error('Image rotation failed:', error);
+                    reject(error);
+                }
+            };
+
+            img.onerror = () => {
+                reject(new Error('Failed to load image for rotation'));
+            };
+
+            img.src = URL.createObjectURL(imageBlob);
+        });
+    };
+
+    // 回転ボタンのハンドラー
+    const handleRotateImage = () => {
+        setImageRotation((prev) => (prev + 90) % 360);
     };
 
     const clearAllReceipts = async () => {
@@ -3474,27 +3573,44 @@ export default function Home() {
                 <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col md:flex-row">
                         {/* 左側: レシート画像（全体を表示） */}
-                        <div className="w-full md:w-1/2 bg-gray-100 flex items-center justify-center p-4 overflow-auto min-h-0">
-                            {(() => {
-                                const imageUrl = editingReceipt.id
-                                    ? (imageUrlsRef.current.get(editingReceipt.id) || URL.createObjectURL(editingReceipt.image))
-                                    : URL.createObjectURL(editingReceipt.image);
-                                if (editingReceipt.id && !imageUrlsRef.current.has(editingReceipt.id)) {
-                                    imageUrlsRef.current.set(editingReceipt.id, imageUrl);
-                                }
-                                return (
-                                    <img
-                                        src={imageUrl}
-                                        alt={`Receipt ${editingReceipt.id}`}
-                                        className="w-auto h-auto max-w-full max-h-full object-contain cursor-pointer rounded-lg shadow-md"
-                                        style={{ maxHeight: 'calc(90vh - 2rem)' }}
-                                        onClick={() => {
-                                            // 画像をタップしたら拡大表示
-                                            setExpandedImage({ url: imageUrl, receipt: editingReceipt });
-                                        }}
-                                    />
-                                );
-                            })()}
+                        <div className="w-full md:w-1/2 bg-gray-100 flex flex-col items-center justify-center p-4 overflow-auto min-h-0">
+                            <div className="flex-1 flex items-center justify-center w-full">
+                                {(() => {
+                                    const imageUrl = editingReceipt.id
+                                        ? (imageUrlsRef.current.get(editingReceipt.id) || URL.createObjectURL(editingReceipt.image))
+                                        : URL.createObjectURL(editingReceipt.image);
+                                    if (editingReceipt.id && !imageUrlsRef.current.has(editingReceipt.id)) {
+                                        imageUrlsRef.current.set(editingReceipt.id, imageUrl);
+                                    }
+                                    return (
+                                        <img
+                                            src={imageUrl}
+                                            alt={`Receipt ${editingReceipt.id}`}
+                                            className="w-auto h-auto max-w-full max-h-full object-contain cursor-pointer rounded-lg shadow-md"
+                                            style={{
+                                                maxHeight: 'calc(90vh - 2rem)',
+                                                transform: `rotate(${imageRotation}deg)`,
+                                                transition: 'transform 0.3s ease'
+                                            }}
+                                            onClick={() => {
+                                                // 画像をタップしたら拡大表示
+                                                setExpandedImage({ url: imageUrl, receipt: editingReceipt });
+                                            }}
+                                        />
+                                    );
+                                })()}
+                            </div>
+                            {/* 回転ボタン */}
+                            <div className="mt-4 flex justify-center">
+                                <button
+                                    onClick={handleRotateImage}
+                                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                                    title="画像を90度回転"
+                                >
+                                    <RotateCw size={20} className="text-gray-700" />
+                                    <span className="text-sm text-gray-700">回転</span>
+                                </button>
+                            </div>
                         </div>
 
                         {/* 右側: 編集フォーム */}
@@ -3505,6 +3621,7 @@ export default function Home() {
                                     onClick={() => {
                                         setEditingReceipt(null);
                                         setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
+                                        setImageRotation(0);
                                     }}
                                     className="p-2 hover:bg-gray-100 rounded-full transition-colors"
                                 >
@@ -3600,6 +3717,7 @@ export default function Home() {
                                     onClick={() => {
                                         setEditingReceipt(null);
                                         setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
+                                        setImageRotation(0);
                                     }}
                                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
                                 >
