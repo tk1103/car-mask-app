@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { getDb, Receipt, ExpenseCategory } from '../lib/db';
-import { Camera, X, Edit2, Loader2, Download, ChevronDown, RotateCw, CheckCircle } from 'lucide-react';
+import { Camera, X, Edit2, Loader2, Download, ChevronDown, RotateCw, CheckCircle, Info } from 'lucide-react';
 import Script from 'next/script';
 
 // OpenCV.jsの型定義
@@ -77,6 +77,8 @@ export default function Home() {
     const [isOcrProcessing, setIsOcrProcessing] = useState(false);
     const [ocrWarning, setOcrWarning] = useState<string | null>(null);
     const [ocrErrorType, setOcrErrorType] = useState<'quota' | 'service_unavailable' | 'auth' | 'other' | null>(null); // エラーの種類
+    const [apiUsageCount, setApiUsageCount] = useState<{ count: number; date: string } | null>(null); // API使用回数と日付
+    const [showApiUsageModal, setShowApiUsageModal] = useState(false); // API使用状況モーダルの表示状態
     const [showFlash, setShowFlash] = useState(false); // 撮影時のフラッシュアニメーション
     const [showSaveSuccess, setShowSaveSuccess] = useState(false); // 保存完了メッセージ
     const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
@@ -179,10 +181,74 @@ export default function Home() {
     useEffect(() => {
         if (typeof window !== 'undefined') {
             loadReceipts();
+            // API使用回数をローカルストレージから読み込む
+            loadApiUsageCount();
         } else {
             setIsLoading(false);
         }
     }, [loadReceipts]);
+
+    // API使用回数をローカルストレージから読み込む
+    const loadApiUsageCount = useCallback(() => {
+        if (typeof window === 'undefined') return;
+
+        try {
+            const stored = localStorage.getItem('apiUsageCount');
+            if (stored) {
+                const usage = JSON.parse(stored);
+                const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD形式
+
+                // 日付が変わったらリセット
+                if (usage.date === today) {
+                    setApiUsageCount(usage);
+                } else {
+                    // 日付が変わったのでリセット
+                    const resetUsage = { count: 0, date: today };
+                    localStorage.setItem('apiUsageCount', JSON.stringify(resetUsage));
+                    setApiUsageCount(resetUsage);
+                }
+            } else {
+                // 初回使用時
+                const today = new Date().toISOString().split('T')[0];
+                const initialUsage = { count: 0, date: today };
+                localStorage.setItem('apiUsageCount', JSON.stringify(initialUsage));
+                setApiUsageCount(initialUsage);
+            }
+        } catch (error) {
+            console.error('Failed to load API usage count:', error);
+            const today = new Date().toISOString().split('T')[0];
+            const initialUsage = { count: 0, date: today };
+            setApiUsageCount(initialUsage);
+        }
+    }, []);
+
+    // API使用回数を増やす
+    const incrementApiUsageCount = useCallback(() => {
+        if (typeof window === 'undefined') return;
+
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const stored = localStorage.getItem('apiUsageCount');
+            let usage: { count: number; date: string };
+
+            if (stored) {
+                usage = JSON.parse(stored);
+                if (usage.date === today) {
+                    usage.count += 1;
+                } else {
+                    // 日付が変わったのでリセット
+                    usage = { count: 1, date: today };
+                }
+            } else {
+                usage = { count: 1, date: today };
+            }
+
+            localStorage.setItem('apiUsageCount', JSON.stringify(usage));
+            setApiUsageCount(usage);
+        } catch (error) {
+            console.error('Failed to increment API usage count:', error);
+        }
+    }, []);
 
     // 合計金額を計算（通貨ごとに分けて）
     const totalAmountByCurrency = receipts.reduce((acc, receipt) => {
@@ -1160,14 +1226,14 @@ export default function Home() {
                         errorType = 'service_unavailable';
                     } else if (response.status === 429) {
                         // クォータ超過エラーの詳細を取得
-                        const quotaLimit = errorData.quotaLimit || '20';
+                        const quotaLimit = parseInt(errorData.quotaLimit || '20', 10);
                         const retryAfter = errorData.retryAfter;
                         if (retryAfter) {
                             const minutes = Math.floor(retryAfter / 60);
                             const seconds = retryAfter % 60;
-                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n${minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}後に再度お試しください。`;
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限に達しました。\n${minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}後に再度お試しください。\n\n詳細はヘッダーの情報アイコンから確認できます。`;
                         } else {
-                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n明日に再度お試しください。`;
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限に達しました。\n明日に再度お試しください。\n\n詳細はヘッダーの情報アイコンから確認できます。`;
                         }
                         errorType = 'quota';
                     } else if (response.status === 401 || response.status === 403) {
@@ -1187,14 +1253,14 @@ export default function Home() {
                     // エラーデータからエラーの種類を判定
                     if (errorData.type === 'QuotaExceededError' || response.status === 429) {
                         errorType = 'quota';
-                        const quotaLimit = errorData.quotaLimit || '20';
+                        const quotaLimit = parseInt(errorData.quotaLimit || '20', 10);
                         const retryAfter = errorData.retryAfter;
                         if (retryAfter) {
                             const minutes = Math.floor(retryAfter / 60);
                             const seconds = retryAfter % 60;
-                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n${minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}後に再度お試しください。`;
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限に達しました。\n${minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}後に再度お試しください。\n\n詳細はヘッダーの情報アイコンから確認できます。`;
                         } else {
-                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限（${quotaLimit}回）に達しました。\n明日に再度お試しください。`;
+                            errorMessage = `⚠️ APIの利用制限に達しました\n\n無料プランの1日あたりのリクエスト制限に達しました。\n明日に再度お試しください。\n\n詳細はヘッダーの情報アイコンから確認できます。`;
                         }
                     } else if (errorData.type === 'ServiceUnavailableError' || response.status === 503) {
                         errorType = 'service_unavailable';
@@ -1219,6 +1285,9 @@ export default function Home() {
 
             const data = await response.json();
             console.log('OCR API response:', data);
+
+            // APIリクエスト成功時にカウントを増やす
+            incrementApiUsageCount();
 
             // rotation_neededを取得
             const rotationNeeded = data.rotation_needed !== undefined ? data.rotation_needed : 0;
@@ -3491,7 +3560,22 @@ export default function Home() {
             <header className="sticky top-0 z-10 bg-white border-b border-gray-300 shadow-sm">
                 <div className="max-w-4xl mx-auto px-4 py-4">
                     <div className="flex items-center justify-between mb-3">
-                        <h1 className="text-2xl font-bold text-gray-900">レシート管理</h1>
+                        <div className="flex items-center gap-2">
+                            <h1 className="text-2xl font-bold text-gray-900">レシート管理</h1>
+                            {/* API使用状況アイコン */}
+                            <button
+                                onClick={() => setShowApiUsageModal(true)}
+                                className={`p-1.5 rounded-full transition-colors ${apiUsageCount && apiUsageCount.count >= 20
+                                        ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                                        : apiUsageCount && apiUsageCount.count >= 15
+                                            ? 'bg-yellow-100 text-yellow-600 hover:bg-yellow-200'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                                title="API使用状況を確認"
+                            >
+                                <Info size={20} />
+                            </button>
+                        </div>
                         {receipts.length > 0 && (
                             <div className="flex items-center gap-2">
                                 <button
@@ -3580,12 +3664,12 @@ export default function Home() {
             {/* OCR警告メッセージ */}
             {ocrWarning && (
                 <div className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 rounded-lg shadow-lg p-4 max-w-md mx-4 ${ocrErrorType === 'quota'
-                        ? 'bg-red-50 border-2 border-red-500'
-                        : ocrErrorType === 'service_unavailable'
-                            ? 'bg-yellow-50 border-2 border-yellow-500'
-                            : ocrErrorType === 'auth'
-                                ? 'bg-orange-50 border-2 border-orange-500'
-                                : 'bg-gray-100 border border-gray-300'
+                    ? 'bg-red-50 border-2 border-red-500'
+                    : ocrErrorType === 'service_unavailable'
+                        ? 'bg-yellow-50 border-2 border-yellow-500'
+                        : ocrErrorType === 'auth'
+                            ? 'bg-orange-50 border-2 border-orange-500'
+                            : 'bg-gray-100 border border-gray-300'
                     }`}>
                     <div className="flex items-start gap-3">
                         <div className="flex-shrink-0">
@@ -3610,12 +3694,12 @@ export default function Home() {
                                 </div>
                             )}
                             <p className={`text-sm font-medium whitespace-pre-line ${ocrErrorType === 'quota'
-                                    ? 'text-red-700'
-                                    : ocrErrorType === 'service_unavailable'
-                                        ? 'text-yellow-700'
-                                        : ocrErrorType === 'auth'
-                                            ? 'text-orange-700'
-                                            : 'text-gray-700'
+                                ? 'text-red-700'
+                                : ocrErrorType === 'service_unavailable'
+                                    ? 'text-yellow-700'
+                                    : ocrErrorType === 'auth'
+                                        ? 'text-orange-700'
+                                        : 'text-gray-700'
                                 }`}>{ocrWarning}</p>
                         </div>
                         <button
@@ -3624,16 +3708,91 @@ export default function Home() {
                                 setOcrErrorType(null);
                             }}
                             className={`flex-shrink-0 hover:opacity-70 ${ocrErrorType === 'quota'
-                                    ? 'text-red-600'
-                                    : ocrErrorType === 'service_unavailable'
-                                        ? 'text-yellow-600'
-                                        : ocrErrorType === 'auth'
-                                            ? 'text-orange-600'
-                                            : 'text-gray-500'
+                                ? 'text-red-600'
+                                : ocrErrorType === 'service_unavailable'
+                                    ? 'text-yellow-600'
+                                    : ocrErrorType === 'auth'
+                                        ? 'text-orange-600'
+                                        : 'text-gray-500'
                                 }`}
                         >
                             <X size={18} />
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* API使用状況モーダル */}
+            {showApiUsageModal && (
+                <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+                        <div className="border-b border-gray-300 px-6 py-4 flex items-center justify-between">
+                            <h2 className="text-xl font-bold text-gray-900">API使用状況</h2>
+                            <button
+                                onClick={() => setShowApiUsageModal(false)}
+                                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                            >
+                                <X size={24} className="text-gray-500" />
+                            </button>
+                        </div>
+                        <div className="px-6 py-6">
+                            {apiUsageCount ? (
+                                <div className="space-y-4">
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-sm font-medium text-gray-700">本日の使用回数</span>
+                                            <span className={`text-lg font-bold ${apiUsageCount.count >= 20
+                                                    ? 'text-red-600'
+                                                    : apiUsageCount.count >= 15
+                                                        ? 'text-yellow-600'
+                                                        : 'text-gray-900'
+                                                }`}>
+                                                {apiUsageCount.count}/20回
+                                            </span>
+                                        </div>
+                                        {/* プログレスバー */}
+                                        <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                                            <div
+                                                className={`h-full transition-all duration-300 ${apiUsageCount.count >= 20
+                                                        ? 'bg-red-500'
+                                                        : apiUsageCount.count >= 15
+                                                            ? 'bg-yellow-500'
+                                                            : 'bg-blue-500'
+                                                    }`}
+                                                style={{ width: `${Math.min((apiUsageCount.count / 20) * 100, 100)}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="pt-4 border-t border-gray-200">
+                                        <p className="text-sm text-gray-600 mb-2">
+                                            <strong>無料プランの制限:</strong> 1日あたり20リクエストまで
+                                        </p>
+                                        {apiUsageCount.count >= 20 ? (
+                                            <p className="text-sm text-red-600 font-medium">
+                                                ⚠️ 本日の利用制限に達しました。明日までお待ちください。
+                                            </p>
+                                        ) : apiUsageCount.count >= 15 ? (
+                                            <p className="text-sm text-yellow-600 font-medium">
+                                                ⚠️ 残り{20 - apiUsageCount.count}回です。制限に近づいています。
+                                            </p>
+                                        ) : (
+                                            <p className="text-sm text-gray-600">
+                                                残り{20 - apiUsageCount.count}回利用できます。
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="pt-4 border-t border-gray-200">
+                                        <p className="text-xs text-gray-500">
+                                            使用回数は日付が変わると自動的にリセットされます。
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <p className="text-gray-600">API使用状況を読み込んでいます...</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
