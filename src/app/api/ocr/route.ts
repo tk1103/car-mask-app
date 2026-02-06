@@ -97,7 +97,6 @@ export async function POST(request: NextRequest) {
                         amount: { type: "number" as const },
                         currency: { type: "string" as const },
                         date: { type: "string" as const },
-                        time: { type: "string" as const },
                         invoice_number: { type: "string" as const },
                         expenseCategory: { 
                             type: "string" as const,
@@ -125,7 +124,7 @@ export async function POST(request: NextRequest) {
                             description: "Number of 90-degree clockwise rotations needed (0, 1, 2, or 3)"
                         }
                     },
-                    required: ["vendor", "amount", "currency", "date", "time", "invoice_number", "corners", "expenseCategory", "categoryReason", "confidenceScore", "rotation_needed"]
+                    required: ["vendor", "amount", "currency", "date", "invoice_number", "corners", "expenseCategory", "categoryReason", "confidenceScore", "rotation_needed"]
                 } as any
             }
         });
@@ -252,12 +251,7 @@ D. DATE:
    - If date format is different, convert to YYYY/MM/DD format
    - Use context clues (day names, month names) to verify accuracy
 
-E. TIME:
-   - Find the transaction time printed on the receipt
-   - Format: HH:mm (24-hour format, e.g., 14:30, 18:45)
-   - If 12-hour format with AM/PM, convert to 24-hour
-
-F. INVOICE_NUMBER:
+E. INVOICE_NUMBER:
    - Look for invoice/receipt numbers (登録番号)
    - CRITICAL: Only extract invoice numbers that match the format "T" followed by exactly 13 digits (T1234567890123)
    - Thai receipts: Often "T" followed by 13 digits (T1234567890123) - this is the standard format
@@ -271,7 +265,7 @@ F. INVOICE_NUMBER:
    - If not found or unclear, return null
    - Do NOT extract phone numbers, dates, or other numbers that happen to have 13 digits
 
-G. EXPENSE_CATEGORY (勘定科目):
+F. EXPENSE_CATEGORY (勘定科目):
    - You are an excellent accounting assistant working at a Japanese tax accounting firm.
    - Analyze the receipt content (vendor name, items purchased, location, amount) to determine the accounting category according to Japanese accounting standards.
    - Follow the priority order and logic below:
@@ -325,25 +319,25 @@ G. EXPENSE_CATEGORY (勘定科目):
        - 上記いずれにも当てはまらない一時的な費用
        - Default category when uncertain
    
-   H. CATEGORY_REASON (判定理由):
+   G. CATEGORY_REASON (判定理由):
    - Describe the reasoning for the category selection in Japanese
    - If uncertain, explain why and what factors were considered
    - Examples: "店名がレストランで金額が8,000円のため接待交際費と判定", "事務用品の購入のため消耗品費と判定"
    
-   I. CONFIDENCE_SCORE (信頼度):
+   H. CONFIDENCE_SCORE (信頼度):
    - Provide a confidence score from 0.0 to 1.0
    - 1.0: Very confident (clear indicators match category)
    - 0.7-0.9: Confident (most indicators match)
    - 0.5-0.6: Somewhat confident (some indicators match, but uncertain)
    - 0.0-0.4: Low confidence (unclear or ambiguous)
 
-H. CORNERS:
+I. CORNERS:
    - Return array of 4 coordinates: [{x, y}, {x, y}, {x, y}, {x, y}]
    - Order: top-left, top-right, bottom-right, bottom-left
    - Normalized coordinates (0-1000 range)
    - These should mark the physical edges of the receipt paper
 
-I. ROTATION_NEEDED (CONSERVATIVE - TEXT ORIENTATION DETECTION):
+J. ROTATION_NEEDED (CONSERVATIVE - TEXT ORIENTATION DETECTION):
    - Analyze the orientation of text lines in the receipt image, specifically focusing on:
      * Price amounts (numbers with currency symbols)
      * Item names and descriptions
@@ -687,7 +681,6 @@ RETURN:
             amount: amount,
             currency: currency,
             date: date,
-            time: parsedData.time || '',
             invoice_number: parsedData.invoice_number || '',
             corners: corners,
             expenseCategory: parsedData.expenseCategory || '雑費',

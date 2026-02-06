@@ -624,7 +624,7 @@ export default function Home() {
 
     // 汎用CSV形式を生成
     const generateGenericCSV = (receipts: Receipt[]): string => {
-        const headers = ['日付', '時刻', '店名', '金額', '通貨', 'インボイス番号', '備考'];
+        const headers = ['日付', '店名', '金額', '通貨', 'インボイス番号', '備考'];
         const rows = receipts.map(receipt => {
             // 日付を取得
             let dateStr = '';
@@ -638,13 +638,6 @@ export default function Home() {
                 dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
             }
 
-            // 時刻を取得
-            let timeStr = receipt.time || '';
-            if (!timeStr && receipt.receiptDate) {
-                const d = receipt.receiptDate;
-                timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-            }
-
             // 金額（数値として）
             const amount = receipt.amount || 0;
 
@@ -656,7 +649,6 @@ export default function Home() {
 
             return [
                 dateStr,
-                timeStr,
                 receipt.vendor || '',
                 amount.toString(),
                 receipt.currency || 'JPY',
@@ -684,7 +676,7 @@ export default function Home() {
 
     // マスター形式CSVを生成（スプレッドシート用）
     const generateMasterCSV = (receipts: Receipt[]): string => {
-        const headers = ['ID', '撮影日時', 'レシート日付', '時刻', '店名', '金額', '通貨', 'インボイス番号', '備考', '画像ファイル名', '解析ステータス'];
+        const headers = ['ID', '撮影日時', 'レシート日付', '店名', '金額', '通貨', 'インボイス番号', '備考', '画像ファイル名', '解析ステータス'];
         const rows = receipts.map((receipt, index) => {
             // ID
             const id = receipt.id?.toString() || '';
@@ -703,13 +695,6 @@ export default function Home() {
                 receiptDateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
             } else if (receipt.date) {
                 receiptDateStr = receipt.date.replace(/-/g, '/');
-            }
-
-            // 時刻
-            let timeStr = receipt.time || '';
-            if (!timeStr && receipt.receiptDate) {
-                const d = receipt.receiptDate;
-                timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
             }
 
             // 店名
@@ -743,7 +728,6 @@ export default function Home() {
                 id,
                 timestampStr,
                 receiptDateStr,
-                timeStr,
                 vendor,
                 amount.toString(),
                 currency,
@@ -1173,12 +1157,11 @@ export default function Home() {
     };
 
 
-    // Gemini APIを使用してOCRで金額、店名、日付、時刻、インボイス番号、四隅の座標を抽出
+    // Gemini APIを使用してOCRで金額、店名、日付、インボイス番号、四隅の座標を抽出
     const extractAmountFromOcr = async (imageBlob: Blob, skipStateUpdate: boolean = false): Promise<{
         amount: number;
         vendor: string;
         date?: string;
-        time?: string;
         invoice_number?: string;
         currency?: string | null;
         corners?: Array<{ x: number; y: number }>;
@@ -1365,12 +1348,11 @@ export default function Home() {
             // インボイス番号のバリデーションとクレンジング
             const validatedInvoiceNumber = validateAndCleanInvoiceNumber(data.invoice_number);
 
-            // Gemini APIからの解析結果を返す（vendor, amount, date, time, invoice_number, currency, corners, expenseCategory, categoryReason, confidenceScore, rotation_needed）
+            // Gemini APIからの解析結果を返す（vendor, amount, date, invoice_number, currency, corners, expenseCategory, categoryReason, confidenceScore, rotation_needed）
             return {
                 amount: data.amount || 0,
                 vendor: data.vendor || '',
                 date: data.date || undefined,
-                time: data.time || undefined,
                 invoice_number: validatedInvoiceNumber || undefined,
                 currency: data.currency || undefined,
                 corners: data.corners || undefined,
@@ -1594,12 +1576,11 @@ export default function Home() {
                 return;
             }
 
-            // 3. OCRで金額、店名、日付、時刻、インボイス番号、四隅の座標、勘定科目、回転情報を抽出（軽量画像を使用）
+            // 3. OCRで金額、店名、日付、インボイス番号、四隅の座標、勘定科目、回転情報を抽出（軽量画像を使用）
             const {
                 amount: extractedAmount,
                 vendor: extractedVendor,
                 date: extractedDate,
-                time: extractedTime,
                 invoice_number: extractedInvoiceNumber,
                 currency: extractedCurrency,
                 corners,
@@ -1652,25 +1633,12 @@ export default function Home() {
                         const year = parseInt(dateParts[0], 10);
                         const month = parseInt(dateParts[1], 10);
                         const day = parseInt(dateParts[2], 10);
-
-                        if (extractedTime) {
-                            // 時刻も含めてパース（HH:mm）
-                            const timeParts = extractedTime.split(':');
-                            if (timeParts.length >= 2) {
-                                const hours = parseInt(timeParts[0], 10);
-                                const minutes = parseInt(timeParts[1], 10);
-                                receiptDate = new Date(year, month - 1, day, hours || 0, minutes || 0);
-                            } else {
-                                receiptDate = new Date(year, month - 1, day);
-                            }
-                        } else {
-                            receiptDate = new Date(year, month - 1, day);
-                        }
+                        receiptDate = new Date(year, month - 1, day);
 
                         console.log('Parsed receipt date from Gemini:', receiptDate);
                     }
                 } catch (dateError) {
-                    console.warn('Failed to parse receipt date:', dateError, 'Date string:', extractedDate, 'Time string:', extractedTime);
+                    console.warn('Failed to parse receipt date:', dateError, 'Date string:', extractedDate);
                 }
             }
 
@@ -1682,8 +1650,7 @@ export default function Home() {
                 vendor: extractedVendor,
                 currency: extractedCurrency || 'JPY', // 通貨コードを保存（デフォルトはJPY）
                 date: extractedDate,
-                time: extractedTime,
-                receiptDate: receiptDate, // Geminiが読み取った日時
+                receiptDate: receiptDate, // Geminiが読み取った日付
                 invoice_number: extractedInvoiceNumber,
                 corners: corners,
                 expenseCategory: (extractedExpenseCategory ?? '雑費') as ExpenseCategory, // 勘定科目
@@ -2795,7 +2762,6 @@ export default function Home() {
                         amount: extractedAmount,
                         vendor: extractedVendor,
                         date: extractedDate,
-                        time: extractedTime,
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency,
                         corners: apiCorners,
@@ -2842,19 +2808,7 @@ export default function Home() {
                                 const year = parseInt(dateParts[0], 10);
                                 const month = parseInt(dateParts[1], 10);
                                 const day = parseInt(dateParts[2], 10);
-
-                                if (extractedTime) {
-                                    const timeParts = extractedTime.split(':');
-                                    if (timeParts.length >= 2) {
-                                        const hours = parseInt(timeParts[0], 10);
-                                        const minutes = parseInt(timeParts[1], 10);
-                                        receiptDate = new Date(year, month - 1, day, hours || 0, minutes || 0);
-                                    } else {
-                                        receiptDate = new Date(year, month - 1, day);
-                                    }
-                                } else {
-                                    receiptDate = new Date(year, month - 1, day);
-                                }
+                                receiptDate = new Date(year, month - 1, day);
                             }
                         } catch (dateError) {
                             console.warn('Failed to parse receipt date:', dateError);
@@ -2874,7 +2828,6 @@ export default function Home() {
                         amount: extractedAmount,
                         vendor: extractedVendor,
                         date: extractedDate,
-                        time: extractedTime,
                         receiptDate: receiptDate,
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency || 'JPY',
@@ -3145,7 +3098,6 @@ export default function Home() {
                         amount: extractedAmount,
                         vendor: extractedVendor,
                         date: extractedDate,
-                        time: extractedTime,
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency,
                         corners: ocrCorners,
@@ -3204,19 +3156,7 @@ export default function Home() {
                                 const year = parseInt(dateParts[0], 10);
                                 const month = parseInt(dateParts[1], 10);
                                 const day = parseInt(dateParts[2], 10);
-
-                                if (extractedTime) {
-                                    const timeParts = extractedTime.split(':');
-                                    if (timeParts.length >= 2) {
-                                        const hours = parseInt(timeParts[0], 10);
-                                        const minutes = parseInt(timeParts[1], 10);
-                                        receiptDate = new Date(year, month - 1, day, hours || 0, minutes || 0);
-                                    } else {
-                                        receiptDate = new Date(year, month - 1, day);
-                                    }
-                                } else {
-                                    receiptDate = new Date(year, month - 1, day);
-                                }
+                                receiptDate = new Date(year, month - 1, day);
                             }
                         } catch (dateError) {
                             console.warn('Failed to parse receipt date:', dateError);
@@ -3236,7 +3176,6 @@ export default function Home() {
                         amount: extractedAmount,
                         vendor: extractedVendor,
                         date: extractedDate,
-                        time: extractedTime,
                         receiptDate: receiptDate,
                         invoice_number: extractedInvoiceNumber,
                         currency: extractedCurrency || 'JPY',
@@ -3294,7 +3233,6 @@ export default function Home() {
                 amount: extractedAmount,
                 vendor: extractedVendor,
                 date: extractedDate,
-                time: extractedTime,
                 invoice_number: extractedInvoiceNumber,
                 currency: extractedCurrency,
                 corners,
@@ -3347,18 +3285,7 @@ export default function Home() {
                         const month = parseInt(dateParts[1], 10);
                         const day = parseInt(dateParts[2], 10);
 
-                        if (extractedTime) {
-                            const timeParts = extractedTime.split(':');
-                            if (timeParts.length >= 2) {
-                                const hours = parseInt(timeParts[0], 10);
-                                const minutes = parseInt(timeParts[1], 10);
-                                receiptDate = new Date(year, month - 1, day, hours || 0, minutes || 0);
-                            } else {
-                                receiptDate = new Date(year, month - 1, day);
-                            }
-                        } else {
-                            receiptDate = new Date(year, month - 1, day);
-                        }
+                        receiptDate = new Date(year, month - 1, day);
                     }
                 } catch (dateError) {
                     console.warn('Failed to parse receipt date:', dateError);
@@ -3378,7 +3305,6 @@ export default function Home() {
                 amount: extractedAmount,
                 vendor: extractedVendor,
                 date: extractedDate,
-                time: extractedTime,
                 receiptDate: receiptDate,
                 invoice_number: extractedInvoiceNumber,
                 currency: extractedCurrency || 'JPY',
@@ -3452,7 +3378,6 @@ export default function Home() {
                 amount: editForm.amount,
                 note: editForm.note,
                 date: dateStr,
-                time: timeStr,
                 receiptDate: receiptDate,
                 expenseCategory: editForm.expenseCategory,
                 invoice_number: validatedInvoiceNumber || undefined,
