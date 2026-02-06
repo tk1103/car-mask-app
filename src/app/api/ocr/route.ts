@@ -258,10 +258,18 @@ E. TIME:
    - If 12-hour format with AM/PM, convert to 24-hour
 
 F. INVOICE_NUMBER:
-   - Look for invoice/receipt numbers
-   - Thai receipts: Often "T" followed by 13 digits (T1234567890123)
-   - Japanese receipts: Various formats
+   - Look for invoice/receipt numbers (登録番号)
+   - CRITICAL: Only extract invoice numbers that match the format "T" followed by exactly 13 digits (T1234567890123)
+   - Thai receipts: Often "T" followed by 13 digits (T1234567890123) - this is the standard format
+   - Japanese receipts: Various formats, but if it doesn't match "T + 13 digits", return null
+   - VALIDATION RULES:
+     * Must start with "T" (uppercase or lowercase, will be normalized)
+     * Must be followed by exactly 13 digits (0-9)
+     * Examples of VALID formats: T1234567890123, t1234567890123
+     * Examples of INVALID formats: T123456789012 (12 digits), T12345678901234 (14 digits), 1234567890123 (no T), T-1234567890123 (has hyphen)
+   - If the extracted number does NOT match "T + 13 digits" format, return null
    - If not found or unclear, return null
+   - Do NOT extract phone numbers, dates, or other numbers that happen to have 13 digits
 
 G. EXPENSE_CATEGORY (勘定科目):
    - You are an excellent accounting assistant working at a Japanese tax accounting firm.

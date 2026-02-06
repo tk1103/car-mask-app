@@ -88,12 +88,14 @@ export default function Home() {
         note: string;
         date: string;
         expenseCategory: ExpenseCategory;
+        invoice_number: string;
     }>({
         vendor: '',
         amount: 0,
         note: '',
         date: '',
-        expenseCategory: '雑費'
+        expenseCategory: '雑費',
+        invoice_number: ''
     });
     const [imageRotation, setImageRotation] = useState<number>(0); // 画像の回転角度（0, 90, 180, 270）
     const [isOpenCvReady, setIsOpenCvReady] = useState(false);
@@ -438,6 +440,33 @@ export default function Home() {
         const [year, month] = monthKey.split('/');
         const monthNum = parseInt(month, 10);
         return `${year}年${monthNum}月`;
+    };
+
+    // インボイス番号のクレンジングとバリデーション
+    const validateAndCleanInvoiceNumber = (invoiceNumber: string | null | undefined): string => {
+        if (!invoiceNumber) {
+            return '';
+        }
+
+        // スペース、ハイフン、全角文字を削除・半角化
+        let cleaned = invoiceNumber
+            .replace(/\s+/g, '') // スペースを削除
+            .replace(/[-－ー]/g, '') // ハイフンと全角ハイフンを削除
+            .replace(/[Ｔｔ]/g, 'T') // 全角Tを半角Tに変換
+            .replace(/[０-９]/g, (char) => {
+                // 全角数字を半角数字に変換
+                return String.fromCharCode(char.charCodeAt(0) - 0xFEE0);
+            })
+            .toUpperCase(); // 小文字のtを大文字のTに変換
+
+        // T + 13桁の数字の形式に一致するかチェック
+        const invoiceNumberPattern = /^T\d{13}$/;
+        if (invoiceNumberPattern.test(cleaned)) {
+            return cleaned;
+        }
+
+        // バリデーションを通過しない場合は空文字を返す
+        return '';
     };
 
     // 画像ファイル名を生成（ZIPエクスポートと同じロジック）
@@ -1333,13 +1362,16 @@ export default function Home() {
             // 金額が0の場合は警告を表示
             const hasWarning = data.amount === 0 || !data.amount;
 
+            // インボイス番号のバリデーションとクレンジング
+            const validatedInvoiceNumber = validateAndCleanInvoiceNumber(data.invoice_number);
+
             // Gemini APIからの解析結果を返す（vendor, amount, date, time, invoice_number, currency, corners, expenseCategory, categoryReason, confidenceScore, rotation_needed）
             return {
                 amount: data.amount || 0,
                 vendor: data.vendor || '',
                 date: data.date || undefined,
                 time: data.time || undefined,
-                invoice_number: data.invoice_number || undefined,
+                invoice_number: validatedInvoiceNumber || undefined,
                 currency: data.currency || undefined,
                 corners: data.corners || undefined,
                 expenseCategory: (data.expenseCategory || '雑費') as ExpenseCategory,
@@ -3412,6 +3444,9 @@ export default function Home() {
                 }
             }
 
+            // インボイス番号のバリデーション
+            const validatedInvoiceNumber = validateAndCleanInvoiceNumber(editForm.invoice_number);
+
             await db.receipts.update(editingReceipt.id, {
                 vendor: editForm.vendor,
                 amount: editForm.amount,
@@ -3420,6 +3455,7 @@ export default function Home() {
                 time: timeStr,
                 receiptDate: receiptDate,
                 expenseCategory: editForm.expenseCategory,
+                invoice_number: validatedInvoiceNumber || undefined,
                 image: imageToSave,
             });
 
@@ -3440,7 +3476,7 @@ export default function Home() {
             }, 3000); // 3秒間表示
 
             setEditingReceipt(null);
-            setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
+            setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費', invoice_number: '' });
             setImageRotation(0);
 
             // レシートリストを再読み込み
@@ -3507,12 +3543,16 @@ export default function Home() {
             }
         }
 
+        // インボイス番号をバリデーション済みの値で設定
+        const validatedInvoiceNumber = validateAndCleanInvoiceNumber(receipt.invoice_number);
+
         setEditForm({
             vendor: receipt.vendor || '',
             amount: receipt.amount || 0,
             note: receipt.note || '',
             date: dateStr,
             expenseCategory: (receipt.expenseCategory ?? '雑費') as ExpenseCategory,
+            invoice_number: validatedInvoiceNumber,
         });
 
         // 画像回転角度を初期化（初期状態では0度）
@@ -4189,7 +4229,7 @@ export default function Home() {
                                 <button
                                     onClick={() => {
                                         setEditingReceipt(null);
-                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
+                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費', invoice_number: '' });
                                         setImageRotation(0);
                                     }}
                                     className="p-2 hover:bg-gray-100 rounded-full transition-colors"
@@ -4228,6 +4268,43 @@ export default function Home() {
                                         min="0"
                                         step="1"
                                     />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        インボイス番号（登録番号）
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={editForm.invoice_number}
+                                        onChange={(e) => {
+                                            const inputValue = e.target.value;
+                                            // リアルタイムでクレンジング（スペース、ハイフン、全角文字を削除）
+                                            const cleaned = inputValue
+                                                .replace(/\s+/g, '')
+                                                .replace(/[-－ー]/g, '')
+                                                .replace(/[Ｔｔ]/g, 'T')
+                                                .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))
+                                                .toUpperCase();
+                                            setEditForm({ ...editForm, invoice_number: cleaned });
+                                        }}
+                                        onBlur={(e) => {
+                                            // フォーカスが外れた時にバリデーション
+                                            const validated = validateAndCleanInvoiceNumber(e.target.value);
+                                            setEditForm({ ...editForm, invoice_number: validated });
+                                        }}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900 placeholder:text-gray-500"
+                                        placeholder="T1234567890123（T + 13桁の数字）"
+                                        maxLength={14}
+                                        style={{
+                                            fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'
+                                        }}
+                                    />
+                                    {editForm.invoice_number && !/^T\d{13}$/.test(editForm.invoice_number) && (
+                                        <p className="text-xs text-red-600 mt-1">
+                                            ⚠️ インボイス番号は「T + 13桁の数字」の形式で入力してください（例: T1234567890123）
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -4285,7 +4362,7 @@ export default function Home() {
                                 <button
                                     onClick={() => {
                                         setEditingReceipt(null);
-                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費' });
+                                        setEditForm({ vendor: '', amount: 0, note: '', date: '', expenseCategory: '雑費', invoice_number: '' });
                                         setImageRotation(0);
                                     }}
                                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
