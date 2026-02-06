@@ -153,6 +153,11 @@ export default function Home() {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [isCameraActive, setIsCameraActive] = useState(false);
     const imageUrlsRef = useRef<Map<number, string>>(new Map());
+    const [zoomLevel, setZoomLevel] = useState<number>(1.0); // 現在のズームレベル（1.0 = 標準）
+    const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]); // 利用可能なカメラリスト
+    const [currentCameraIndex, setCurrentCameraIndex] = useState<number>(0); // 現在選択中のカメラインデックス
+    const [zoomSupported, setZoomSupported] = useState<boolean>(false); // ズームAPI対応フラグ
+    const [zoomCapabilities, setZoomCapabilities] = useState<{ min: number; max: number; step: number } | null>(null); // ズーム能力情報
 
     const loadReceipts = useCallback(async () => {
         if (typeof window === 'undefined') {
@@ -1896,8 +1901,45 @@ export default function Home() {
                 console.log('Torch/flash not supported or failed to enable:', torchError.message);
             }
 
+            // 利用可能なカメラデバイスを列挙
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                setAvailableCameras(videoDevices);
+                // 現在のカメラのインデックスを設定
+                const currentDeviceId = mediaStream.getVideoTracks()[0].getSettings().deviceId;
+                const currentIndex = videoDevices.findIndex(device => device.deviceId === currentDeviceId);
+                setCurrentCameraIndex(currentIndex >= 0 ? currentIndex : 0);
+                console.log('Available cameras:', videoDevices.length);
+            } catch (error) {
+                console.error('Failed to enumerate devices:', error);
+            }
+
+            // ズーム機能の対応確認
+            const videoTrack = mediaStream.getVideoTracks()[0];
+            if (videoTrack && 'getCapabilities' in videoTrack) {
+                try {
+                    const capabilities = videoTrack.getCapabilities();
+                    if (capabilities && 'zoom' in capabilities) {
+                        const zoomCap = capabilities.zoom as { min: number; max: number; step: number };
+                        setZoomSupported(true);
+                        setZoomCapabilities(zoomCap);
+                        console.log('Zoom supported:', zoomCap);
+                    } else {
+                        setZoomSupported(false);
+                        console.log('Zoom not supported by this camera');
+                    }
+                } catch (error) {
+                    console.error('Failed to get camera capabilities:', error);
+                    setZoomSupported(false);
+                }
+            } else {
+                setZoomSupported(false);
+            }
+
             setStream(mediaStream);
             setIsCameraActive(true);
+            setZoomLevel(1.0); // 初期ズームレベルをリセット
         } catch (error: any) {
             console.error('Failed to access camera:', error);
 
@@ -1932,6 +1974,112 @@ export default function Home() {
             });
         }
     }, [isCameraActive, stream]);
+
+    // ズームレベルを変更する関数
+    const applyZoom = async (level: number) => {
+        if (!stream) return;
+
+        const videoTrack = stream.getVideoTracks()[0];
+        if (!videoTrack) return;
+
+        try {
+            if (zoomSupported && zoomCapabilities) {
+                // ズームAPIを使用
+                const clampedZoom = Math.max(zoomCapabilities.min, Math.min(level, zoomCapabilities.max));
+                await videoTrack.applyConstraints({
+                    advanced: [{ zoom: clampedZoom } as any]
+                });
+                setZoomLevel(clampedZoom);
+                console.log('Zoom applied:', clampedZoom);
+            } else {
+                // ズームAPIが使えない場合は、カメラを切り替え（フォールバック）
+                console.log('Zoom API not supported, switching camera instead');
+            }
+        } catch (error) {
+            console.error('Failed to apply zoom:', error);
+        }
+    };
+
+    // カメラを切り替える関数（フォールバック用）
+    const switchCamera = async () => {
+        if (availableCameras.length <= 1) {
+            console.log('Only one camera available, cannot switch');
+            return;
+        }
+
+        // 現在のカメラの次のカメラに切り替え
+        const nextIndex = (currentCameraIndex + 1) % availableCameras.length;
+        const nextCamera = availableCameras[nextIndex];
+
+        try {
+            // 現在のストリームを停止
+            stopCamera();
+
+            // 新しいカメラでストリームを開始
+            const isMobile = isMobileDevice();
+            const constraints: MediaStreamConstraints = {
+                video: {
+                    deviceId: { exact: nextCamera.deviceId },
+                    width: { ideal: isMobile ? 1920 : 1920 },
+                    height: { ideal: isMobile ? 1080 : 1080 },
+                },
+            };
+
+            const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+            // ズーム機能の対応確認
+            const videoTrack = newStream.getVideoTracks()[0];
+            if (videoTrack && 'getCapabilities' in videoTrack) {
+                try {
+                    const capabilities = videoTrack.getCapabilities();
+                    if (capabilities && 'zoom' in capabilities) {
+                        const zoomCap = capabilities.zoom as { min: number; max: number; step: number };
+                        setZoomSupported(true);
+                        setZoomCapabilities(zoomCap);
+                    } else {
+                        setZoomSupported(false);
+                    }
+                } catch (error) {
+                    setZoomSupported(false);
+                }
+            } else {
+                setZoomSupported(false);
+            }
+
+            setStream(newStream);
+            setCurrentCameraIndex(nextIndex);
+            setZoomLevel(1.0);
+            setIsCameraActive(true);
+        } catch (error) {
+            console.error('Failed to switch camera:', error);
+            alert('カメラの切り替えに失敗しました');
+        }
+    };
+
+    // ズームレベルを切り替える関数（0.5x, 1x, 2x）
+    const toggleZoom = async () => {
+        if (zoomSupported && zoomCapabilities) {
+            // ズームAPIが使える場合
+            const currentLevel = zoomLevel;
+            let nextLevel: number;
+
+            if (currentLevel <= zoomCapabilities.min + 0.1) {
+                // 0.5x → 1x
+                nextLevel = 1.0;
+            } else if (currentLevel <= 1.1) {
+                // 1x → 2x
+                nextLevel = Math.min(2.0, zoomCapabilities.max);
+            } else {
+                // 2x → 0.5x
+                nextLevel = zoomCapabilities.min;
+            }
+
+            await applyZoom(nextLevel);
+        } else {
+            // ズームAPIが使えない場合はカメラを切り替え
+            await switchCamera();
+        }
+    };
 
     const stopCamera = () => {
         // リアルタイム検出を停止
@@ -4627,31 +4775,53 @@ export default function Home() {
                                     ⚠️ レシートを縦（または文字を水平）にしてください
                                 </div>
                             )}
-                        <button
-                            onClick={capturePhoto}
-                            disabled={(() => {
-                                // detectedCornersRefも確認（状態更新の遅延を考慮）
-                                const corners = detectedCorners || detectedCornersRef.current;
-                                return corners !== null && !isReceiptAreaValid;
-                            })()}
-                            className={`w-24 h-24 rounded-full border-4 transition-all shadow-2xl active:scale-90 z-20 flex items-center justify-center ${(() => {
-                                const corners = detectedCorners || detectedCornersRef.current;
-                                return corners !== null && !isReceiptAreaValid;
-                            })()
-                                ? 'bg-gray-500 border-gray-700 cursor-not-allowed opacity-50'
-                                : 'bg-white border-gray-300 hover:border-gray-500 hover:bg-gray-100'
-                                }`}
-                            aria-label="写真を撮る"
-                            type="button"
-                        >
-                            <div className={`w-20 h-20 rounded-full border-2 ${(() => {
-                                const corners = detectedCorners || detectedCornersRef.current;
-                                return corners !== null && !isReceiptAreaValid;
-                            })()
-                                ? 'bg-gray-500 border-gray-700'
-                                : 'bg-white border-gray-300'
-                                }`}></div>
-                        </button>
+                        <div className="flex flex-col items-center gap-3">
+                            {/* ズーム切り替えボタン */}
+                            <button
+                                onClick={toggleZoom}
+                                className="w-16 h-16 rounded-full bg-white/90 border-2 border-gray-300 shadow-lg hover:bg-gray-100 active:scale-90 transition-all z-20 flex items-center justify-center backdrop-blur-sm"
+                                aria-label="ズーム切り替え"
+                                type="button"
+                            >
+                                <span className="text-xs font-semibold text-gray-700">
+                                    {zoomSupported && zoomCapabilities
+                                        ? zoomLevel <= zoomCapabilities.min + 0.1
+                                            ? '0.5x'
+                                            : zoomLevel <= 1.1
+                                                ? '1.0x'
+                                                : '2.0x'
+                                        : availableCameras.length > 1
+                                            ? '📷'
+                                            : '1.0x'}
+                                </span>
+                            </button>
+                            {/* シャッターボタン */}
+                            <button
+                                onClick={capturePhoto}
+                                disabled={(() => {
+                                    // detectedCornersRefも確認（状態更新の遅延を考慮）
+                                    const corners = detectedCorners || detectedCornersRef.current;
+                                    return corners !== null && !isReceiptAreaValid;
+                                })()}
+                                className={`w-24 h-24 rounded-full border-4 transition-all shadow-2xl active:scale-90 z-20 flex items-center justify-center ${(() => {
+                                    const corners = detectedCorners || detectedCornersRef.current;
+                                    return corners !== null && !isReceiptAreaValid;
+                                })()
+                                    ? 'bg-gray-500 border-gray-700 cursor-not-allowed opacity-50'
+                                    : 'bg-white border-gray-300 hover:border-gray-500 hover:bg-gray-100'
+                                    }`}
+                                aria-label="写真を撮る"
+                                type="button"
+                            >
+                                <div className={`w-20 h-20 rounded-full border-2 ${(() => {
+                                    const corners = detectedCorners || detectedCornersRef.current;
+                                    return corners !== null && !isReceiptAreaValid;
+                                })()
+                                    ? 'bg-gray-500 border-gray-700'
+                                    : 'bg-white border-gray-300'
+                                    }`}></div>
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
