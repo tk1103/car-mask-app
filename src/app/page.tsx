@@ -451,7 +451,7 @@ export default function Home() {
     };
 
     // CSVエクスポート機能
-    const exportToCSV = (format: 'generic' | 'freee' | 'moneyforward' | 'master', exportAll: boolean) => {
+    const exportToCSV = (format: 'generic' | 'master', exportAll: boolean) => {
         // エクスポート対象のレシートを取得
         const receiptsToExport = exportAll ? receipts : groupedReceipts.sortedMonthKeys.flatMap(monthKey =>
             groupedReceipts.grouped[monthKey] || []
@@ -464,14 +464,6 @@ export default function Home() {
             // 汎用CSV形式
             csvContent = generateGenericCSV(receiptsToExport);
             filename = `receipt_export_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.csv`;
-        } else if (format === 'freee') {
-            // freee形式
-            csvContent = generateFreeeCSV(receiptsToExport);
-            filename = `receipt_freee_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.csv`;
-        } else if (format === 'moneyforward') {
-            // マネーフォワード形式
-            csvContent = generateMoneyForwardCSV(receiptsToExport);
-            filename = `receipt_mf_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.csv`;
         } else if (format === 'master') {
             // マスター形式（スプレッドシート用）
             csvContent = generateMasterCSV(receiptsToExport);
@@ -591,161 +583,6 @@ export default function Home() {
         });
 
         // CSV形式に変換（値にカンマや改行が含まれる場合はダブルクォートで囲む）
-        const escapeCSV = (value: string | number): string => {
-            const str = String(value);
-            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-                return `"${str.replace(/"/g, '""')}"`;
-            }
-            return str;
-        };
-
-        const csvRows = [
-            headers.map(escapeCSV).join(','),
-            ...rows.map(row => row.map(escapeCSV).join(','))
-        ];
-
-        return csvRows.join('\n');
-    };
-
-    // freee形式CSVを生成
-    const generateFreeeCSV = (receipts: Receipt[]): string => {
-        // freeeのインポート形式に合わせる
-        const headers = ['収支区分', '管理番号', '発生日', '勘定科目', '金額', '税区分', '税額', '備考', '品目'];
-        const rows = receipts.map(receipt => {
-            // 収支区分: 支出
-            const category = '支出';
-
-            // 管理番号: インボイス番号またはID
-            const managementNumber = receipt.invoice_number || `RECEIPT-${receipt.id || ''}`;
-
-            // 発生日
-            let dateStr = '';
-            if (receipt.receiptDate) {
-                const d = receipt.receiptDate;
-                dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-            } else if (receipt.date) {
-                dateStr = receipt.date.replace(/-/g, '/');
-            } else if (receipt.timestamp) {
-                const d = receipt.timestamp instanceof Date ? receipt.timestamp : new Date(receipt.timestamp);
-                dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-            }
-
-            // 勘定科目: 未確定（ユーザーが後で設定）
-            const account = '未確定';
-
-            // 金額（数値）
-            const amount = receipt.amount || 0;
-
-            // 税区分: 対象外（デフォルト）
-            const taxCategory = '対象外';
-
-            // 税額: 0
-            const taxAmount = 0;
-
-            // 備考
-            let memo = receipt.note || '';
-            if (receipt.currency === 'THB') {
-                memo = memo ? `${memo} / 外貨: THB` : '外貨: THB';
-            }
-            memo = memo ? `${memo} / 店名: ${receipt.vendor || ''}` : `店名: ${receipt.vendor || ''}`;
-
-            // 品目: 店名
-            const item = receipt.vendor || '';
-
-            return [
-                category,
-                managementNumber,
-                dateStr,
-                account,
-                amount.toString(),
-                taxCategory,
-                taxAmount.toString(),
-                memo,
-                item
-            ];
-        });
-
-        const escapeCSV = (value: string | number): string => {
-            const str = String(value);
-            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-                return `"${str.replace(/"/g, '""')}"`;
-            }
-            return str;
-        };
-
-        const csvRows = [
-            headers.map(escapeCSV).join(','),
-            ...rows.map(row => row.map(escapeCSV).join(','))
-        ];
-
-        return csvRows.join('\n');
-    };
-
-    // マネーフォワード形式CSVを生成
-    const generateMoneyForwardCSV = (receipts: Receipt[]): string => {
-        // マネーフォワードのインポート形式に合わせる
-        const headers = ['計算区分', '日付', '内容', '金額（円）', '保有金融機関', '大項目', '中項目', 'メモ', '振替', '残高調整', '通貨', '金額（外貨）'];
-        const rows = receipts.map(receipt => {
-            // 計算区分: 支出
-            const calculationType = '支出';
-
-            // 日付
-            let dateStr = '';
-            if (receipt.receiptDate) {
-                const d = receipt.receiptDate;
-                dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-            } else if (receipt.date) {
-                dateStr = receipt.date.replace(/-/g, '/');
-            } else if (receipt.timestamp) {
-                const d = receipt.timestamp instanceof Date ? receipt.timestamp : new Date(receipt.timestamp);
-                dateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
-            }
-
-            // 内容: 店名
-            const content = receipt.vendor || '';
-
-            // 金額（円）: JPYの場合はそのまま、THBの場合は0（外貨欄に記載）
-            const amountJPY = receipt.currency === 'JPY' ? (receipt.amount || 0) : 0;
-
-            // 保有金融機関: 空
-            const financialInstitution = '';
-
-            // 大項目・中項目: 空（ユーザーが後で設定）
-            const largeCategory = '';
-            const mediumCategory = '';
-
-            // メモ
-            let memo = receipt.note || '';
-            if (receipt.invoice_number) {
-                memo = memo ? `${memo} / インボイス: ${receipt.invoice_number}` : `インボイス: ${receipt.invoice_number}`;
-            }
-
-            // 振替・残高調整: 空
-            const transfer = '';
-            const balanceAdjustment = '';
-
-            // 通貨: THBの場合はTHB、JPYの場合は空
-            const currency = receipt.currency === 'THB' ? 'THB' : '';
-
-            // 金額（外貨）: THBの場合は金額、JPYの場合は空
-            const amountForeign = receipt.currency === 'THB' ? (receipt.amount || 0) : '';
-
-            return [
-                calculationType,
-                dateStr,
-                content,
-                amountJPY.toString(),
-                financialInstitution,
-                largeCategory,
-                mediumCategory,
-                memo,
-                transfer,
-                balanceAdjustment,
-                currency,
-                amountForeign.toString()
-            ];
-        });
-
         const escapeCSV = (value: string | number): string => {
             const str = String(value);
             if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -4152,42 +3989,6 @@ export default function Home() {
                                         >
                                             <div className="font-semibold text-gray-900">汎用CSV（全データ）</div>
                                             <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
-                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
-                                        </button>
-                                        <button
-                                            onClick={() => exportToCSV('freee', false)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
-                                        >
-                                            <div className="font-semibold text-gray-900">freee形式（現在表示中）</div>
-                                            <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
-                                            <div className="text-xs text-gray-500 mt-1">
-                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
-                                            </div>
-                                        </button>
-                                        <button
-                                            onClick={() => exportToCSV('freee', true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
-                                        >
-                                            <div className="font-semibold text-gray-900">freee形式（全データ）</div>
-                                            <div className="text-xs text-gray-500 mt-1">freee会計ソフトのインポート用形式</div>
-                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
-                                        </button>
-                                        <button
-                                            onClick={() => exportToCSV('moneyforward', false)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
-                                        >
-                                            <div className="font-semibold text-gray-900">マネーフォワード形式（現在表示中）</div>
-                                            <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
-                                            <div className="text-xs text-gray-500 mt-1">
-                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
-                                            </div>
-                                        </button>
-                                        <button
-                                            onClick={() => exportToCSV('moneyforward', true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
-                                        >
-                                            <div className="font-semibold text-gray-900">マネーフォワード形式（全データ）</div>
-                                            <div className="text-xs text-gray-500 mt-1">マネーフォワードのインポート用形式</div>
                                             <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                         </button>
                                     </div>
