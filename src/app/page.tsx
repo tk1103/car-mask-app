@@ -101,6 +101,7 @@ export default function Home() {
     const [sortBy, setSortBy] = useState<'timestamp' | 'receiptDate'>('receiptDate'); // ソート基準：撮影時間 or レシート日時
     const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest'); // 並び順：新しい順 or 古い順
     const [showExportModal, setShowExportModal] = useState(false);
+    const [exportPeriod, setExportPeriod] = useState<'all' | 'currentMonth' | 'lastMonth' | 'last3Months' | 'last6Months' | 'thisYear'>('all');
     const [previewImage, setPreviewImage] = useState<{ blob: Blob; corners: Array<{ x: number; y: number }> | null } | null>(null); // プレビュー画像と検出座標
     const [visibleButtons, setVisibleButtons] = useState<Set<number>>(new Set()); // ボタンが表示されているレシートIDのセット
     const previewImageUrlRef = useRef<string | null>(null); // プレビュー画像のURL（メモリ管理用）
@@ -450,12 +451,67 @@ export default function Home() {
         return `${dateStr}_${vendorStr}_${receipt.id || index}.jpg`;
     };
 
+    // 期間に応じてレシートをフィルタリング
+    const getFilteredReceipts = (period: 'all' | 'currentMonth' | 'lastMonth' | 'last3Months' | 'last6Months' | 'thisYear'): Receipt[] => {
+        if (period === 'all') {
+            return receipts;
+        }
+
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth();
+
+        return receipts.filter(receipt => {
+            // レシートの日付を取得
+            let receiptDate: Date;
+            if (receipt.receiptDate) {
+                receiptDate = receipt.receiptDate;
+            } else if (receipt.date) {
+                const dateParts = receipt.date.split('/');
+                if (dateParts.length === 3) {
+                    const year = parseInt(dateParts[0], 10);
+                    const month = parseInt(dateParts[1], 10);
+                    const day = parseInt(dateParts[2], 10);
+                    if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+                        receiptDate = new Date(year, month - 1, day);
+                    } else {
+                        receiptDate = receipt.timestamp instanceof Date ? receipt.timestamp : new Date(receipt.timestamp);
+                    }
+                } else {
+                    receiptDate = receipt.timestamp instanceof Date ? receipt.timestamp : new Date(receipt.timestamp);
+                }
+            } else {
+                receiptDate = receipt.timestamp instanceof Date ? receipt.timestamp : new Date(receipt.timestamp);
+            }
+
+            const receiptYear = receiptDate.getFullYear();
+            const receiptMonth = receiptDate.getMonth();
+
+            switch (period) {
+                case 'currentMonth':
+                    return receiptYear === currentYear && receiptMonth === currentMonth;
+                case 'lastMonth':
+                    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                    return receiptYear === lastMonthYear && receiptMonth === lastMonth;
+                case 'last3Months':
+                    const threeMonthsAgo = new Date(currentYear, currentMonth - 3, 1);
+                    return receiptDate >= threeMonthsAgo;
+                case 'last6Months':
+                    const sixMonthsAgo = new Date(currentYear, currentMonth - 6, 1);
+                    return receiptDate >= sixMonthsAgo;
+                case 'thisYear':
+                    return receiptYear === currentYear;
+                default:
+                    return true;
+            }
+        });
+    };
+
     // CSVエクスポート機能
-    const exportToCSV = (format: 'generic' | 'master', exportAll: boolean) => {
+    const exportToCSV = (format: 'generic' | 'master') => {
         // エクスポート対象のレシートを取得
-        const receiptsToExport = exportAll ? receipts : groupedReceipts.sortedMonthKeys.flatMap(monthKey =>
-            groupedReceipts.grouped[monthKey] || []
-        ).concat(groupedReceipts.unknownDateReceipts);
+        const receiptsToExport = getFilteredReceipts(exportPeriod);
 
         let csvContent = '';
         let filename = '';
@@ -485,7 +541,7 @@ export default function Home() {
     };
 
     // 画像エクスポート機能（ZIP形式）
-    const exportImages = async (exportAll: boolean) => {
+    const exportImages = async () => {
         try {
             // クライアントサイドでのみ実行
             if (typeof window === 'undefined') {
@@ -493,9 +549,7 @@ export default function Home() {
                 return;
             }
 
-            const receiptsToExport = exportAll ? receipts : groupedReceipts.sortedMonthKeys.flatMap(monthKey =>
-                groupedReceipts.grouped[monthKey] || []
-            ).concat(groupedReceipts.unknownDateReceipts);
+            const receiptsToExport = getFilteredReceipts(exportPeriod);
 
             if (receiptsToExport.length === 0) {
                 alert('エクスポートするレシートがありません');
@@ -3929,9 +3983,9 @@ export default function Home() {
             {/* エクスポートモーダル */}
             {showExportModal && (
                 <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-                        <div className="border-b border-gray-300 px-6 py-4 flex items-center justify-between">
-                            <h2 className="text-xl font-bold text-gray-900">CSVエクスポート</h2>
+                    <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col">
+                        <div className="border-b border-gray-300 px-6 py-4 flex items-center justify-between flex-shrink-0">
+                            <h2 className="text-xl font-bold text-gray-900">データエクスポート</h2>
                             <button
                                 onClick={() => setShowExportModal(false)}
                                 className="p-2 hover:bg-gray-100 rounded-full transition-colors"
@@ -3940,7 +3994,32 @@ export default function Home() {
                             </button>
                         </div>
 
-                        <div className="p-6 space-y-6">
+                        <div className="p-6 space-y-6 overflow-y-auto flex-1">
+                            {/* 期間選択 */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    エクスポート期間を選択
+                                </label>
+                                <select
+                                    value={exportPeriod}
+                                    onChange={(e) => setExportPeriod(e.target.value as typeof exportPeriod)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent text-gray-900"
+                                >
+                                    <option value="all">全期間</option>
+                                    <option value="currentMonth">今月</option>
+                                    <option value="lastMonth">先月</option>
+                                    <option value="last3Months">過去3ヶ月</option>
+                                    <option value="last6Months">過去6ヶ月</option>
+                                    <option value="thisYear">今年</option>
+                                </select>
+                                <p className="text-xs text-gray-500 mt-2">
+                                    {(() => {
+                                        const filtered = getFilteredReceipts(exportPeriod);
+                                        return `選択中の期間: ${filtered.length}件`;
+                                    })()}
+                                </p>
+                            </div>
+
                             {/* エクスポート形式の選択 */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -3951,22 +4030,14 @@ export default function Home() {
                                     <div className="border-t border-gray-300 pt-4 mt-4">
                                         <h3 className="text-sm font-semibold text-gray-700 mb-2">画像エクスポート</h3>
                                         <button
-                                            onClick={() => exportImages(false)}
+                                            onClick={exportImages}
                                             className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
-                                            <div className="font-semibold text-gray-900">画像をZIPでエクスポート（現在表示中）</div>
+                                            <div className="font-semibold text-gray-900">画像をZIPでエクスポート</div>
                                             <div className="text-xs text-gray-500 mt-1">撮影したサイズのまま画像をZIPファイルでダウンロード</div>
                                             <div className="text-xs text-gray-500 mt-1">
-                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
+                                                {getFilteredReceipts(exportPeriod).length}件
                                             </div>
-                                        </button>
-                                        <button
-                                            onClick={() => exportImages(true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-blue-600 hover:bg-gray-100 transition-colors mt-2"
-                                        >
-                                            <div className="font-semibold text-gray-900">画像をZIPでエクスポート（全データ）</div>
-                                            <div className="text-xs text-gray-500 mt-1">撮影したサイズのまま画像をZIPファイルでダウンロード</div>
-                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                         </button>
                                     </div>
 
@@ -3974,22 +4045,14 @@ export default function Home() {
                                     <div className="border-t border-gray-300 pt-4 mt-4">
                                         <h3 className="text-sm font-semibold text-gray-700 mb-2">CSVエクスポート</h3>
                                         <button
-                                            onClick={() => exportToCSV('generic', false)}
+                                            onClick={() => exportToCSV('generic')}
                                             className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
                                         >
-                                            <div className="font-semibold text-gray-900">汎用CSV（現在表示中）</div>
+                                            <div className="font-semibold text-gray-900">汎用CSV</div>
                                             <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
                                             <div className="text-xs text-gray-500 mt-1">
-                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
+                                                {getFilteredReceipts(exportPeriod).length}件
                                             </div>
-                                        </button>
-                                        <button
-                                            onClick={() => exportToCSV('generic', true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-gray-300 rounded-lg hover:border-custom-blue hover:bg-gray-100 transition-colors"
-                                        >
-                                            <div className="font-semibold text-gray-900">汎用CSV（全データ）</div>
-                                            <div className="text-xs text-gray-500 mt-1">日付, 店名, 金額, 通貨, 時刻, インボイス番号</div>
-                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                         </button>
                                     </div>
 
@@ -3998,22 +4061,14 @@ export default function Home() {
                                         <h3 className="text-sm font-semibold text-blue-700 mb-2">マスターデータ（スプレッドシート用）</h3>
                                         <p className="text-xs text-gray-500 mb-3">全ての解析データを出力します。計算や台帳作成に最適です。</p>
                                         <button
-                                            onClick={() => exportToCSV('master', false)}
+                                            onClick={() => exportToCSV('master')}
                                             className="w-full px-4 py-3 text-left border-2 border-blue-500 rounded-lg hover:border-blue-600 hover:bg-blue-50 transition-colors bg-blue-50"
                                         >
-                                            <div className="font-semibold text-gray-900">マスターデータ（現在表示中）</div>
+                                            <div className="font-semibold text-gray-900">マスターデータ</div>
                                             <div className="text-xs text-gray-500 mt-1">ID, 撮影日時, レシート日付, 時刻, 店名, 金額, 通貨, インボイス番号, 備考, 画像ファイル名, 解析ステータス</div>
                                             <div className="text-xs text-gray-500 mt-1">
-                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
+                                                {getFilteredReceipts(exportPeriod).length}件
                                             </div>
-                                        </button>
-                                        <button
-                                            onClick={() => exportToCSV('master', true)}
-                                            className="w-full px-4 py-3 text-left border-2 border-blue-500 rounded-lg hover:border-blue-600 hover:bg-blue-50 transition-colors bg-blue-50 mt-2"
-                                        >
-                                            <div className="font-semibold text-gray-900">マスターデータ（全データ）</div>
-                                            <div className="text-xs text-gray-500 mt-1">ID, 撮影日時, レシート日付, 時刻, 店名, 金額, 通貨, インボイス番号, 備考, 画像ファイル名, 解析ステータス</div>
-                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                         </button>
                                     </div>
                                 </div>
@@ -4022,7 +4077,7 @@ export default function Home() {
                             {/* 注意事項 */}
                             <div className="bg-gray-100 border border-gray-300 rounded-lg p-3">
                                 <p className="text-xs text-gray-700">
-                                    💡 各形式のボタンをクリックすると、選択した範囲のデータが即座にダウンロードされます。
+                                    💡 各形式のボタンをクリックすると、選択した期間のデータが即座にダウンロードされます。
                                     <br />
                                     THB（タイバーツ）のレシートは備考欄に「外貨: THB」と記載されます。
                                     <br />
@@ -4031,12 +4086,12 @@ export default function Home() {
                             </div>
                         </div>
 
-                        <div className="border-t border-gray-300 px-6 py-4 flex justify-end">
+                        <div className="border-t border-gray-300 px-6 py-4 flex justify-end flex-shrink-0">
                             <button
                                 onClick={() => setShowExportModal(false)}
                                 className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
                             >
-                                キャンセル
+                                閉じる
                             </button>
                         </div>
                     </div>
