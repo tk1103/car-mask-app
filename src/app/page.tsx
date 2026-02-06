@@ -434,8 +434,19 @@ export default function Home() {
         return `${year}年${monthNum}月`;
     };
 
+    // 画像ファイル名を生成（ZIPエクスポートと同じロジック）
+    const generateImageFilename = (receipt: Receipt, index: number): string => {
+        const dateStr = receipt.receiptDate
+            ? `${receipt.receiptDate.getFullYear()}${String(receipt.receiptDate.getMonth() + 1).padStart(2, '0')}${String(receipt.receiptDate.getDate()).padStart(2, '0')}`
+            : receipt.timestamp
+                ? `${receipt.timestamp.getFullYear()}${String(receipt.timestamp.getMonth() + 1).padStart(2, '0')}${String(receipt.timestamp.getDate()).padStart(2, '0')}`
+                : 'unknown';
+        const vendorStr = receipt.vendor ? receipt.vendor.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20) : 'receipt';
+        return `${dateStr}_${vendorStr}_${receipt.id || index}.jpg`;
+    };
+
     // CSVエクスポート機能
-    const exportToCSV = (format: 'generic' | 'freee' | 'moneyforward', exportAll: boolean) => {
+    const exportToCSV = (format: 'generic' | 'freee' | 'moneyforward' | 'master', exportAll: boolean) => {
         // エクスポート対象のレシートを取得
         const receiptsToExport = exportAll ? receipts : groupedReceipts.sortedMonthKeys.flatMap(monthKey =>
             groupedReceipts.grouped[monthKey] || []
@@ -456,6 +467,10 @@ export default function Home() {
             // マネーフォワード形式
             csvContent = generateMoneyForwardCSV(receiptsToExport);
             filename = `receipt_mf_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.csv`;
+        } else if (format === 'master') {
+            // マスター形式（スプレッドシート用）
+            csvContent = generateMasterCSV(receiptsToExport);
+            filename = `receipt_master_${new Date().toISOString().split('T')[0].replace(/-/g, '')}.csv`;
         }
 
         // BOM付きUTF-8でダウンロード
@@ -729,6 +744,95 @@ export default function Home() {
         const escapeCSV = (value: string | number): string => {
             const str = String(value);
             if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+        };
+
+        const csvRows = [
+            headers.map(escapeCSV).join(','),
+            ...rows.map(row => row.map(escapeCSV).join(','))
+        ];
+
+        return csvRows.join('\n');
+    };
+
+    // マスター形式CSVを生成（スプレッドシート用）
+    const generateMasterCSV = (receipts: Receipt[]): string => {
+        const headers = ['ID', '撮影日時', 'レシート日付', '時刻', '店名', '金額', '通貨', 'インボイス番号', '備考', '画像ファイル名', '解析ステータス'];
+        const rows = receipts.map((receipt, index) => {
+            // ID
+            const id = receipt.id?.toString() || '';
+
+            // 撮影日時
+            let timestampStr = '';
+            if (receipt.timestamp) {
+                const d = receipt.timestamp instanceof Date ? receipt.timestamp : new Date(receipt.timestamp);
+                timestampStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+            }
+
+            // レシート日付
+            let receiptDateStr = '';
+            if (receipt.receiptDate) {
+                const d = receipt.receiptDate;
+                receiptDateStr = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+            } else if (receipt.date) {
+                receiptDateStr = receipt.date.replace(/-/g, '/');
+            }
+
+            // 時刻
+            let timeStr = receipt.time || '';
+            if (!timeStr && receipt.receiptDate) {
+                const d = receipt.receiptDate;
+                timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            }
+
+            // 店名
+            const vendor = receipt.vendor || '';
+
+            // 金額
+            const amount = receipt.amount || 0;
+
+            // 通貨
+            const currency = receipt.currency || 'JPY';
+
+            // インボイス番号
+            const invoiceNumber = receipt.invoice_number || '';
+
+            // 備考
+            const note = receipt.note || '';
+
+            // 画像ファイル名（ZIPエクスポートと同じロジック）
+            const imageFilename = generateImageFilename(receipt, index);
+
+            // 解析ステータス
+            let parseStatus = '成功';
+            if (receipt.amount === 0 || !receipt.amount) {
+                parseStatus = '警告: 金額が0または未検出';
+            }
+            if (receipt.confidenceScore !== undefined && receipt.confidenceScore < 0.5) {
+                parseStatus = `低信頼度 (${(receipt.confidenceScore * 100).toFixed(0)}%)`;
+            }
+
+            return [
+                id,
+                timestampStr,
+                receiptDateStr,
+                timeStr,
+                vendor,
+                amount.toString(),
+                currency,
+                invoiceNumber,
+                note,
+                imageFilename,
+                parseStatus
+            ];
+        });
+
+        // CSV形式に変換（値にカンマや改行が含まれる場合はダブルクォートで囲む）
+        const escapeCSV = (value: string | number): string => {
+            const str = String(value);
+            if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
                 return `"${str.replace(/"/g, '""')}"`;
             }
             return str;
@@ -3939,6 +4043,30 @@ export default function Home() {
                                             <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
                                         </button>
                                     </div>
+
+                                    {/* マスターデータエクスポート */}
+                                    <div className="border-t border-blue-200 pt-4 mt-4">
+                                        <h3 className="text-sm font-semibold text-blue-700 mb-2">マスターデータ（スプレッドシート用）</h3>
+                                        <p className="text-xs text-gray-500 mb-3">全ての解析データを出力します。計算や台帳作成に最適です。</p>
+                                        <button
+                                            onClick={() => exportToCSV('master', false)}
+                                            className="w-full px-4 py-3 text-left border-2 border-blue-500 rounded-lg hover:border-blue-600 hover:bg-blue-50 transition-colors bg-blue-50"
+                                        >
+                                            <div className="font-semibold text-gray-900">マスターデータ（現在表示中）</div>
+                                            <div className="text-xs text-gray-500 mt-1">ID, 撮影日時, レシート日付, 時刻, 店名, 金額, 通貨, インボイス番号, 備考, 画像ファイル名, 解析ステータス</div>
+                                            <div className="text-xs text-gray-500 mt-1">
+                                                {groupedReceipts.sortedMonthKeys.reduce((sum, key) => sum + (groupedReceipts.grouped[key]?.length || 0), 0) + groupedReceipts.unknownDateReceipts.length}件
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => exportToCSV('master', true)}
+                                            className="w-full px-4 py-3 text-left border-2 border-blue-500 rounded-lg hover:border-blue-600 hover:bg-blue-50 transition-colors bg-blue-50 mt-2"
+                                        >
+                                            <div className="font-semibold text-gray-900">マスターデータ（全データ）</div>
+                                            <div className="text-xs text-gray-500 mt-1">ID, 撮影日時, レシート日付, 時刻, 店名, 金額, 通貨, インボイス番号, 備考, 画像ファイル名, 解析ステータス</div>
+                                            <div className="text-xs text-gray-500 mt-1">{receipts.length}件</div>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -3948,6 +4076,8 @@ export default function Home() {
                                     💡 各形式のボタンをクリックすると、選択した範囲のデータが即座にダウンロードされます。
                                     <br />
                                     THB（タイバーツ）のレシートは備考欄に「外貨: THB」と記載されます。
+                                    <br />
+                                    📊 マスターデータ形式では、画像ファイル名がZIPエクスポート時のファイル名と一致します。
                                 </p>
                             </div>
                         </div>
