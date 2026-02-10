@@ -179,7 +179,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isCameraActive]);
 
-  // Detection loop: run coco-ssd on video, filter "car", draw masks on overlay
+  // Detection loop: run coco-ssd on video, filter "car/truck/bus", draw masks on overlay
   useEffect(() => {
     if (!model || !isCameraActive || !videoRef.current || !overlayRef.current) return;
 
@@ -191,6 +191,7 @@ export default function Home() {
     let lastTime = 0;
     const fpsInterval = 1000 / 10;
     let lastCars: DetectedCar[] = [];
+    let frameCount = 0; // フレームカウンター（処理負荷軽減用）
 
     const detect = async () => {
       if (!video.videoWidth || !video.videoHeight || !streamRef.current) {
@@ -203,19 +204,23 @@ export default function Home() {
         overlay.height = video.videoHeight;
       }
 
+      frameCount++;
       const now = performance.now();
-      if (now - lastTime >= fpsInterval) {
+      
+      // 3フレームに1回検知（処理負荷軽減）
+      if (now - lastTime >= fpsInterval && frameCount % 3 === 0) {
         lastTime = now;
         try {
-          const predictions = await model.detect(video);
-          const cars = predictions
-            .filter((p: { class: string }) => p.class === 'car')
+          // 感度向上: maxNumBoxes=20, minScore=0.3で低スコアでも検知
+          const predictions = await model.detect(video, 20, 0.3);
+          const vehicles = predictions
+            .filter((p: { class: string }) => p.class === 'car' || p.class === 'truck' || p.class === 'bus')
             .map((p: { bbox: [number, number, number, number]; score: number }) => ({
               bbox: p.bbox,
               score: p.score,
             }));
-          lastCars = cars;
-          setDetectedCars(cars);
+          lastCars = vehicles;
+          setDetectedCars(vehicles);
         } catch (e) {
           console.warn('Detection error:', e);
         }
@@ -232,12 +237,25 @@ export default function Home() {
         const left = centerX - maskW / 2;
         const top = bottomY - maskH * 0.6;
 
+        // デバッグ用: 車全体を囲む赤い枠を描画
+        overlayCtx.strokeStyle = '#ff0000';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.strokeRect(x, y, w, h);
+
+        // マスクを描画
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
         } else {
           // ダークグレーのマスク
           overlayCtx.fillStyle = '#1a1a1a';
           overlayCtx.fillRect(left, top, maskW, maskH);
+          
+          // A_O_Iロゴを白抜きテキストで表示
+          overlayCtx.fillStyle = '#FFFFFF';
+          overlayCtx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
+          overlayCtx.textAlign = 'center';
+          overlayCtx.textBaseline = 'middle';
+          overlayCtx.fillText('A_O_I', centerX, top + maskH / 2);
         }
       };
 
@@ -286,6 +304,13 @@ export default function Home() {
         // ダークグレーのマスク
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(left, top, maskW, maskH);
+        
+        // A_O_Iロゴを白抜きテキストで表示
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('A_O_I', centerX, top + maskH / 2);
       }
     };
 
