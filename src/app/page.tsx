@@ -17,6 +17,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
+  const [debugLog, setDebugLog] = useState<string | null>(null); // Gemini検出のデバッグ用ログ
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const saveCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -156,6 +157,7 @@ export default function Home() {
 
     setIsProcessing(true);
     setCameraError(null);
+    setDebugLog('Geminiに画像を送信してナンバープレートを検出します…');
 
     try {
       // 現在のビデオフレームをキャプチャ
@@ -190,10 +192,23 @@ export default function Home() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'APIリクエストに失敗しました');
+        const message = errorData.error || 'APIリクエストに失敗しました';
+        setDebugLog(`Gemini APIエラー: ${message}`);
+        throw new Error(message);
       }
 
       const result = await response.json();
+      if (result.error) {
+        // サーバー側で座標解析に失敗した場合など
+        setDebugLog(`Gemini応答エラー: ${result.error}`);
+      } else if (result.found && result.bbox) {
+        setDebugLog(
+          `Gemini検出成功: x=${result.bbox.x}, y=${result.bbox.y}, w=${result.bbox.width}, h=${result.bbox.height}`
+        );
+      } else {
+        // found=false の場合
+        setDebugLog('Gemini応答: ナンバープレートを検出できませんでした (found=false)');
+      }
 
       // 保存用Canvasに描画
       const ctx = saveCanvas.getContext('2d');
@@ -255,7 +270,9 @@ export default function Home() {
       );
     } catch (error) {
       console.error('Save photo error:', error);
-      setCameraError(error instanceof Error ? error.message : '画像の保存に失敗しました');
+      const message = error instanceof Error ? error.message : '画像の保存に失敗しました';
+      setCameraError(message);
+      setDebugLog((prev) => prev ?? `保存処理エラー: ${message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -281,6 +298,11 @@ export default function Home() {
       )}
 
       <main className="max-w-4xl mx-auto px-4 py-6">
+        {debugLog && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-gray-100 border border-gray-200 text-xs text-gray-700 font-mono whitespace-pre-wrap">
+            {debugLog}
+          </div>
+        )}
         {!isCameraActive && (
           <div className="flex flex-col items-center justify-center py-12 gap-6">
             <p className="text-gray-600 text-center">
