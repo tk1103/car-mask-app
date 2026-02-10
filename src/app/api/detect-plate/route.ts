@@ -30,38 +30,29 @@ export async function POST(request: NextRequest) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    // プロンプト: 日本のナンバープレートの座標を取得（最強プロンプト）
-    const prompt = `あなたは自動車のプロカメラマンです。送られた画像から「日本のナンバープレート」の位置を正確に特定してください。
+    // Geminiへの最強プロンプト（日本のナンバープレート特化型）
+    const prompt = `
+      DETECT_LICENSE_PLATE_TASK:
+      1. 分析対象: 画像内の「日本の自動車用ナンバープレート（白・黄色・緑）」を特定してください。
+      2. 座標定義: 
+         - 画像の左上を [0, 0]、右下を [1000, 1000] とする正規化座標を使用せよ。
+         - ナンバープレートの外枠ギリギリを囲むバウンディングボックスを算出せよ。
+      3. 出力形式: 
+         - 思考プロセスや挨拶は一切不要。
+         - 以下の純粋なJSON形式のみを出力せよ。
+      
+      {
+        "found": true,
+        "bbox": {
+          "ymin": [上端のY座標],
+          "xmin": [左端のX座標],
+          "ymax": [下端のY座標],
+          "xmax": [右端のX座標]
+        }
+      }
 
-日本のナンバープレートの特徴：
-- 白い長方形のプレート（軽自動車は黄色）
-- 横長の長方形形状
-- 数字とひらがな/カタカナが記載されている
-- 通常、車の前部または後部に取り付けられている
-
-画像サイズ: 幅 ${imageWidth}px × 高さ ${imageHeight}px
-
-ナンバープレートが見つかった場合、以下のJSON形式で座標を返してください：
-{
-  "found": true,
-  "bbox": {
-    "x": ナンバープレートの左端のX座標（0から1000の正規化座標）,
-    "y": ナンバープレートの上端のY座標（0から1000の正規化座標）,
-    "width": ナンバープレートの幅（0から1000の正規化座標）,
-    "height": ナンバープレートの高さ（0から1000の正規化座標）
-  }
-}
-
-ナンバープレートが見つからない場合：
-{
-  "found": false
-}
-
-重要：
-- 座標は画像全体を1000とした正規化座標で返してください（例：画像の中央は x=500, y=500）
-- 画像の左上を(0,0)とします
-- JSON形式のみを返し、説明文やマークダウン記号（\`\`\`json など）は一切含めないでください
-- 返答は必ず有効なJSON形式のみです`;
+      ※プレートが画像内に存在しない、または不明瞭な場合は必ず {"found": false} とのみ出力してください。
+    `;
 
     const result = await model.generateContent([
       {
@@ -88,12 +79,18 @@ export async function POST(request: NextRequest) {
       const parsed = JSON.parse(jsonText);
       
       // 正規化座標（0-1000）をピクセル座標に変換
-      if (parsed.found && parsed.bbox) {
+      // xmin, ymin, xmax, ymax形式からx, y, width, height形式に変換
+      if (parsed.found && parsed.bbox && parsed.bbox.xmin !== undefined) {
+        const xmin = Math.round((parsed.bbox.xmin / 1000) * imageWidth);
+        const ymin = Math.round((parsed.bbox.ymin / 1000) * imageHeight);
+        const xmax = Math.round((parsed.bbox.xmax / 1000) * imageWidth);
+        const ymax = Math.round((parsed.bbox.ymax / 1000) * imageHeight);
+        
         parsed.bbox = {
-          x: Math.round((parsed.bbox.x / 1000) * imageWidth),
-          y: Math.round((parsed.bbox.y / 1000) * imageHeight),
-          width: Math.round((parsed.bbox.width / 1000) * imageWidth),
-          height: Math.round((parsed.bbox.height / 1000) * imageHeight),
+          x: xmin,
+          y: ymin,
+          width: xmax - xmin,
+          height: ymax - ymin,
         };
       }
       
