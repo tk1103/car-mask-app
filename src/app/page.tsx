@@ -17,12 +17,16 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
-  const [debugLog, setDebugLog] = useState<string | null>(null); // Gemini検出のデバッグ用ログ
+  const [debugLog, setDebugLog] = useState<string | null>(null);
+  const [detectedPlate, setDetectedPlate] = useState<PlateBbox | null>(null); // AR用：リアルタイム検出結果
+  const [isScanning, setIsScanning] = useState(false); // AR用：スキャン中フラグ
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null); // AR用：オーバーレイCanvas
   const saveCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const playAttemptCountRef = useRef<number>(0);
+  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null); // AR用：検出ループのタイマー
 
   // Load mask image (optional)
   useEffect(() => {
@@ -32,6 +36,150 @@ export default function Home() {
     img.onerror = () => setMaskImage(null);
     img.src = '/mask-logo.png';
   }, []);
+
+  // ナンバープレート検出関数（ARループと保存の両方で使用）
+  const detectPlate = useCallback(async (): Promise<PlateBbox | null> => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) return null;
+
+    try {
+      setIsScanning(true);
+      
+      // 現在のビデオフレームをキャプチャ
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = video.videoWidth;
+      tempCanvas.height = video.videoHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) return null;
+
+      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+
+      // CanvasをBlobに変換
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        tempCanvas.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error('画像の変換に失敗しました'));
+        }, 'image/jpeg', 0.92);
+      });
+
+      // Gemini APIに送信
+      const formData = new FormData();
+      formData.append('image', blob, 'photo.jpg');
+      formData.append('width', tempCanvas.width.toString());
+      formData.append('height', tempCanvas.height.toString());
+
+      const response = await fetch('/api/detect-plate', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.warn('Detection API error:', errorData);
+        return null;
+      }
+
+      const result = await response.json();
+      if (result.found && result.bbox) {
+        return result.bbox as PlateBbox;
+      }
+      return null;
+    } catch (error) {
+      console.error('Detection error:', error);
+      return null;
+    } finally {
+      setIsScanning(false);
+    }
+  }, []);
+
+  // AR用：リアルタイム検出ループ（2-3秒おき）
+  useEffect(() => {
+    if (!isCameraActive || !videoRef.current) {
+      setDetectedPlate(null);
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+        detectionIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // 初回検出（すぐに実行）
+    detectPlate().then((bbox) => {
+      if (bbox) setDetectedPlate(bbox);
+    });
+
+    // 2.5秒おきに自動検出
+    detectionIntervalRef.current = setInterval(() => {
+      detectPlate().then((bbox) => {
+        if (bbox) setDetectedPlate(bbox);
+        // found=false の場合は前回の検出結果を保持（AR表示が消えないように）
+      });
+    }, 2500);
+
+    return () => {
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+        detectionIntervalRef.current = null;
+      }
+    };
+  }, [isCameraActive, detectPlate]);
+
+  // AR用：オーバーレイCanvasにリアルタイムでA_O_Iロゴを描画
+  useEffect(() => {
+    if (!isCameraActive || !videoRef.current || !overlayRef.current) {
+      return;
+    }
+
+    const video = videoRef.current;
+    const overlay = overlayRef.current;
+    const overlayCtx = overlay.getContext('2d');
+    if (!overlayCtx) return;
+
+    const drawOverlay = () => {
+      if (!video.videoWidth || !video.videoHeight) {
+        requestAnimationFrame(drawOverlay);
+        return;
+      }
+
+      // Canvasサイズをビデオに合わせる
+      if (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+      }
+
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+      // 検出されたナンバープレート位置にA_O_Iロゴを描画
+      if (detectedPlate) {
+        const bbox = detectedPlate;
+        const centerX = bbox.x + bbox.width / 2;
+        const bottomY = bbox.y + bbox.height;
+        const maskW = Math.max(80, bbox.width * 1.2);
+        const maskH = Math.max(28, bbox.height * 1.5);
+        const left = centerX - maskW / 2;
+        const top = bottomY - maskH * 0.8;
+
+        if (maskImage && maskImage.complete && maskImage.naturalWidth) {
+          overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
+        } else {
+          // ダークグレーのマスク
+          overlayCtx.fillStyle = '#1a1a1a';
+          overlayCtx.fillRect(left, top, maskW, maskH);
+          
+          // A_O_Iロゴを白抜きテキストで表示
+          overlayCtx.fillStyle = '#FFFFFF';
+          overlayCtx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
+          overlayCtx.textAlign = 'center';
+          overlayCtx.textBaseline = 'middle';
+          overlayCtx.fillText('A_O_I', centerX, top + maskH / 2);
+        }
+      }
+
+      requestAnimationFrame(drawOverlay);
+    };
+
+    drawOverlay();
+  }, [isCameraActive, detectedPlate, maskImage]);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
@@ -81,6 +229,10 @@ export default function Home() {
   }, []);
 
   const stopCamera = useCallback(() => {
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current);
+      detectionIntervalRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -90,7 +242,9 @@ export default function Home() {
     }
     setStream(null);
     setIsCameraActive(false);
+    setDetectedPlate(null);
     setCameraError(null);
+    setIsScanning(false);
     playAttemptCountRef.current = 0;
   }, []);
 
@@ -157,66 +311,17 @@ export default function Home() {
 
     setIsProcessing(true);
     setCameraError(null);
-    setDebugLog('Geminiに画像を送信してナンバープレートを検出します…');
 
     try {
-      // 現在のビデオフレームをキャプチャ
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = video.videoWidth;
-      tempCanvas.height = video.videoHeight;
-      const tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) {
-        throw new Error('Canvas context取得に失敗しました');
+      // 最新の検出結果を使用（ARループで既に検出済みの場合）
+      let bbox: PlateBbox | null = detectedPlate;
+      
+      // 検出結果がない場合は、今すぐ検出を実行
+      if (!bbox) {
+        setDebugLog('ナンバープレートを検出中...');
+        bbox = await detectPlate();
       }
 
-      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-
-      // CanvasをBlobに変換
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        tempCanvas.toBlob((b) => {
-          if (b) resolve(b);
-          else reject(new Error('画像の変換に失敗しました'));
-        }, 'image/jpeg', 0.92);
-      });
-
-      // Gemini APIに送信
-      const formData = new FormData();
-      formData.append('image', blob, 'photo.jpg');
-      formData.append('width', tempCanvas.width.toString());
-      formData.append('height', tempCanvas.height.toString());
-
-      const response = await fetch('/api/detect-plate', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        const message = errorData.error || 'APIリクエストに失敗しました';
-        // サーバー側から返ってきた詳細情報も含めて表示
-        setDebugLog(
-          `Gemini APIエラー: ${message}\n\nraw: ${JSON.stringify(errorData, null, 2)}`
-        );
-        // ここでは例外を投げず、UI上のエラー表示とログだけにとどめる
-        setCameraError(message);
-        setIsProcessing(false);
-        return;
-      }
-
-      const result = await response.json();
-      if (result.error) {
-        // サーバー側で座標解析に失敗した場合など
-        setDebugLog(`Gemini応答エラー: ${result.error}`);
-      } else if (result.found && result.bbox) {
-        setDebugLog(
-          `Gemini検出成功: x=${result.bbox.x}, y=${result.bbox.y}, w=${result.bbox.width}, h=${result.bbox.height}`
-        );
-      } else {
-        // found=false の場合
-        setDebugLog('Gemini応答: ナンバープレートを検出できませんでした (found=false)');
-      }
-
-      // 保存用Canvasに描画
       const ctx = saveCanvas.getContext('2d');
       if (!ctx) {
         throw new Error('保存用Canvas context取得に失敗しました');
@@ -231,11 +336,10 @@ export default function Home() {
       ctx.drawImage(video, 0, 0, w, h);
 
       // ナンバープレートが見つかった場合、マスクを描画
-      if (result.found && result.bbox) {
-        const bbox: PlateBbox = result.bbox;
+      if (bbox) {
         const centerX = bbox.x + bbox.width / 2;
         const bottomY = bbox.y + bbox.height;
-        const maskW = Math.max(80, bbox.width * 1.2); // ナンバープレートより少し大きめ
+        const maskW = Math.max(80, bbox.width * 1.2);
         const maskH = Math.max(28, bbox.height * 1.5);
         const left = centerX - maskW / 2;
         const top = bottomY - maskH * 0.8;
@@ -256,12 +360,37 @@ export default function Home() {
         }
       }
 
-      // ダウンロード
+      // Share APIで保存（フォールバック付き）
       saveCanvas.toBlob(
-        (finalBlob) => {
+        async (finalBlob) => {
           if (!finalBlob) {
             throw new Error('最終画像の生成に失敗しました');
           }
+
+          // Share APIが使える場合はそれを使用
+          if (navigator.share && navigator.canShare) {
+            try {
+              const file = new File([finalBlob], `number-mask-${Date.now()}.jpg`, {
+                type: 'image/jpeg',
+              });
+
+              if (navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                  files: [file],
+                  title: 'Number Mask',
+                });
+                setShowSaveSuccess(true);
+                setTimeout(() => setShowSaveSuccess(false), 2500);
+                setIsProcessing(false);
+                return;
+              }
+            } catch (shareError) {
+              // Share APIが失敗した場合はダウンロードにフォールバック
+              console.warn('Share API failed, falling back to download:', shareError);
+            }
+          }
+
+          // Share APIが使えない、または失敗した場合はダウンロード
           const url = URL.createObjectURL(finalBlob);
           const a = document.createElement('a');
           a.href = url;
@@ -270,6 +399,7 @@ export default function Home() {
           URL.revokeObjectURL(url);
           setShowSaveSuccess(true);
           setTimeout(() => setShowSaveSuccess(false), 2500);
+          setIsProcessing(false);
         },
         'image/jpeg',
         0.92
@@ -279,10 +409,9 @@ export default function Home() {
       const message = error instanceof Error ? error.message : '画像の保存に失敗しました';
       setCameraError(message);
       setDebugLog((prev) => prev ?? `保存処理エラー: ${message}`);
-    } finally {
       setIsProcessing(false);
     }
-  }, [maskImage]);
+  }, [detectedPlate, maskImage, detectPlate]);
 
   return (
     <div className="min-h-screen bg-white pb-20" style={{ backgroundColor: '#FFFFFF' }}>
@@ -339,14 +468,6 @@ export default function Home() {
                 <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
               </div>
             )}
-            {isProcessing && (
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <Loader2 className="animate-spin text-blue-600" size={24} />
-                  <p className="text-blue-800 text-sm font-medium">ナンバープレートを検出中...</p>
-                </div>
-              </div>
-            )}
             {/* スマホ最適化: 画面からはみ出さないように調整 */}
             <div className="relative w-full bg-gray-900 rounded-2xl overflow-hidden shadow-lg" style={{ maxHeight: 'calc(100vh - 250px)', aspectRatio: '9/16' }}>
               <video
@@ -376,6 +497,18 @@ export default function Home() {
                   }
                 }}
               />
+              {/* AR用：オーバーレイCanvas（リアルタイムでA_O_Iロゴを描画） */}
+              <canvas
+                ref={overlayRef}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                style={{ objectFit: 'cover' }}
+              />
+              {/* AI Scanning... インジケーター（画面の隅に小さく表示） */}
+              {isScanning && (
+                <div className="absolute top-2 right-2 px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm">
+                  <p className="text-xs text-gray-700 font-medium">AI Scanning...</p>
+                </div>
+              )}
             </div>
             <div className="flex justify-center gap-4">
               <button
