@@ -27,6 +27,7 @@ export default function Home() {
   const streamRef = useRef<MediaStream | null>(null);
   const playAttemptCountRef = useRef<number>(0);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null); // AR用：検出ループのタイマー
+  const lastDetectionTimeRef = useRef<number>(0); // 最後に検出成功した時刻（永続化用）
 
   // Load mask image (optional)
   useEffect(() => {
@@ -45,21 +46,28 @@ export default function Home() {
     try {
       setIsScanning(true);
       
-      // 現在のビデオフレームをキャプチャ
+      // 現在のビデオフレームをキャプチャ（速度向上のため解像度を下げる）
       const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = video.videoWidth;
-      tempCanvas.height = video.videoHeight;
+      // 最大640x480にリサイズ（API呼び出しを高速化、精度とのバランス）
+      const maxWidth = 640;
+      const maxHeight = 480;
+      const scale = Math.min(maxWidth / video.videoWidth, maxHeight / video.videoHeight, 1);
+      tempCanvas.width = Math.round(video.videoWidth * scale);
+      tempCanvas.height = Math.round(video.videoHeight * scale);
       const tempCtx = tempCanvas.getContext('2d');
       if (!tempCtx) return null;
 
+      // 画像の品質を向上させるため、スムージングを有効化
+      tempCtx.imageSmoothingEnabled = true;
+      tempCtx.imageSmoothingQuality = 'high';
       tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
 
-      // CanvasをBlobに変換
+      // CanvasをBlobに変換（品質を0.8に調整：速度と精度のバランス）
       const blob = await new Promise<Blob>((resolve, reject) => {
         tempCanvas.toBlob((b) => {
           if (b) resolve(b);
           else reject(new Error('画像の変換に失敗しました'));
-        }, 'image/jpeg', 0.92);
+        }, 'image/jpeg', 0.8); // 0.75 → 0.8 に上げて精度向上
       });
 
       // Gemini APIに送信
@@ -92,10 +100,11 @@ export default function Home() {
     }
   }, []);
 
-  // AR用：リアルタイム検出ループ（2-3秒おき）
+  // AR用：リアルタイム検出ループ（600ms間隔で高速化）
   useEffect(() => {
     if (!isCameraActive || !videoRef.current) {
       setDetectedPlate(null);
+      lastDetectionTimeRef.current = 0;
       if (detectionIntervalRef.current) {
         clearInterval(detectionIntervalRef.current);
         detectionIntervalRef.current = null;
@@ -105,16 +114,29 @@ export default function Home() {
 
     // 初回検出（すぐに実行）
     detectPlate().then((bbox) => {
-      if (bbox) setDetectedPlate(bbox);
+      if (bbox) {
+        setDetectedPlate(bbox);
+        lastDetectionTimeRef.current = Date.now();
+      }
     });
 
-    // 2.5秒おきに自動検出
+    // 600msおきに自動検出（速度向上：1秒 → 600ms）
     detectionIntervalRef.current = setInterval(() => {
       detectPlate().then((bbox) => {
-        if (bbox) setDetectedPlate(bbox);
-        // found=false の場合は前回の検出結果を保持（AR表示が消えないように）
+        if (bbox) {
+          setDetectedPlate(bbox);
+          lastDetectionTimeRef.current = Date.now(); // 検出成功時刻を記録
+        } else {
+          // found=false の場合でも、最後の検出から3秒以内なら前回の結果を保持
+          const timeSinceLastDetection = Date.now() - lastDetectionTimeRef.current;
+          if (timeSinceLastDetection > 3000) {
+            // 3秒以上検出されない場合はクリア
+            setDetectedPlate(null);
+          }
+          // 3秒以内なら setDetectedPlate を呼ばず、前回の値を保持
+        }
       });
-    }, 2500);
+    }, 600); // 1秒 → 600msに短縮
 
     return () => {
       if (detectionIntervalRef.current) {
