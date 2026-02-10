@@ -4,10 +4,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Loader2, CheckCircle } from 'lucide-react';
 
 type PlateBbox = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  x: number; // 0-1の比率
+  y: number; // 0-1の比率
+  width: number; // 0-1の比率
+  height: number; // 0-1の比率
 };
 
 export default function Home() {
@@ -59,9 +59,9 @@ export default function Home() {
       
       // 現在のビデオフレームをキャプチャ（速度向上のため解像度を下げる）
       const tempCanvas = document.createElement('canvas');
-      // 最大640x480にリサイズ（API呼び出しを高速化、精度とのバランス）
-      const maxWidth = 640;
-      const maxHeight = 480;
+      // 最大400pxにリサイズ（API呼び出しを高速化）
+      const maxWidth = 400;
+      const maxHeight = 300;
       const scale = Math.min(maxWidth / video.videoWidth, maxHeight / video.videoHeight, 1);
       tempCanvas.width = Math.round(video.videoWidth * scale);
       tempCanvas.height = Math.round(video.videoHeight * scale);
@@ -136,11 +136,24 @@ export default function Home() {
       const result = await response.json();
       
       // デバッグ情報を常に表示（検出状況を確認するため）
-      if (result.found && result.bbox) {
-        const logMsg = `✓ 検出成功: x=${Math.round(result.bbox.x)}, y=${Math.round(result.bbox.y)}, w=${Math.round(result.bbox.width)}, h=${Math.round(result.bbox.height)}`;
+      if (result.found && result.bbox && result.bbox.xmin !== undefined) {
+        // 0-1000の座標を0-1の比率に変換
+        const xmin = result.bbox.xmin / 1000;
+        const ymin = result.bbox.ymin / 1000;
+        const xmax = result.bbox.xmax / 1000;
+        const ymax = result.bbox.ymax / 1000;
+        
+        const ratioBbox: PlateBbox = {
+          x: xmin,
+          y: ymin,
+          width: xmax - xmin,
+          height: ymax - ymin,
+        };
+        
+        const logMsg = `✓ 検出成功: x=${(ratioBbox.x * 100).toFixed(1)}%, y=${(ratioBbox.y * 100).toFixed(1)}%, w=${(ratioBbox.width * 100).toFixed(1)}%, h=${(ratioBbox.height * 100).toFixed(1)}%`;
         setDebugLog(logMsg);
-        console.log('Detection success:', result.bbox);
-        return result.bbox as PlateBbox;
+        console.log('Detection success (ratio):', ratioBbox);
+        return ratioBbox;
       } else {
         // found=falseの場合もログに記録（問題特定のため）
         const errorMsg = result.error ? `検出失敗: ${result.error}` : 'ナンバープレートが見つかりませんでした';
@@ -259,18 +272,19 @@ export default function Home() {
 
       overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
-      // 検出されたナンバープレート位置にA_O_Iロゴを描画
+      // 検出されたナンバープレート位置にA_O_Iロゴを描画（比率ベース）
       if (detectedPlate) {
-        const bbox = detectedPlate;
-        const centerX = bbox.x + bbox.width / 2;
-        const bottomY = bbox.y + bbox.height;
-        const maskW = Math.max(80, bbox.width * 1.2);
-        const maskH = Math.max(28, bbox.height * 1.5);
+        const bbox = detectedPlate; // 0-1の比率
+        // 比率を画面サイズに変換
+        const centerX = (bbox.x + bbox.width / 2) * overlay.width;
+        const bottomY = (bbox.y + bbox.height) * overlay.height;
+        const maskW = Math.max(overlay.width * 0.1, bbox.width * overlay.width * 1.2);
+        const maskH = Math.max(overlay.height * 0.03, bbox.height * overlay.height * 1.5);
         const left = centerX - maskW / 2;
         const top = bottomY - maskH * 0.8;
 
         // デバッグ: マスク描画位置を確認
-        console.log(`Drawing mask at: left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
+        console.log(`Drawing mask (ratio-based): left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
 
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
@@ -471,16 +485,17 @@ export default function Home() {
       // ビデオフレームを描画
       ctx.drawImage(video, 0, 0, w, h);
 
-      // ナンバープレートが見つかった場合、マスクを描画
+      // ナンバープレートが見つかった場合、マスクを描画（比率ベース）
       if (bbox) {
-        const centerX = bbox.x + bbox.width / 2;
-        const bottomY = bbox.y + bbox.height;
-        const maskW = Math.max(80, bbox.width * 1.2);
-        const maskH = Math.max(28, bbox.height * 1.5);
+        // 比率を画面サイズに変換
+        const centerX = (bbox.x + bbox.width / 2) * w;
+        const bottomY = (bbox.y + bbox.height) * h;
+        const maskW = Math.max(w * 0.1, bbox.width * w * 1.2);
+        const maskH = Math.max(h * 0.03, bbox.height * h * 1.5);
         const left = centerX - maskW / 2;
         const top = bottomY - maskH * 0.8;
 
-        console.log(`Save: Drawing mask at: left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
+        console.log(`Save: Drawing mask (ratio-based): left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
 
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           ctx.drawImage(maskImage, left, top, maskW, maskH);
@@ -496,7 +511,7 @@ export default function Home() {
           ctx.textBaseline = 'middle';
           ctx.fillText('A_O_I', centerX, top + maskH / 2);
         }
-        setDebugLog(`保存: マスクを描画しました (x=${Math.round(bbox.x)}, y=${Math.round(bbox.y)})`);
+        setDebugLog(`保存: マスクを描画しました (x=${(bbox.x * 100).toFixed(1)}%, y=${(bbox.y * 100).toFixed(1)}%)`);
       } else {
         setDebugLog('保存: ナンバープレートが見つかりませんでした');
       }

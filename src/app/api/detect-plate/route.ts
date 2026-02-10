@@ -28,51 +28,26 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Geminiへの最強プロンプト（日本のナンバープレート特化型・精度向上版）
+    // Geminiへの最強プロンプト（精度・速度特化型）
     const prompt = `
-あなたは日本の自動車ナンバープレート検出の専門家です。画像内の「日本の自動車用ナンバープレート」を高精度で検出してください。
+TASK: Detect the precise bounding box of a Japanese License Plate.
 
-【日本のナンバープレートの特徴】
-- 白い長方形（軽自動車は黄色、営業用は緑）
-- 横長の長方形（幅:高さ = 約3:1〜4:1）
-- 数字とひらがな/カタカナが記載されている
-- 通常、車の前部または後部の中央下部に取り付けられている
-- 反射材で光っている場合がある
-- 縁取り（枠）がある
-- 車体のバンパーやグリル付近に配置される
-
-【検出優先順位】
-1. 車の前部/後部の中央下部にある横長の白/黄/緑の長方形
-2. 数字と文字が読み取れるプレート（文字が小さくても検出）
-3. 画面の下半分にあるプレート（上半分は通常、フロントガラスや背景）
-4. 部分的に隠れていても、プレートの大部分が見えていれば検出
-
-【検出の厳密さ】
-- プレートが少し傾いていても検出してください
-- 光の反射で見えにくくても、プレートの形状が分かれば検出してください
-- 複数のプレートがある場合は、最も大きく、最も明確なものを検出してください
-
-【座標定義】
-- 画像の左上を [0, 0]、右下を [1000, 1000] とする正規化座標を使用
-- ナンバープレートの外枠ギリギリを囲むバウンディングボックスを算出
-- プレート全体（数字・文字・枠を含む）を正確に囲むこと
-- 座標は整数値で出力してください
-
-【出力形式】
-思考プロセスや挨拶は一切不要。以下の純粋なJSON形式のみを出力してください。
-
+CRITICAL RULES:
+1. Target only the license plate (rectangle part), excluding car body.
+2. Coordinate system: Use normalized coordinates where top-left is [0, 0] and bottom-right is [1000, 1000].
+3. Respond ONLY in the following JSON format:
 {
   "found": true,
   "bbox": {
-    "ymin": [上端のY座標（0-1000の整数）],
-    "xmin": [左端のX座標（0-1000の整数）],
-    "ymax": [下端のY座標（0-1000の整数）],
-    "xmax": [右端のX座標（0-1000の整数）]
+    "ymin": number,
+    "xmin": number,
+    "ymax": number,
+    "xmax": number
   }
 }
-
-プレートが画像内に存在しない、または不明瞭な場合は必ず {"found": false} とのみ出力してください。
-    `;
+4. If no plate is clearly visible, return {"found": false}.
+5. Strictly no conversational text, no markdown code blocks. Just the JSON.
+`;
 
     // REST API (v1) で直接呼び出し
     // ListModels で確認できたマルチモーダル対応モデルを使用
@@ -188,21 +163,11 @@ export async function POST(request: NextRequest) {
       const parsed = JSON.parse(jsonText);
       console.log('Parsed JSON:', JSON.stringify(parsed));
       
-      // 正規化座標（0-1000）をピクセル座標に変換
-      // xmin, ymin, xmax, ymax形式からx, y, width, height形式に変換
+      // 0-1000の正規化座標をそのまま返す（フロントエンド側で比率に変換）
+      // xmin, ymin, xmax, ymax形式のまま返す
       if (parsed.found && parsed.bbox && parsed.bbox.xmin !== undefined) {
-        const xmin = Math.round((parsed.bbox.xmin / 1000) * imageWidth);
-        const ymin = Math.round((parsed.bbox.ymin / 1000) * imageHeight);
-        const xmax = Math.round((parsed.bbox.xmax / 1000) * imageWidth);
-        const ymax = Math.round((parsed.bbox.ymax / 1000) * imageHeight);
-        
-        parsed.bbox = {
-          x: xmin,
-          y: ymin,
-          width: xmax - xmin,
-          height: ymax - ymin,
-        };
-        console.log('Converted bbox:', parsed.bbox);
+        // 座標変換は行わず、0-1000の座標をそのまま返す
+        console.log('Bbox (normalized 0-1000):', parsed.bbox);
       } else {
         console.log('No bbox found in parsed result:', parsed);
       }
