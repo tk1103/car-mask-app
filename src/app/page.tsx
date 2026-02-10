@@ -214,12 +214,27 @@ export default function Home() {
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                className="w-full h-full"
+                style={{
+                  objectFit: 'cover',
+                  width: '100%',
+                  height: '100%',
+                  display: 'block',
+                  border: '4px solid red',
+                }}
                 onLoadedMetadata={() => {
                   // メタデータ読み込み後に確実に再生
                   if (videoRef.current) {
                     videoRef.current.play().catch((err) => {
-                      console.warn('Auto-play failed, will retry:', err);
+                      console.warn('Auto-play failed on loadedMetadata:', err);
+                    });
+                  }
+                }}
+                onCanPlay={() => {
+                  // iOSでの再生成功率を上げるため、onCanPlayでも再生を試行
+                  if (videoRef.current) {
+                    videoRef.current.play().catch((err) => {
+                      console.warn('Auto-play failed on canPlay:', err);
                     });
                   }
                 }}
