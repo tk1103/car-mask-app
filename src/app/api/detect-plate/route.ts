@@ -30,8 +30,14 @@ export async function POST(request: NextRequest) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    // プロンプト: ナンバープレートの座標を取得
-    const prompt = `この画像内の自動車のナンバープレート（車両番号プレート、ライセンスプレート）の位置を検出してください。
+    // プロンプト: 日本のナンバープレートの座標を取得（最強プロンプト）
+    const prompt = `あなたは自動車のプロカメラマンです。送られた画像から「日本のナンバープレート」の位置を正確に特定してください。
+
+日本のナンバープレートの特徴：
+- 白い長方形のプレート（軽自動車は黄色）
+- 横長の長方形形状
+- 数字とひらがな/カタカナが記載されている
+- 通常、車の前部または後部に取り付けられている
 
 画像サイズ: 幅 ${imageWidth}px × 高さ ${imageHeight}px
 
@@ -39,10 +45,10 @@ export async function POST(request: NextRequest) {
 {
   "found": true,
   "bbox": {
-    "x": ナンバープレートの左端のX座標（0から${imageWidth}の範囲、ピクセル単位）,
-    "y": ナンバープレートの上端のY座標（0から${imageHeight}の範囲、ピクセル単位）,
-    "width": ナンバープレートの幅（ピクセル単位）,
-    "height": ナンバープレートの高さ（ピクセル単位）
+    "x": ナンバープレートの左端のX座標（0から1000の正規化座標）,
+    "y": ナンバープレートの上端のY座標（0から1000の正規化座標）,
+    "width": ナンバープレートの幅（0から1000の正規化座標）,
+    "height": ナンバープレートの高さ（0から1000の正規化座標）
   }
 }
 
@@ -51,8 +57,11 @@ export async function POST(request: NextRequest) {
   "found": false
 }
 
-座標は画像の左上を(0,0)としたピクセル単位で返してください。
-JSON形式のみを返し、説明文やマークダウン記号は含めないでください。`;
+重要：
+- 座標は画像全体を1000とした正規化座標で返してください（例：画像の中央は x=500, y=500）
+- 画像の左上を(0,0)とします
+- JSON形式のみを返し、説明文やマークダウン記号（\`\`\`json など）は一切含めないでください
+- 返答は必ず有効なJSON形式のみです`;
 
     const result = await model.generateContent([
       {
@@ -77,6 +86,17 @@ JSON形式のみを返し、説明文やマークダウン記号は含めない�
 
     try {
       const parsed = JSON.parse(jsonText);
+      
+      // 正規化座標（0-1000）をピクセル座標に変換
+      if (parsed.found && parsed.bbox) {
+        parsed.bbox = {
+          x: Math.round((parsed.bbox.x / 1000) * imageWidth),
+          y: Math.round((parsed.bbox.y / 1000) * imageHeight),
+          width: Math.round((parsed.bbox.width / 1000) * imageWidth),
+          height: Math.round((parsed.bbox.height / 1000) * imageHeight),
+        };
+      }
+      
       return NextResponse.json(parsed);
     } catch (parseError) {
       console.error('JSON parse error:', parseError);
