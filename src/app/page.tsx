@@ -94,7 +94,22 @@ export default function Home() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        const errorMsg = `APIエラー: ${response.status} - ${JSON.stringify(errorData)}`;
+        
+        // レート制限エラー（429）の場合は特別なメッセージを表示
+        if (response.status === 429) {
+          const rateLimitMsg = '⚠️ APIレート制限に達しました。無料プランは1日20リクエストまでです。しばらく待ってから再度お試しください。';
+          setDebugLog(rateLimitMsg);
+          setCameraError(rateLimitMsg);
+          console.warn('Rate limit exceeded:', errorData);
+          // 検出ループを一時停止
+          if (detectionIntervalRef.current) {
+            clearInterval(detectionIntervalRef.current);
+            detectionIntervalRef.current = null;
+          }
+          return null;
+        }
+        
+        const errorMsg = `APIエラー: ${response.status} - ${errorData.error || JSON.stringify(errorData)}`;
         setDebugLog(errorMsg);
         console.warn('Detection API error:', errorData);
         return null;
@@ -155,7 +170,7 @@ export default function Home() {
       setDebugLog(`初回検出エラー: ${err instanceof Error ? err.message : String(err)}`);
     });
 
-    // 800msおきに自動検出（検出完了を待つため少し間隔を空ける）
+    // 5秒おきに自動検出（レート制限対策：無料プランは1日20リクエストまで）
     detectionIntervalRef.current = setInterval(() => {
       // 検出中でない場合のみ実行
       if (!isDetectingRef.current) {
@@ -165,14 +180,14 @@ export default function Home() {
             lastDetectionTimeRef.current = Date.now(); // 検出成功時刻を記録
             console.log('Interval detection success:', bbox);
           } else {
-            // found=false の場合でも、最後の検出から3秒以内なら前回の結果を保持
+            // found=false の場合でも、最後の検出から10秒以内なら前回の結果を保持
             const timeSinceLastDetection = Date.now() - lastDetectionTimeRef.current;
-            if (timeSinceLastDetection > 3000) {
-              // 3秒以上検出されない場合はクリア
+            if (timeSinceLastDetection > 10000) {
+              // 10秒以上検出されない場合はクリア
               setDetectedPlate(null);
-              console.log('Clearing detectedPlate (3s timeout)');
+              console.log('Clearing detectedPlate (10s timeout)');
             }
-            // 3秒以内なら setDetectedPlate を呼ばず、前回の値を保持
+            // 10秒以内なら setDetectedPlate を呼ばず、前回の値を保持
           }
         }).catch((err) => {
           console.error('Interval detection error:', err);
@@ -180,7 +195,7 @@ export default function Home() {
       } else {
         console.log('Skipping detection (already detecting)');
       }
-    }, 800); // 600ms → 800msに調整（検出完了を待つ）
+    }, 5000); // 800ms → 5000ms（5秒）に変更（レート制限対策）
 
     return () => {
       if (detectionIntervalRef.current) {
@@ -511,7 +526,13 @@ export default function Home() {
 
       <main className="max-w-4xl mx-auto px-4 py-6">
         {debugLog && (
-          <div className="mb-4 px-4 py-3 rounded-lg bg-gray-100 border border-gray-200 text-xs text-gray-700 font-mono whitespace-pre-wrap">
+          <div className={`mb-4 px-4 py-3 rounded-lg border text-xs font-mono whitespace-pre-wrap ${
+            debugLog.includes('レート制限') || debugLog.includes('APIエラー') 
+              ? 'bg-red-50 border-red-200 text-red-800' 
+              : debugLog.includes('検出成功') || debugLog.includes('マスクを描画')
+              ? 'bg-green-50 border-green-200 text-green-800'
+              : 'bg-gray-100 border-gray-200 text-gray-700'
+          }`}>
             {debugLog}
           </div>
         )}
