@@ -126,6 +126,8 @@ export async function POST(request: NextRequest) {
         ?.map((p: any) => p.text || '')
         .join('') ?? '';
 
+    console.log('Gemini API raw text response:', text.substring(0, 500)); // 最初の500文字をログ
+
     // JSONを抽出（```json や ``` を除去）
     let jsonText = text.trim();
     if (jsonText.includes('```json')) {
@@ -134,8 +136,12 @@ export async function POST(request: NextRequest) {
       jsonText = jsonText.split('```')[1].split('```')[0].trim();
     }
 
+    // デバッグ: 抽出されたJSONテキストを確認
+    console.log('Extracted JSON text:', jsonText.substring(0, 200));
+
     try {
       const parsed = JSON.parse(jsonText);
+      console.log('Parsed JSON:', JSON.stringify(parsed));
       
       // 正規化座標（0-1000）をピクセル座標に変換
       // xmin, ymin, xmax, ymax形式からx, y, width, height形式に変換
@@ -151,17 +157,20 @@ export async function POST(request: NextRequest) {
           width: xmax - xmin,
           height: ymax - ymin,
         };
+        console.log('Converted bbox:', parsed.bbox);
+      } else {
+        console.log('No bbox found in parsed result:', parsed);
       }
       
       return NextResponse.json(parsed);
     } catch (parseError) {
       console.error('JSON parse error:', parseError);
-      console.error('Response text:', text);
+      console.error('Response text (full):', text);
       // JSONパースに失敗した場合、テキストから座標を抽出を試みる
       return NextResponse.json({ 
         found: false, 
         error: '座標の解析に失敗しました',
-        rawResponse: text 
+        rawResponse: text.substring(0, 500) // 最初の500文字のみ返す
       });
     }
   } catch (error) {

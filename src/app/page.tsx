@@ -102,11 +102,19 @@ export default function Home() {
 
       const result = await response.json();
       
+      // デバッグ情報を常に表示（検出状況を確認するため）
       if (result.found && result.bbox) {
-        setDebugLog(`✓ 検出成功: x=${Math.round(result.bbox.x)}, y=${Math.round(result.bbox.y)}`);
+        const logMsg = `✓ 検出成功: x=${Math.round(result.bbox.x)}, y=${Math.round(result.bbox.y)}, w=${Math.round(result.bbox.width)}, h=${Math.round(result.bbox.height)}`;
+        setDebugLog(logMsg);
+        console.log('Detection success:', result.bbox);
         return result.bbox as PlateBbox;
       } else {
-        // found=falseの場合はデバッグログを更新しない（チカチカ防止）
+        // found=falseの場合もログに記録（問題特定のため）
+        const errorMsg = result.error ? `検出失敗: ${result.error}` : 'ナンバープレートが見つかりませんでした';
+        setDebugLog(errorMsg);
+        if (result.rawResponse) {
+          console.warn('API raw response:', result.rawResponse);
+        }
         return null;
       }
     } catch (error) {
@@ -133,11 +141,18 @@ export default function Home() {
     }
 
     // 初回検出（すぐに実行）
+    setDebugLog('検出ループ開始...');
     detectPlate().then((bbox) => {
       if (bbox) {
         setDetectedPlate(bbox);
         lastDetectionTimeRef.current = Date.now();
+        console.log('First detection success:', bbox);
+      } else {
+        console.log('First detection: no plate found');
       }
+    }).catch((err) => {
+      console.error('First detection error:', err);
+      setDebugLog(`初回検出エラー: ${err instanceof Error ? err.message : String(err)}`);
     });
 
     // 800msおきに自動検出（検出完了を待つため少し間隔を空ける）
@@ -148,16 +163,22 @@ export default function Home() {
           if (bbox) {
             setDetectedPlate(bbox);
             lastDetectionTimeRef.current = Date.now(); // 検出成功時刻を記録
+            console.log('Interval detection success:', bbox);
           } else {
             // found=false の場合でも、最後の検出から3秒以内なら前回の結果を保持
             const timeSinceLastDetection = Date.now() - lastDetectionTimeRef.current;
             if (timeSinceLastDetection > 3000) {
               // 3秒以上検出されない場合はクリア
               setDetectedPlate(null);
+              console.log('Clearing detectedPlate (3s timeout)');
             }
             // 3秒以内なら setDetectedPlate を呼ばず、前回の値を保持
           }
+        }).catch((err) => {
+          console.error('Interval detection error:', err);
         });
+      } else {
+        console.log('Skipping detection (already detecting)');
       }
     }, 800); // 600ms → 800msに調整（検出完了を待つ）
 
@@ -204,6 +225,9 @@ export default function Home() {
         const left = centerX - maskW / 2;
         const top = bottomY - maskH * 0.8;
 
+        // デバッグ: マスク描画位置を確認
+        console.log(`Drawing mask at: left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
+
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
         } else {
@@ -218,6 +242,9 @@ export default function Home() {
           overlayCtx.textBaseline = 'middle';
           overlayCtx.fillText('A_O_I', centerX, top + maskH / 2);
         }
+      } else {
+        // デバッグ: detectedPlateがnullの場合
+        console.log('No detectedPlate, skipping mask drawing');
       }
 
       requestAnimationFrame(drawOverlay);
@@ -389,6 +416,8 @@ export default function Home() {
         const left = centerX - maskW / 2;
         const top = bottomY - maskH * 0.8;
 
+        console.log(`Save: Drawing mask at: left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
+
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           ctx.drawImage(maskImage, left, top, maskW, maskH);
         } else {
@@ -403,6 +432,9 @@ export default function Home() {
           ctx.textBaseline = 'middle';
           ctx.fillText('A_O_I', centerX, top + maskH / 2);
         }
+        setDebugLog(`保存: マスクを描画しました (x=${Math.round(bbox.x)}, y=${Math.round(bbox.y)})`);
+      } else {
+        setDebugLog('保存: ナンバープレートが見つかりませんでした');
       }
 
       // Share APIで保存（フォールバック付き）
