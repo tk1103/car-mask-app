@@ -3,63 +3,62 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Loader2, CheckCircle } from 'lucide-react';
 
-// type DetectedCar = {
-//   bbox: [number, number, number, number]; // [x, y, width, height]
-//   score: number;
-// };
+type DetectedCar = {
+  bbox: [number, number, number, number]; // [x, y, width, height]
+  score: number;
+};
 
 export default function Home() {
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  // const [detectedCars, setDetectedCars] = useState<DetectedCar[]>([]);
-  // const [isModelLoading, setIsModelLoading] = useState(true);
-  // const [model, setModel] = useState<any>(null);
-  // const [showSaveSuccess, setShowSaveSuccess] = useState(false);
-  // const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
+  const [detectedCars, setDetectedCars] = useState<DetectedCar[]>([]);
+  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [model, setModel] = useState<any>(null);
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  // デバッグ情報は削除（映像が確認できたため）
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  // const overlayRef = useRef<HTMLCanvasElement>(null);
-  // const saveCanvasRef = useRef<HTMLCanvasElement>(null);
-  // const detectionLoopRef = useRef<number | null>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+  const saveCanvasRef = useRef<HTMLCanvasElement>(null);
+  const detectionLoopRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const playAttemptCountRef = useRef<number>(0);
 
-  // Load COCO-SSD model - コメントアウト
-  // useEffect(() => {
-  //   let cancelled = false;
-  //   (async () => {
-  //     try {
-  //       const cocoSsd = await import('@tensorflow-models/coco-ssd');
-  //       const m = await cocoSsd.load();
-  //       if (!cancelled) {
-  //         setModel(m);
-  //       }
-  //     } catch (err) {
-  //       console.error('Failed to load coco-ssd:', err);
-  //     } finally {
-  //       if (!cancelled) {
-  //         setIsModelLoading(false);
-  //       }
-  //     }
-  //   })();
-  //   return () => {
-  //     cancelled = true;
-  //   };
-  // }, []);
+  // Load COCO-SSD model
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cocoSsd = await import('@tensorflow-models/coco-ssd');
+        const m = await cocoSsd.load();
+        if (!cancelled) {
+          setModel(m);
+        }
+      } catch (err) {
+        console.error('Failed to load coco-ssd:', err);
+      } finally {
+        if (!cancelled) {
+          setIsModelLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // Load mask image (optional) - コメントアウト
-  // useEffect(() => {
-  //   const img = new Image();
-  //   img.crossOrigin = 'anonymous';
-  //   img.onload = () => setMaskImage(img);
-  //   img.onerror = () => setMaskImage(null);
-  //   img.src = '/mask-logo.png';
-  // }, []);
+  // Load mask image (optional)
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => setMaskImage(img);
+    img.onerror = () => setMaskImage(null);
+    img.src = '/mask-logo.png';
+  }, []);
 
   const startCamera = useCallback(async () => {
-    setCameraError(null); // エラーをクリア
+    setCameraError(null);
 
     if (!navigator.mediaDevices?.getUserMedia) {
       const errorMsg = 'カメラAPIが利用できません。スマホでは https:// でアクセスする必要があります。';
@@ -68,7 +67,6 @@ export default function Home() {
     }
 
     try {
-      // 背面カメラを優先 + 高画質設定
       const s = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -79,13 +77,11 @@ export default function Home() {
       });
       
       streamRef.current = s;
-      // stream stateを設定して、useEffectでsrcObjectを接続する
       setStream(s);
       setIsCameraActive(true);
     } catch (err) {
       console.error('Camera error:', err);
       
-      // エラーの種類に応じて詳細なメッセージを表示
       let errorMessage = 'カメラへのアクセスに失敗しました。';
       
       if (err instanceof Error) {
@@ -109,25 +105,25 @@ export default function Home() {
   }, []);
 
   const stopCamera = useCallback(() => {
-    // if (detectionLoopRef.current != null) {
-    //   cancelAnimationFrame(detectionLoopRef.current);
-    //   detectionLoopRef.current = null;
-    // }
+    if (detectionLoopRef.current != null) {
+      cancelAnimationFrame(detectionLoopRef.current);
+      detectionLoopRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
     if (videoRef.current) {
-      videoRef.current.srcObject = null; // srcObjectを明示的にクリア
+      videoRef.current.srcObject = null;
     }
     setStream(null);
     setIsCameraActive(false);
-    // setDetectedCars([]);
-    setCameraError(null); // カメラ停止時にエラーもクリア
-    playAttemptCountRef.current = 0; // 再生試行回数をリセット
+    setDetectedCars([]);
+    setCameraError(null);
+    playAttemptCountRef.current = 0;
   }, []);
 
-  // streamの変化を監視してsrcObjectを接続（useEffect方式）
+  // streamの変化を監視してsrcObjectを接続
   useEffect(() => {
     if (!stream || !videoRef.current) {
       return;
@@ -135,29 +131,23 @@ export default function Home() {
 
     const video = videoRef.current;
     
-    // setTimeoutでわずかに遅らせて、video要素が確実に存在する状態で接続
     const timeoutId = setTimeout(() => {
       if (video && stream) {
-        console.log('Setting srcObject:', stream);
         video.srcObject = stream;
-        
-        // iOS Safari等のブラウザ制限を回避するため、確実にplay()を実行
         video.play().catch((playErr) => {
           const playErrorMsg = `動画の再生に失敗しました: ${playErr instanceof Error ? playErr.message : String(playErr)}`;
           setCameraError(playErrorMsg);
           console.error('Video play error:', playErr);
         });
       }
-    }, 100); // 100ms遅らせる
+    }, 100);
 
     return () => {
       clearTimeout(timeoutId);
     };
   }, [stream]);
 
-  // デバッグ情報の更新は削除（映像が確認できたため）
-
-  // iOS/Android向けの強制再生タイマー（500msごとに3回実行）
+  // iOS/Android向けの強制再生タイマー
   useEffect(() => {
     if (!isCameraActive || !videoRef.current) {
       playAttemptCountRef.current = 0;
@@ -176,10 +166,8 @@ export default function Home() {
       }
     };
 
-    // 初回実行
     forcePlay();
 
-    // 500msごとに3回実行
     const interval = setInterval(() => {
       if (playAttemptCountRef.current < 3) {
         forcePlay();
@@ -191,52 +179,171 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isCameraActive]);
 
-  // Detection loop - コメントアウト
-  // useEffect(() => {
-  //   if (!model || !isCameraActive || !videoRef.current || !overlayRef.current) return;
-  //   ...
-  // }, [model, isCameraActive, maskImage]);
+  // Detection loop: run coco-ssd on video, filter "car", draw masks on overlay
+  useEffect(() => {
+    if (!model || !isCameraActive || !videoRef.current || !overlayRef.current) return;
 
-  // Save photo - コメントアウト
-  // const savePhoto = useCallback(() => {
-  //   ...
-  // }, [detectedCars, maskImage]);
+    const video = videoRef.current;
+    const overlay = overlayRef.current;
+    const overlayCtx = overlay.getContext('2d');
+    if (!overlayCtx) return;
+
+    let lastTime = 0;
+    const fpsInterval = 1000 / 10;
+    let lastCars: DetectedCar[] = [];
+
+    const detect = async () => {
+      if (!video.videoWidth || !video.videoHeight || !streamRef.current) {
+        detectionLoopRef.current = requestAnimationFrame(detect);
+        return;
+      }
+
+      if (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
+        overlay.width = video.videoWidth;
+        overlay.height = video.videoHeight;
+      }
+
+      const now = performance.now();
+      if (now - lastTime >= fpsInterval) {
+        lastTime = now;
+        try {
+          const predictions = await model.detect(video);
+          const cars = predictions
+            .filter((p: { class: string }) => p.class === 'car')
+            .map((p: { bbox: [number, number, number, number]; score: number }) => ({
+              bbox: p.bbox,
+              score: p.score,
+            }));
+          lastCars = cars;
+          setDetectedCars(cars);
+        } catch (e) {
+          console.warn('Detection error:', e);
+        }
+      }
+
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+      const drawMaskAt = (bbox: [number, number, number, number]) => {
+        const [x, y, w, h] = bbox;
+        const centerX = x + w / 2;
+        const bottomY = y + h;
+        const maskW = Math.max(80, w * 0.55);
+        const maskH = Math.max(28, h * 0.12);
+        const left = centerX - maskW / 2;
+        const top = bottomY - maskH * 0.6;
+
+        if (maskImage && maskImage.complete && maskImage.naturalWidth) {
+          overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
+        } else {
+          // ダークグレーのマスク
+          overlayCtx.fillStyle = '#1a1a1a';
+          overlayCtx.fillRect(left, top, maskW, maskH);
+        }
+      };
+
+      lastCars.forEach((c) => drawMaskAt(c.bbox));
+
+      detectionLoopRef.current = requestAnimationFrame(detect);
+    };
+
+    detectionLoopRef.current = requestAnimationFrame(detect);
+    return () => {
+      if (detectionLoopRef.current != null) {
+        cancelAnimationFrame(detectionLoopRef.current);
+        detectionLoopRef.current = null;
+      }
+    };
+  }, [model, isCameraActive, maskImage]);
+
+  const savePhoto = useCallback(() => {
+    const video = videoRef.current;
+    const overlay = overlayRef.current;
+    const saveCanvas = saveCanvasRef.current;
+    if (!video || !overlay || !saveCanvas || !video.videoWidth || !video.videoHeight) return;
+
+    const ctx = saveCanvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    saveCanvas.width = w;
+    saveCanvas.height = h;
+
+    ctx.drawImage(video, 0, 0, w, h);
+
+    const drawMaskAt = (bbox: [number, number, number, number]) => {
+      const [x, y, width, height] = bbox;
+      const centerX = x + width / 2;
+      const bottomY = y + height;
+      const maskW = Math.max(80, width * 0.55);
+      const maskH = Math.max(28, height * 0.12);
+      const left = centerX - maskW / 2;
+      const top = bottomY - maskH * 0.6;
+
+      if (maskImage && maskImage.complete && maskImage.naturalWidth) {
+        ctx.drawImage(maskImage, left, top, maskW, maskH);
+      } else {
+        // ダークグレーのマスク
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(left, top, maskW, maskH);
+      }
+    };
+
+    detectedCars.forEach((c) => drawMaskAt(c.bbox));
+
+    saveCanvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `number-mask-${Date.now()}.jpg`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setShowSaveSuccess(true);
+        setTimeout(() => setShowSaveSuccess(false), 2500);
+      },
+      'image/jpeg',
+      0.92
+    );
+  }, [detectedCars, maskImage]);
 
   return (
-    <div className="min-h-screen bg-white pb-20">
-      <header className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
+    <div className="min-h-screen bg-white pb-20" style={{ backgroundColor: '#FFFFFF' }}>
+      <header className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm" style={{ backgroundColor: '#FFFFFF' }}>
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-gray-900">Number Mask</h1>
+          <h1 className="text-2xl font-light text-gray-900" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '0.05em' }}>
+            A_O_I CAMERA
+          </h1>
         </div>
       </header>
 
-      {/* 保存成功メッセージ - コメントアウト */}
-      {/* {showSaveSuccess && (
+      {showSaveSuccess && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center pointer-events-none">
           <div className="bg-white rounded-lg p-8 flex flex-col items-center gap-4 shadow-2xl animate-scale-in">
             <CheckCircle className="text-green-500" size={64} />
             <p className="text-gray-900 font-bold text-2xl">保存しました</p>
           </div>
         </div>
-      )} */}
+      )}
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {/* モデル読み込み中 - コメントアウト */}
-        {/* {isModelLoading && (
+        {isModelLoading && (
           <div className="flex flex-col items-center justify-center py-16 gap-4">
             <Loader2 className="animate-spin text-gray-900" size={48} />
             <p className="text-gray-600">モデルを読み込み中...</p>
           </div>
-        )} */}
+        )}
 
-        {!isCameraActive && (
+        {!isModelLoading && !isCameraActive && (
           <div className="flex flex-col items-center justify-center py-12 gap-6">
             <p className="text-gray-600 text-center">
-              カメラを起動して映像を表示します
+              カメラを起動して車のナンバーをマスクできます
             </p>
             <button
               onClick={startCamera}
-              className="flex items-center gap-2 px-6 py-4 bg-gray-900 text-white rounded-xl font-medium shadow-lg hover:bg-gray-800 transition-colors"
+              className="flex items-center gap-2 px-8 py-4 bg-gray-900 text-white rounded-2xl font-medium shadow-lg hover:bg-gray-800 transition-colors"
+              style={{ backgroundColor: '#000000', color: '#FFFFFF' }}
             >
               <Camera size={24} />
               カメラを起動
@@ -250,7 +357,7 @@ export default function Home() {
           </div>
         )}
 
-        {isCameraActive && (
+        {!isModelLoading && isCameraActive && (
           <div className="space-y-4">
             {cameraError && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -258,8 +365,8 @@ export default function Home() {
                 <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
               </div>
             )}
-            {/* 画面いっぱいにカメラ映像を表示 */}
-            <div className="relative w-full h-screen max-h-[calc(100vh-200px)] bg-gray-900">
+            {/* スマホ最適化: 画面からはみ出さないように調整 */}
+            <div className="relative w-full bg-gray-900 rounded-2xl overflow-hidden shadow-lg" style={{ maxHeight: 'calc(100vh - 250px)', aspectRatio: '9/16' }}>
               <video
                 ref={videoRef}
                 autoPlay={true}
@@ -273,7 +380,6 @@ export default function Home() {
                   display: 'block',
                 }}
                 onLoadedMetadata={() => {
-                  // メタデータ読み込み後に確実に再生
                   if (videoRef.current) {
                     videoRef.current.play().catch((err) => {
                       console.warn('Auto-play failed on loadedMetadata:', err);
@@ -281,7 +387,6 @@ export default function Home() {
                   }
                 }}
                 onCanPlay={() => {
-                  // iOSでの再生成功率を上げるため、onCanPlayでも再生を試行
                   if (videoRef.current) {
                     videoRef.current.play().catch((err) => {
                       console.warn('Auto-play failed on canPlay:', err);
@@ -289,23 +394,23 @@ export default function Home() {
                   }
                 }}
               />
-              {/* オーバーレイcanvas - コメントアウト */}
-              {/* <canvas
+              <canvas
                 ref={overlayRef}
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-              /> */}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                style={{ objectFit: 'cover' }}
+              />
             </div>
             <div className="flex justify-center gap-4">
-              {/* 保存ボタン - コメントアウト */}
-              {/* <button
+              <button
                 onClick={savePhoto}
-                className="flex items-center gap-2 px-6 py-3 bg-gray-900 text-white rounded-xl font-medium shadow hover:bg-gray-800 transition-colors"
+                className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-2xl font-medium shadow hover:bg-gray-800 transition-colors"
+                style={{ backgroundColor: '#000000', color: '#FFFFFF' }}
               >
                 保存
-              </button> */}
+              </button>
               <button
                 onClick={stopCamera}
-                className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-900 rounded-xl font-medium shadow hover:bg-gray-300 transition-colors"
+                className="flex items-center gap-2 px-8 py-3 bg-gray-200 text-gray-900 rounded-2xl font-medium shadow hover:bg-gray-300 transition-colors"
               >
                 カメラを止める
               </button>
@@ -313,8 +418,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* 保存用canvas - コメントアウト */}
-        {/* <canvas ref={saveCanvasRef} className="hidden" /> */}
+        <canvas ref={saveCanvasRef} className="hidden" />
       </main>
     </div>
   );
