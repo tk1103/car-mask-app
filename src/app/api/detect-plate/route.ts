@@ -52,8 +52,10 @@ export async function POST(request: NextRequest) {
       ※プレートが画像内に存在しない、または不明瞭な場合は必ず {"found": false} とのみ出力してください。
     `;
 
-    // REST API (v1) で直接呼び出し（v1betaによる404を回避）
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // REST API (v1) で直接呼び出し
+    // ※ 利用可能性の高いビジョン対応モデルを使用（1.0 pro vision latest）
+    const modelName = 'gemini-1.0-pro-vision-latest';
+    const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`;
 
     const geminiResponse = await fetch(url, {
       method: 'POST',
