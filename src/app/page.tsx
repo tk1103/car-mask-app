@@ -28,6 +28,7 @@ export default function Home() {
   const playAttemptCountRef = useRef<number>(0);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null); // AR用：検出ループのタイマー
   const lastDetectionTimeRef = useRef<number>(0); // 最後に検出成功した時刻（永続化用）
+  const isDetectingRef = useRef<boolean>(false); // 検出中フラグ（重複実行防止）
 
   // Load mask image (optional)
   useEffect(() => {
@@ -40,9 +41,17 @@ export default function Home() {
 
   // ナンバープレート検出関数（ARループと保存の両方で使用）
   const detectPlate = useCallback(async (): Promise<PlateBbox | null> => {
-    const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) return null;
+    // 既に検出中の場合はスキップ（重複実行防止）
+    if (isDetectingRef.current) {
+      return null;
+    }
 
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      return null;
+    }
+
+    isDetectingRef.current = true;
     try {
       setIsScanning(true);
       
@@ -55,7 +64,9 @@ export default function Home() {
       tempCanvas.width = Math.round(video.videoWidth * scale);
       tempCanvas.height = Math.round(video.videoHeight * scale);
       const tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) return null;
+      if (!tempCtx) {
+        return null;
+      }
 
       // 画像の品質を向上させるため、スムージングを有効化
       tempCtx.imageSmoothingEnabled = true;
@@ -67,7 +78,7 @@ export default function Home() {
         tempCanvas.toBlob((b) => {
           if (b) resolve(b);
           else reject(new Error('画像の変換に失敗しました'));
-        }, 'image/jpeg', 0.8); // 0.75 → 0.8 に上げて精度向上
+        }, 'image/jpeg', 0.8);
       });
 
       // Gemini APIに送信
@@ -83,20 +94,29 @@ export default function Home() {
 
       if (!response.ok) {
         const errorData = await response.json();
+        const errorMsg = `APIエラー: ${response.status} - ${JSON.stringify(errorData)}`;
+        setDebugLog(errorMsg);
         console.warn('Detection API error:', errorData);
         return null;
       }
 
       const result = await response.json();
+      
       if (result.found && result.bbox) {
+        setDebugLog(`✓ 検出成功: x=${Math.round(result.bbox.x)}, y=${Math.round(result.bbox.y)}`);
         return result.bbox as PlateBbox;
+      } else {
+        // found=falseの場合はデバッグログを更新しない（チカチカ防止）
+        return null;
       }
-      return null;
     } catch (error) {
+      const errorMsg = `検出エラー: ${error instanceof Error ? error.message : String(error)}`;
+      setDebugLog(errorMsg);
       console.error('Detection error:', error);
       return null;
     } finally {
       setIsScanning(false);
+      isDetectingRef.current = false;
     }
   }, []);
 
@@ -120,23 +140,26 @@ export default function Home() {
       }
     });
 
-    // 600msおきに自動検出（速度向上：1秒 → 600ms）
+    // 800msおきに自動検出（検出完了を待つため少し間隔を空ける）
     detectionIntervalRef.current = setInterval(() => {
-      detectPlate().then((bbox) => {
-        if (bbox) {
-          setDetectedPlate(bbox);
-          lastDetectionTimeRef.current = Date.now(); // 検出成功時刻を記録
-        } else {
-          // found=false の場合でも、最後の検出から3秒以内なら前回の結果を保持
-          const timeSinceLastDetection = Date.now() - lastDetectionTimeRef.current;
-          if (timeSinceLastDetection > 3000) {
-            // 3秒以上検出されない場合はクリア
-            setDetectedPlate(null);
+      // 検出中でない場合のみ実行
+      if (!isDetectingRef.current) {
+        detectPlate().then((bbox) => {
+          if (bbox) {
+            setDetectedPlate(bbox);
+            lastDetectionTimeRef.current = Date.now(); // 検出成功時刻を記録
+          } else {
+            // found=false の場合でも、最後の検出から3秒以内なら前回の結果を保持
+            const timeSinceLastDetection = Date.now() - lastDetectionTimeRef.current;
+            if (timeSinceLastDetection > 3000) {
+              // 3秒以上検出されない場合はクリア
+              setDetectedPlate(null);
+            }
+            // 3秒以内なら setDetectedPlate を呼ばず、前回の値を保持
           }
-          // 3秒以内なら setDetectedPlate を呼ばず、前回の値を保持
-        }
-      });
-    }, 600); // 1秒 → 600msに短縮
+        });
+      }
+    }, 800); // 600ms → 800msに調整（検出完了を待つ）
 
     return () => {
       if (detectionIntervalRef.current) {
@@ -527,8 +550,11 @@ export default function Home() {
               />
               {/* AI Scanning... インジケーター（画面の隅に小さく表示） */}
               {isScanning && (
-                <div className="absolute top-2 right-2 px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm">
-                  <p className="text-xs text-gray-700 font-medium">AI Scanning...</p>
+                <div className="absolute top-2 right-2 px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm animate-pulse">
+                  <p className="text-xs text-gray-700 font-medium flex items-center gap-1">
+                    <Loader2 className="animate-spin" size={12} />
+                    AI Scanning...
+                  </p>
                 </div>
               )}
             </div>
