@@ -17,12 +17,20 @@ export default function Home() {
   // const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   // const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<{
+    readyState: number;
+    videoWidth: number;
+    videoHeight: number;
+    paused: boolean;
+    srcObject: boolean;
+  } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   // const overlayRef = useRef<HTMLCanvasElement>(null);
   // const saveCanvasRef = useRef<HTMLCanvasElement>(null);
   // const detectionLoopRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const playAttemptCountRef = useRef<number>(0);
 
   // Load COCO-SSD model - コメントアウト
   // useEffect(() => {
@@ -138,7 +146,72 @@ export default function Home() {
     setIsCameraActive(false);
     // setDetectedCars([]);
     setCameraError(null); // カメラ停止時にエラーもクリア
+    setDebugInfo(null); // デバッグ情報もクリア
+    playAttemptCountRef.current = 0; // 再生試行回数をリセット
   }, []);
+
+  // デバッグ情報を定期的に更新
+  useEffect(() => {
+    if (!isCameraActive || !videoRef.current) {
+      setDebugInfo(null);
+      return;
+    }
+
+    const updateDebugInfo = () => {
+      const video = videoRef.current;
+      if (video) {
+        setDebugInfo({
+          readyState: video.readyState,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+          paused: video.paused,
+          srcObject: video.srcObject !== null,
+        });
+      }
+    };
+
+    // 初回更新
+    updateDebugInfo();
+
+    // 500msごとに更新
+    const interval = setInterval(updateDebugInfo, 500);
+
+    return () => clearInterval(interval);
+  }, [isCameraActive]);
+
+  // iOS/Android向けの強制再生タイマー（500msごとに3回実行）
+  useEffect(() => {
+    if (!isCameraActive || !videoRef.current) {
+      playAttemptCountRef.current = 0;
+      return;
+    }
+
+    const video = videoRef.current;
+    playAttemptCountRef.current = 0;
+
+    const forcePlay = () => {
+      if (video && playAttemptCountRef.current < 3) {
+        playAttemptCountRef.current += 1;
+        video.play().catch((err) => {
+          console.warn(`Force play attempt ${playAttemptCountRef.current} failed:`, err);
+        });
+      }
+    };
+
+    // 初回実行
+    forcePlay();
+
+    // 500msごとに3回実行
+    const interval = setInterval(() => {
+      if (playAttemptCountRef.current < 3) {
+        forcePlay();
+      } else {
+        clearInterval(interval);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [isCameraActive]);
 
   // Detection loop - コメントアウト
   // useEffect(() => {
@@ -196,6 +269,18 @@ export default function Home() {
                 <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
               </div>
             )}
+            {debugInfo && (
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg max-w-md">
+                <p className="text-blue-800 text-sm font-medium mb-2">デバッグ情報</p>
+                <div className="text-blue-700 text-xs space-y-1 font-mono">
+                  <p>readyState: {debugInfo.readyState} ({debugInfo.readyState === 0 ? 'HAVE_NOTHING' : debugInfo.readyState === 1 ? 'HAVE_METADATA' : debugInfo.readyState === 2 ? 'HAVE_CURRENT_DATA' : debugInfo.readyState === 3 ? 'HAVE_FUTURE_DATA' : debugInfo.readyState === 4 ? 'HAVE_ENOUGH_DATA' : 'UNKNOWN'})</p>
+                  <p>videoWidth: {debugInfo.videoWidth}px</p>
+                  <p>videoHeight: {debugInfo.videoHeight}px</p>
+                  <p>paused: {debugInfo.paused ? 'true' : 'false'}</p>
+                  <p>srcObject: {debugInfo.srcObject ? 'true' : 'false'}</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -205,6 +290,18 @@ export default function Home() {
               <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-red-800 text-sm font-medium mb-1">エラー</p>
                 <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
+              </div>
+            )}
+            {debugInfo && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-blue-800 text-sm font-medium mb-2">デバッグ情報</p>
+                <div className="text-blue-700 text-xs space-y-1 font-mono">
+                  <p>readyState: {debugInfo.readyState} ({debugInfo.readyState === 0 ? 'HAVE_NOTHING' : debugInfo.readyState === 1 ? 'HAVE_METADATA' : debugInfo.readyState === 2 ? 'HAVE_CURRENT_DATA' : debugInfo.readyState === 3 ? 'HAVE_FUTURE_DATA' : debugInfo.readyState === 4 ? 'HAVE_ENOUGH_DATA' : 'UNKNOWN'})</p>
+                  <p>videoWidth: {debugInfo.videoWidth}px</p>
+                  <p>videoHeight: {debugInfo.videoHeight}px</p>
+                  <p>paused: {debugInfo.paused ? 'true' : 'false'}</p>
+                  <p>srcObject: {debugInfo.srcObject ? 'true' : 'false'}</p>
+                </div>
               </div>
             )}
             {/* 画面いっぱいにカメラ映像を表示 */}
