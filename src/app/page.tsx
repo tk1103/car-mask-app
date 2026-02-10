@@ -193,8 +193,14 @@ export default function Home() {
       if (!response.ok) {
         const errorData = await response.json();
         const message = errorData.error || 'APIリクエストに失敗しました';
-        setDebugLog(`Gemini APIエラー: ${message}`);
-        throw new Error(message);
+        // サーバー側から返ってきた詳細情報も含めて表示
+        setDebugLog(
+          `Gemini APIエラー: ${message}\n\nraw: ${JSON.stringify(errorData, null, 2)}`
+        );
+        // ここでは例外を投げず、UI上のエラー表示とログだけにとどめる
+        setCameraError(message);
+        setIsProcessing(false);
+        return;
       }
 
       const result = await response.json();
