@@ -20,6 +20,8 @@ export default function Home() {
   const [debugLog, setDebugLog] = useState<string | null>(null);
   const [detectedPlate, setDetectedPlate] = useState<PlateBbox | null>(null); // AR用：リアルタイム検出結果
   const [isScanning, setIsScanning] = useState(false); // AR用：スキャン中フラグ
+  const [isRateLimited, setIsRateLimited] = useState(false); // レート制限フラグ
+  const [autoDetectionEnabled, setAutoDetectionEnabled] = useState(true); // 自動検出の有効/無効
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null); // AR用：オーバーレイCanvas
@@ -104,11 +106,13 @@ export default function Home() {
         
         // レート制限エラー（429）の場合は特別なメッセージを表示
         if (response.status === 429) {
-          const rateLimitMsg = '⚠️ APIレート制限に達しました。無料プランは1日20リクエストまでです。しばらく待ってから再度お試しください。';
+          const rateLimitMsg = '⚠️ APIレート制限に達しました。無料プランは1日20リクエストまでです。自動検出を停止しました。「手動検出」ボタンで検出できます。';
           setDebugLog(rateLimitMsg);
           setCameraError(rateLimitMsg);
+          setIsRateLimited(true); // レート制限フラグを設定
+          setAutoDetectionEnabled(false); // 自動検出を無効化
           console.warn('Rate limit exceeded:', errorData);
-          // 検出ループを一時停止
+          // 検出ループを停止
           if (detectionIntervalRef.current) {
             clearInterval(detectionIntervalRef.current);
             detectionIntervalRef.current = null;
@@ -157,9 +161,10 @@ export default function Home() {
     }
   }, []);
 
-  // AR用：リアルタイム検出ループ（600ms間隔で高速化）
+  // AR用：リアルタイム検出ループ（自動検出が有効な場合のみ）
   useEffect(() => {
-    if (!isCameraActive || !videoRef.current) {
+    // レート制限に達している、または自動検出が無効な場合は停止
+    if (!isCameraActive || !videoRef.current || isRateLimited || !autoDetectionEnabled) {
       setDetectedPlate(null);
       lastDetectionTimeRef.current = 0;
       if (detectionIntervalRef.current) {
@@ -184,8 +189,18 @@ export default function Home() {
       setDebugLog(`初回検出エラー: ${err instanceof Error ? err.message : String(err)}`);
     });
 
-    // 5秒おきに自動検出（レート制限対策：無料プランは1日20リクエストまで）
+    // 10秒おきに自動検出（レート制限対策：無料プランは1日20リクエストまで）
+    // 5秒 → 10秒に延長して、より安全に
     detectionIntervalRef.current = setInterval(() => {
+      // レート制限チェック
+      if (isRateLimited || !autoDetectionEnabled) {
+        if (detectionIntervalRef.current) {
+          clearInterval(detectionIntervalRef.current);
+          detectionIntervalRef.current = null;
+        }
+        return;
+      }
+      
       // 検出中でない場合のみ実行
       if (!isDetectingRef.current) {
         detectPlate().then((bbox) => {
@@ -194,14 +209,14 @@ export default function Home() {
             lastDetectionTimeRef.current = Date.now(); // 検出成功時刻を記録
             console.log('Interval detection success:', bbox);
           } else {
-            // found=false の場合でも、最後の検出から10秒以内なら前回の結果を保持
+            // found=false の場合でも、最後の検出から15秒以内なら前回の結果を保持
             const timeSinceLastDetection = Date.now() - lastDetectionTimeRef.current;
-            if (timeSinceLastDetection > 10000) {
-              // 10秒以上検出されない場合はクリア
+            if (timeSinceLastDetection > 15000) {
+              // 15秒以上検出されない場合はクリア
               setDetectedPlate(null);
-              console.log('Clearing detectedPlate (10s timeout)');
+              console.log('Clearing detectedPlate (15s timeout)');
             }
-            // 10秒以内なら setDetectedPlate を呼ばず、前回の値を保持
+            // 15秒以内なら setDetectedPlate を呼ばず、前回の値を保持
           }
         }).catch((err) => {
           console.error('Interval detection error:', err);
@@ -209,7 +224,7 @@ export default function Home() {
       } else {
         console.log('Skipping detection (already detecting)');
       }
-    }, 5000); // 800ms → 5000ms（5秒）に変更（レート制限対策）
+    }, 10000); // 5秒 → 10秒に延長（レート制限対策）
 
     return () => {
       if (detectionIntervalRef.current) {
@@ -217,7 +232,7 @@ export default function Home() {
         detectionIntervalRef.current = null;
       }
     };
-  }, [isCameraActive, detectPlate]);
+  }, [isCameraActive, detectPlate, isRateLimited, autoDetectionEnabled]);
 
   // AR用：オーバーレイCanvasにリアルタイムでA_O_Iロゴを描画
   useEffect(() => {
@@ -346,8 +361,28 @@ export default function Home() {
     setDetectedPlate(null);
     setCameraError(null);
     setIsScanning(false);
+    setIsRateLimited(false); // レート制限フラグをリセット
+    setAutoDetectionEnabled(true); // 自動検出を再有効化
     playAttemptCountRef.current = 0;
   }, []);
+
+  // 手動検出関数（レート制限時や自動検出無効時に使用）
+  const manualDetect = useCallback(async () => {
+    if (!isCameraActive || !videoRef.current) {
+      setDebugLog('カメラが起動していません');
+      return;
+    }
+    
+    setDebugLog('手動検出を実行中...');
+    const bbox = await detectPlate();
+    if (bbox) {
+      setDetectedPlate(bbox);
+      lastDetectionTimeRef.current = Date.now();
+      setDebugLog(`✓ 検出成功: x=${Math.round(bbox.x)}, y=${Math.round(bbox.y)}`);
+    } else {
+      setDebugLog('ナンバープレートが見つかりませんでした');
+    }
+  }, [isCameraActive, detectPlate]);
 
   // streamの変化を監視してsrcObjectを接続
   useEffect(() => {
@@ -625,29 +660,67 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <div className="flex justify-center gap-4">
-              <button
-                onClick={savePhoto}
-                disabled={isProcessing}
-                className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-2xl font-medium shadow hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: '#000000', color: '#FFFFFF' }}
-              >
-                {isProcessing ? (
-                  <>
-                    <Loader2 className="animate-spin" size={20} />
-                    処理中...
-                  </>
-                ) : (
-                  '保存'
-                )}
-              </button>
-              <button
-                onClick={stopCamera}
-                disabled={isProcessing}
-                className="flex items-center gap-2 px-8 py-3 bg-gray-200 text-gray-900 rounded-2xl font-medium shadow hover:bg-gray-300 transition-colors disabled:opacity-50"
-              >
-                カメラを止める
-              </button>
+            <div className="flex flex-col gap-3">
+              <div className="flex justify-center gap-4">
+                <button
+                  onClick={savePhoto}
+                  disabled={isProcessing}
+                  className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-2xl font-medium shadow hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: '#000000', color: '#FFFFFF' }}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="animate-spin" size={20} />
+                      処理中...
+                    </>
+                  ) : (
+                    '保存'
+                  )}
+                </button>
+                <button
+                  onClick={stopCamera}
+                  disabled={isProcessing}
+                  className="flex items-center gap-2 px-8 py-3 bg-gray-200 text-gray-900 rounded-2xl font-medium shadow hover:bg-gray-300 transition-colors disabled:opacity-50"
+                >
+                  カメラを止める
+                </button>
+              </div>
+              {/* 手動検出ボタン（レート制限時や自動検出無効時に表示） */}
+              {(isRateLimited || !autoDetectionEnabled) && (
+                <div className="flex justify-center">
+                  <button
+                    onClick={manualDetect}
+                    disabled={isProcessing || isScanning}
+                    className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-medium shadow hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  >
+                    {isScanning ? (
+                      <>
+                        <Loader2 className="animate-spin" size={16} />
+                        検出中...
+                      </>
+                    ) : (
+                      '手動検出'
+                    )}
+                  </button>
+                </div>
+              )}
+              {/* 自動検出の有効/無効切り替え */}
+              {!isRateLimited && (
+                <div className="flex justify-center">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoDetectionEnabled}
+                      onChange={(e) => {
+                        setAutoDetectionEnabled(e.target.checked);
+                        setDebugLog(e.target.checked ? '自動検出を有効にしました' : '自動検出を無効にしました。手動検出ボタンを使用してください。');
+                      }}
+                      className="w-4 h-4"
+                    />
+                    <span>自動検出を有効にする</span>
+                  </label>
+                </div>
+              )}
             </div>
           </div>
         )}
