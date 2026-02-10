@@ -3,50 +3,25 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Loader2, CheckCircle } from 'lucide-react';
 
-type DetectedCar = {
-  bbox: [number, number, number, number]; // [x, y, width, height]
-  score: number;
+type PlateBbox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 export default function Home() {
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [detectedCars, setDetectedCars] = useState<DetectedCar[]>([]);
-  const [isModelLoading, setIsModelLoading] = useState(true);
-  const [model, setModel] = useState<any>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
-  const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const overlayRef = useRef<HTMLCanvasElement>(null);
   const saveCanvasRef = useRef<HTMLCanvasElement>(null);
-  const detectionLoopRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const playAttemptCountRef = useRef<number>(0);
-
-  // Load COCO-SSD model
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const cocoSsd = await import('@tensorflow-models/coco-ssd');
-        const m = await cocoSsd.load();
-        if (!cancelled) {
-          setModel(m);
-        }
-      } catch (err) {
-        console.error('Failed to load coco-ssd:', err);
-      } finally {
-        if (!cancelled) {
-          setIsModelLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Load mask image (optional)
   useEffect(() => {
@@ -105,10 +80,6 @@ export default function Home() {
   }, []);
 
   const stopCamera = useCallback(() => {
-    if (detectionLoopRef.current != null) {
-      cancelAnimationFrame(detectionLoopRef.current);
-      detectionLoopRef.current = null;
-    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -118,7 +89,6 @@ export default function Home() {
     }
     setStream(null);
     setIsCameraActive(false);
-    setDetectedCars([]);
     setCameraError(null);
     playAttemptCountRef.current = 0;
   }, []);
@@ -179,159 +149,117 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isCameraActive]);
 
-  // Detection loop: run coco-ssd on video, filter "car/truck/bus", draw masks on overlay
-  useEffect(() => {
-    if (!model || !isCameraActive || !videoRef.current || !overlayRef.current) return;
-
+  const savePhoto = useCallback(async () => {
     const video = videoRef.current;
-    const overlay = overlayRef.current;
-    const overlayCtx = overlay.getContext('2d');
-    if (!overlayCtx) return;
+    const saveCanvas = saveCanvasRef.current;
+    if (!video || !saveCanvas || !video.videoWidth || !video.videoHeight) return;
 
-    let lastTime = 0;
-    const fpsInterval = 1000 / 10;
-    let lastCars: DetectedCar[] = [];
-    let frameCount = 0; // フレームカウンター（処理負荷軽減用）
+    setIsProcessing(true);
+    setCameraError(null);
 
-    const detect = async () => {
-      if (!video.videoWidth || !video.videoHeight || !streamRef.current) {
-        detectionLoopRef.current = requestAnimationFrame(detect);
-        return;
+    try {
+      // 現在のビデオフレームをキャプチャ
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = video.videoWidth;
+      tempCanvas.height = video.videoHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) {
+        throw new Error('Canvas context取得に失敗しました');
       }
 
-      if (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
-        overlay.width = video.videoWidth;
-        overlay.height = video.videoHeight;
+      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+
+      // CanvasをBlobに変換
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        tempCanvas.toBlob((b) => {
+          if (b) resolve(b);
+          else reject(new Error('画像の変換に失敗しました'));
+        }, 'image/jpeg', 0.92);
+      });
+
+      // Gemini APIに送信
+      const formData = new FormData();
+      formData.append('image', blob, 'photo.jpg');
+      formData.append('width', tempCanvas.width.toString());
+      formData.append('height', tempCanvas.height.toString());
+
+      const response = await fetch('/api/detect-plate', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'APIリクエストに失敗しました');
       }
 
-      frameCount++;
-      const now = performance.now();
-      
-      // 3フレームに1回検知（処理負荷軽減）
-      if (now - lastTime >= fpsInterval && frameCount % 3 === 0) {
-        lastTime = now;
-        try {
-          // 感度向上: maxNumBoxes=20, minScore=0.3で低スコアでも検知
-          const predictions = await model.detect(video, 20, 0.3);
-          const vehicles = predictions
-            .filter((p: { class: string }) => p.class === 'car' || p.class === 'truck' || p.class === 'bus')
-            .map((p: { bbox: [number, number, number, number]; score: number }) => ({
-              bbox: p.bbox,
-              score: p.score,
-            }));
-          lastCars = vehicles;
-          setDetectedCars(vehicles);
-        } catch (e) {
-          console.warn('Detection error:', e);
-        }
+      const result = await response.json();
+
+      // 保存用Canvasに描画
+      const ctx = saveCanvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('保存用Canvas context取得に失敗しました');
       }
 
-      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      saveCanvas.width = w;
+      saveCanvas.height = h;
 
-      const drawMaskAt = (bbox: [number, number, number, number]) => {
-        const [x, y, w, h] = bbox;
-        const centerX = x + w / 2;
-        const bottomY = y + h;
-        const maskW = Math.max(80, w * 0.55);
-        const maskH = Math.max(28, h * 0.12);
+      // ビデオフレームを描画
+      ctx.drawImage(video, 0, 0, w, h);
+
+      // ナンバープレートが見つかった場合、マスクを描画
+      if (result.found && result.bbox) {
+        const bbox: PlateBbox = result.bbox;
+        const centerX = bbox.x + bbox.width / 2;
+        const bottomY = bbox.y + bbox.height;
+        const maskW = Math.max(80, bbox.width * 1.2); // ナンバープレートより少し大きめ
+        const maskH = Math.max(28, bbox.height * 1.5);
         const left = centerX - maskW / 2;
-        const top = bottomY - maskH * 0.6;
+        const top = bottomY - maskH * 0.8;
 
-        // デバッグ用: 車全体を囲む赤い枠を描画
-        overlayCtx.strokeStyle = '#ff0000';
-        overlayCtx.lineWidth = 2;
-        overlayCtx.strokeRect(x, y, w, h);
-
-        // マスクを描画
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-          overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
+          ctx.drawImage(maskImage, left, top, maskW, maskH);
         } else {
           // ダークグレーのマスク
-          overlayCtx.fillStyle = '#1a1a1a';
-          overlayCtx.fillRect(left, top, maskW, maskH);
+          ctx.fillStyle = '#1a1a1a';
+          ctx.fillRect(left, top, maskW, maskH);
           
           // A_O_Iロゴを白抜きテキストで表示
-          overlayCtx.fillStyle = '#FFFFFF';
-          overlayCtx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
-          overlayCtx.textAlign = 'center';
-          overlayCtx.textBaseline = 'middle';
-          overlayCtx.fillText('A_O_I', centerX, top + maskH / 2);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('A_O_I', centerX, top + maskH / 2);
         }
-      };
-
-      lastCars.forEach((c) => drawMaskAt(c.bbox));
-
-      detectionLoopRef.current = requestAnimationFrame(detect);
-    };
-
-    detectionLoopRef.current = requestAnimationFrame(detect);
-    return () => {
-      if (detectionLoopRef.current != null) {
-        cancelAnimationFrame(detectionLoopRef.current);
-        detectionLoopRef.current = null;
       }
-    };
-  }, [model, isCameraActive, maskImage]);
 
-  const savePhoto = useCallback(() => {
-    const video = videoRef.current;
-    const overlay = overlayRef.current;
-    const saveCanvas = saveCanvasRef.current;
-    if (!video || !overlay || !saveCanvas || !video.videoWidth || !video.videoHeight) return;
-
-    const ctx = saveCanvas.getContext('2d');
-    if (!ctx) return;
-
-    const w = video.videoWidth;
-    const h = video.videoHeight;
-    saveCanvas.width = w;
-    saveCanvas.height = h;
-
-    ctx.drawImage(video, 0, 0, w, h);
-
-    const drawMaskAt = (bbox: [number, number, number, number]) => {
-      const [x, y, width, height] = bbox;
-      const centerX = x + width / 2;
-      const bottomY = y + height;
-      const maskW = Math.max(80, width * 0.55);
-      const maskH = Math.max(28, height * 0.12);
-      const left = centerX - maskW / 2;
-      const top = bottomY - maskH * 0.6;
-
-      if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-        ctx.drawImage(maskImage, left, top, maskW, maskH);
-      } else {
-        // ダークグレーのマスク
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillRect(left, top, maskW, maskH);
-        
-        // A_O_Iロゴを白抜きテキストで表示
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('A_O_I', centerX, top + maskH / 2);
-      }
-    };
-
-    detectedCars.forEach((c) => drawMaskAt(c.bbox));
-
-    saveCanvas.toBlob(
-      (blob) => {
-        if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `number-mask-${Date.now()}.jpg`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setShowSaveSuccess(true);
-        setTimeout(() => setShowSaveSuccess(false), 2500);
-      },
-      'image/jpeg',
-      0.92
-    );
-  }, [detectedCars, maskImage]);
+      // ダウンロード
+      saveCanvas.toBlob(
+        (finalBlob) => {
+          if (!finalBlob) {
+            throw new Error('最終画像の生成に失敗しました');
+          }
+          const url = URL.createObjectURL(finalBlob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `number-mask-${Date.now()}.jpg`;
+          a.click();
+          URL.revokeObjectURL(url);
+          setShowSaveSuccess(true);
+          setTimeout(() => setShowSaveSuccess(false), 2500);
+        },
+        'image/jpeg',
+        0.92
+      );
+    } catch (error) {
+      console.error('Save photo error:', error);
+      setCameraError(error instanceof Error ? error.message : '画像の保存に失敗しました');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [maskImage]);
 
   return (
     <div className="min-h-screen bg-white pb-20" style={{ backgroundColor: '#FFFFFF' }}>
@@ -353,14 +281,7 @@ export default function Home() {
       )}
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {isModelLoading && (
-          <div className="flex flex-col items-center justify-center py-16 gap-4">
-            <Loader2 className="animate-spin text-gray-900" size={48} />
-            <p className="text-gray-600">モデルを読み込み中...</p>
-          </div>
-        )}
-
-        {!isModelLoading && !isCameraActive && (
+        {!isCameraActive && (
           <div className="flex flex-col items-center justify-center py-12 gap-6">
             <p className="text-gray-600 text-center">
               カメラを起動して車のナンバーをマスクできます
@@ -382,12 +303,20 @@ export default function Home() {
           </div>
         )}
 
-        {!isModelLoading && isCameraActive && (
+        {isCameraActive && (
           <div className="space-y-4">
             {cameraError && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-red-800 text-sm font-medium mb-1">エラー</p>
                 <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
+              </div>
+            )}
+            {isProcessing && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="animate-spin text-blue-600" size={24} />
+                  <p className="text-blue-800 text-sm font-medium">ナンバープレートを検出中...</p>
+                </div>
               </div>
             )}
             {/* スマホ最適化: 画面からはみ出さないように調整 */}
@@ -419,23 +348,27 @@ export default function Home() {
                   }
                 }}
               />
-              <canvas
-                ref={overlayRef}
-                className="absolute inset-0 w-full h-full pointer-events-none"
-                style={{ objectFit: 'cover' }}
-              />
             </div>
             <div className="flex justify-center gap-4">
               <button
                 onClick={savePhoto}
-                className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-2xl font-medium shadow hover:bg-gray-800 transition-colors"
+                disabled={isProcessing}
+                className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-2xl font-medium shadow hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ backgroundColor: '#000000', color: '#FFFFFF' }}
               >
-                保存
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="animate-spin" size={20} />
+                    処理中...
+                  </>
+                ) : (
+                  '保存'
+                )}
               </button>
               <button
                 onClick={stopCamera}
-                className="flex items-center gap-2 px-8 py-3 bg-gray-200 text-gray-900 rounded-2xl font-medium shadow hover:bg-gray-300 transition-colors"
+                disabled={isProcessing}
+                className="flex items-center gap-2 px-8 py-3 bg-gray-200 text-gray-900 rounded-2xl font-medium shadow hover:bg-gray-300 transition-colors disabled:opacity-50"
               >
                 カメラを止める
               </button>
