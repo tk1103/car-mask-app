@@ -23,6 +23,7 @@ export default function Home() {
     videoHeight: number;
     paused: boolean;
     srcObject: boolean;
+    srcObjectType: string;
   } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -81,31 +82,8 @@ export default function Home() {
       });
       
       streamRef.current = s;
+      // stream stateを設定して、useEffectでsrcObjectを接続する
       setStream(s);
-      
-      if (videoRef.current) {
-        const v = videoRef.current;
-        v.srcObject = s;
-        
-        // iOS Safari等のブラウザ制限を回避するため、確実にplay()を実行
-        try {
-          const playPromise = v.play();
-          if (playPromise !== undefined) {
-            await playPromise;
-          }
-        } catch (playErr) {
-          // play()が失敗した場合のエラーハンドリング
-          const playErrorMsg = `動画の再生に失敗しました: ${playErr instanceof Error ? playErr.message : String(playErr)}`;
-          setCameraError(playErrorMsg);
-          console.error('Video play error:', playErr);
-          
-          // ストリームを停止してクリーンアップ
-          s.getTracks().forEach((t) => t.stop());
-          streamRef.current = null;
-          setStream(null);
-          return;
-        }
-      }
       setIsCameraActive(true);
     } catch (err) {
       console.error('Camera error:', err);
@@ -142,6 +120,9 @@ export default function Home() {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null; // srcObjectを明示的にクリア
+    }
     setStream(null);
     setIsCameraActive(false);
     // setDetectedCars([]);
@@ -149,6 +130,41 @@ export default function Home() {
     setDebugInfo(null); // デバッグ情報もクリア
     playAttemptCountRef.current = 0; // 再生試行回数をリセット
   }, []);
+
+  // streamの変化を監視してsrcObjectを接続（useEffect方式）
+  useEffect(() => {
+    if (!stream || !videoRef.current) {
+      return;
+    }
+
+    const video = videoRef.current;
+    
+    // setTimeoutでわずかに遅らせて、video要素が確実に存在する状態で接続
+    const timeoutId = setTimeout(() => {
+      if (video && stream) {
+        console.log('Setting srcObject:', stream);
+        video.srcObject = stream;
+        
+        // デバッグ情報を即座に更新
+        setDebugInfo(prev => prev ? {
+          ...prev,
+          srcObject: video.srcObject !== null,
+          srcObjectType: video.srcObject ? `[object ${video.srcObject.constructor.name}]` : 'null',
+        } : null);
+        
+        // iOS Safari等のブラウザ制限を回避するため、確実にplay()を実行
+        video.play().catch((playErr) => {
+          const playErrorMsg = `動画の再生に失敗しました: ${playErr instanceof Error ? playErr.message : String(playErr)}`;
+          setCameraError(playErrorMsg);
+          console.error('Video play error:', playErr);
+        });
+      }
+    }, 100); // 100ms遅らせる
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [stream]);
 
   // デバッグ情報を定期的に更新
   useEffect(() => {
@@ -166,6 +182,7 @@ export default function Home() {
           videoHeight: video.videoHeight,
           paused: video.paused,
           srcObject: video.srcObject !== null,
+          srcObjectType: video.srcObject ? `[object ${video.srcObject.constructor.name}]` : 'null',
         });
       }
     };
@@ -278,6 +295,7 @@ export default function Home() {
                   <p>videoHeight: {debugInfo.videoHeight}px</p>
                   <p>paused: {debugInfo.paused ? 'true' : 'false'}</p>
                   <p>srcObject: {debugInfo.srcObject ? 'true' : 'false'}</p>
+                  <p>srcObjectType: {debugInfo.srcObjectType || 'N/A'}</p>
                 </div>
               </div>
             )}
@@ -301,6 +319,7 @@ export default function Home() {
                   <p>videoHeight: {debugInfo.videoHeight}px</p>
                   <p>paused: {debugInfo.paused ? 'true' : 'false'}</p>
                   <p>srcObject: {debugInfo.srcObject ? 'true' : 'false'}</p>
+                  <p>srcObjectType: {debugInfo.srcObjectType || 'N/A'}</p>
                 </div>
               </div>
             )}
@@ -308,9 +327,9 @@ export default function Home() {
             <div className="relative w-full h-screen max-h-[calc(100vh-200px)] bg-gray-900">
               <video
                 ref={videoRef}
-                autoPlay
-                playsInline
-                muted
+                autoPlay={true}
+                playsInline={true}
+                muted={true}
                 className="w-full h-full"
                 style={{
                   objectFit: 'cover',
