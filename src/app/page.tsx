@@ -66,10 +66,11 @@ export default function Home() {
     }
 
     try {
-      // 背面カメラ（environment）を強制 + 解像度を1280x720に設定
+      // 背面カメラ（environment）を優先 + 解像度を1280x720に設定
+      // exactではなく文字列指定で互換性を向上
       const s = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { exact: 'environment' }, // 強制（exactで指定）
+          facingMode: 'environment', // exactを外して互換性向上
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -82,14 +83,24 @@ export default function Home() {
       if (videoRef.current) {
         const v = videoRef.current;
         v.srcObject = s;
-        // 一部ブラウザでは明示的な play() 呼び出しが必要
-        const playPromise = v.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((err) => {
-            const playErrorMsg = `動画の再生に失敗しました: ${err instanceof Error ? err.message : String(err)}`;
-            setCameraError(playErrorMsg);
-            console.warn('Video play was interrupted:', err);
-          });
+        
+        // iOS Safari等のブラウザ制限を回避するため、確実にplay()を実行
+        try {
+          const playPromise = v.play();
+          if (playPromise !== undefined) {
+            await playPromise;
+          }
+        } catch (playErr) {
+          // play()が失敗した場合のエラーハンドリング
+          const playErrorMsg = `動画の再生に失敗しました: ${playErr instanceof Error ? playErr.message : String(playErr)}`;
+          setCameraError(playErrorMsg);
+          console.error('Video play error:', playErr);
+          
+          // ストリームを停止してクリーンアップ
+          s.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+          setStream(null);
+          return;
         }
       }
       setIsCameraActive(true);
@@ -190,7 +201,8 @@ export default function Home() {
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
         } else {
-          overlayCtx.fillStyle = '#426aeb';
+          // 白背景に合うダークグレーのマスク
+          overlayCtx.fillStyle = '#1a1a1a';
           overlayCtx.fillRect(left, top, maskW, maskH);
         }
       };
@@ -237,7 +249,8 @@ export default function Home() {
       if (maskImage && maskImage.complete && maskImage.naturalWidth) {
         ctx.drawImage(maskImage, left, top, maskW, maskH);
       } else {
-        ctx.fillStyle = '#426aeb';
+        // 白背景に合うダークグレーのマスク
+        ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(left, top, maskW, maskH);
       }
     };
@@ -262,8 +275,8 @@ export default function Home() {
   }, [detectedCars, maskImage]);
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-20">
-      <header className="sticky top-0 z-10 bg-white border-b border-gray-300 shadow-sm">
+    <div className="min-h-screen bg-white pb-20">
+      <header className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
         <div className="max-w-4xl mx-auto px-4 py-4">
           <h1 className="text-2xl font-bold text-gray-900">Number Mask</h1>
         </div>
@@ -281,7 +294,7 @@ export default function Home() {
       <main className="max-w-4xl mx-auto px-4 py-6">
         {isModelLoading && (
           <div className="flex flex-col items-center justify-center py-16 gap-4">
-            <Loader2 className="animate-spin text-custom-blue" size={48} />
+            <Loader2 className="animate-spin text-gray-900" size={48} />
             <p className="text-gray-600">モデルを読み込み中...</p>
           </div>
         )}
@@ -293,7 +306,7 @@ export default function Home() {
             </p>
             <button
               onClick={startCamera}
-              className="flex items-center gap-2 px-6 py-4 bg-custom-blue text-white rounded-xl font-medium shadow-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 px-6 py-4 bg-gray-900 text-white rounded-xl font-medium shadow-lg hover:bg-gray-800 transition-colors"
             >
               <Camera size={24} />
               カメラを起動
@@ -315,13 +328,21 @@ export default function Home() {
                 <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
               </div>
             )}
-            <div className="relative rounded-xl overflow-hidden bg-black shadow-lg" style={{ aspectRatio: '9/16' }}>
+            <div className="relative rounded-xl overflow-hidden bg-gray-900 shadow-lg" style={{ aspectRatio: '9/16' }}>
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
                 className="w-full h-full object-cover"
+                onLoadedMetadata={() => {
+                  // メタデータ読み込み後に確実に再生
+                  if (videoRef.current) {
+                    videoRef.current.play().catch((err) => {
+                      console.warn('Auto-play failed, will retry:', err);
+                    });
+                  }
+                }}
               />
               <canvas
                 ref={overlayRef}
@@ -331,13 +352,13 @@ export default function Home() {
             <div className="flex justify-center gap-4">
               <button
                 onClick={savePhoto}
-                className="flex items-center gap-2 px-6 py-3 bg-custom-blue text-white rounded-xl font-medium shadow hover:bg-blue-700 transition-colors"
+                className="flex items-center gap-2 px-6 py-3 bg-gray-900 text-white rounded-xl font-medium shadow hover:bg-gray-800 transition-colors"
               >
                 保存
               </button>
               <button
                 onClick={stopCamera}
-                className="flex items-center gap-2 px-6 py-3 bg-gray-500 text-white rounded-xl font-medium shadow hover:bg-gray-600 transition-colors"
+                className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-900 rounded-xl font-medium shadow hover:bg-gray-300 transition-colors"
               >
                 カメラを止める
               </button>
