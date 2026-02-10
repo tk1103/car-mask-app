@@ -16,6 +16,7 @@ export default function Home() {
   const [model, setModel] = useState<any>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -56,24 +57,65 @@ export default function Home() {
   }, []);
 
   const startCamera = useCallback(async () => {
+    setCameraError(null); // エラーをクリア
+
     if (!navigator.mediaDevices?.getUserMedia) {
-      alert('カメラAPIが利用できません。HTTPSで接続してください。');
+      const errorMsg = 'カメラAPIが利用できません。スマホでは https:// でアクセスする必要があります。';
+      setCameraError(errorMsg);
       return;
     }
+
     try {
+      // 背面カメラ（environment）を強制 + 解像度を1280x720に設定
       const s = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: {
+          facingMode: { exact: 'environment' }, // 強制（exactで指定）
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
+      
       streamRef.current = s;
       setStream(s);
+      
       if (videoRef.current) {
-        videoRef.current.srcObject = s;
+        const v = videoRef.current;
+        v.srcObject = s;
+        // 一部ブラウザでは明示的な play() 呼び出しが必要
+        const playPromise = v.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            const playErrorMsg = `動画の再生に失敗しました: ${err instanceof Error ? err.message : String(err)}`;
+            setCameraError(playErrorMsg);
+            console.warn('Video play was interrupted:', err);
+          });
+        }
       }
       setIsCameraActive(true);
     } catch (err) {
       console.error('Camera error:', err);
-      alert('カメラへのアクセスに失敗しました。権限を確認してください。');
+      
+      // エラーの種類に応じて詳細なメッセージを表示
+      let errorMessage = 'カメラへのアクセスに失敗しました。';
+      
+      if (err instanceof Error) {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          errorMessage = 'カメラの権限が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください。';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          errorMessage = 'カメラが見つかりませんでした。デバイスにカメラが接続されているか確認してください。';
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+          errorMessage = 'カメラが使用中です。他のアプリでカメラを使用していないか確認してください。';
+        } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+          errorMessage = `カメラの設定がサポートされていません。背面カメラまたは解像度1280x720が利用できない可能性があります。\nエラー詳細: ${err.message}`;
+        } else {
+          errorMessage = `カメラエラー: ${err.name} - ${err.message}`;
+        }
+      } else {
+        errorMessage = `カメラエラー: ${String(err)}`;
+      }
+      
+      setCameraError(errorMessage);
     }
   }, []);
 
@@ -89,6 +131,7 @@ export default function Home() {
     setStream(null);
     setIsCameraActive(false);
     setDetectedCars([]);
+    setCameraError(null); // カメラ停止時にエラーもクリア
   }, []);
 
   // Detection loop: run coco-ssd on video, filter "car", draw masks on overlay
@@ -255,24 +298,34 @@ export default function Home() {
               <Camera size={24} />
               カメラを起動
             </button>
+            {cameraError && (
+              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg max-w-md">
+                <p className="text-red-800 text-sm font-medium mb-1">エラー</p>
+                <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
+              </div>
+            )}
           </div>
         )}
 
         {!isModelLoading && isCameraActive && (
           <div className="space-y-4">
-            <div className="relative rounded-xl overflow-hidden bg-black shadow-lg" style={{ aspectRatio: '16/10' }}>
+            {cameraError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-red-800 text-sm font-medium mb-1">エラー</p>
+                <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
+              </div>
+            )}
+            <div className="relative rounded-xl overflow-hidden bg-black shadow-lg" style={{ aspectRatio: '9/16' }}>
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
                 className="w-full h-full object-cover"
-                style={{ transform: 'scaleX(-1)' }}
               />
               <canvas
                 ref={overlayRef}
                 className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                style={{ transform: 'scaleX(-1)' }}
               />
             </div>
             <div className="flex justify-center gap-4">
