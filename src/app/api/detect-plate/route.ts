@@ -107,24 +107,69 @@ export async function POST(request: NextRequest) {
     });
 
     if (!geminiResponse.ok) {
-      const errorBody = await geminiResponse.text();
+      let errorBody: string;
+      let errorJson: any = null;
+      
+      try {
+        errorBody = await geminiResponse.text();
+        // JSONとしてパースを試みる
+        try {
+          errorJson = JSON.parse(errorBody);
+        } catch {
+          // JSONでない場合はそのまま使用
+        }
+      } catch (e) {
+        errorBody = `エラーレスポンスの読み取りに失敗: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      
       console.error('Gemini HTTP error:', geminiResponse.status, errorBody);
+      
+      // エラーメッセージを抽出
+      let errorMessage = 'Gemini API HTTPエラー';
+      if (errorJson?.error?.message) {
+        errorMessage = errorJson.error.message;
+      } else if (errorJson?.error) {
+        errorMessage = String(errorJson.error);
+      }
+      
       return NextResponse.json(
         {
           found: false,
-          error: 'Gemini API HTTPエラー',
+          error: errorMessage,
           status: geminiResponse.status,
-          rawResponse: errorBody,
+          rawResponse: errorBody.substring(0, 1000), // 最初の1000文字のみ
         },
-        { status: 500 }
+        { status: geminiResponse.status === 429 ? 429 : 500 }
       );
     }
 
-    const geminiJson: any = await geminiResponse.json();
+    let geminiJson: any;
+    try {
+      geminiJson = await geminiResponse.json();
+    } catch (jsonError) {
+      console.error('Failed to parse Gemini response as JSON:', jsonError);
+      const text = await geminiResponse.text();
+      return NextResponse.json({
+        found: false,
+        error: 'Gemini APIの応答を解析できませんでした',
+        rawResponse: text.substring(0, 500),
+      }, { status: 500 });
+    }
+    
     const text =
       geminiJson.candidates?.[0]?.content?.parts
         ?.map((p: any) => p.text || '')
         .join('') ?? '';
+
+    // テキストが空の場合はエラー
+    if (!text || text.trim().length === 0) {
+      console.error('Empty response from Gemini API:', geminiJson);
+      return NextResponse.json({
+        found: false,
+        error: 'Gemini APIから空の応答が返されました',
+        rawResponse: JSON.stringify(geminiJson).substring(0, 500),
+      });
+    }
 
     console.log('Gemini API raw text response:', text.substring(0, 500)); // 最初の500文字をログ
 

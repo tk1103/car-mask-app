@@ -93,7 +93,14 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        let errorData: any;
+        try {
+          errorData = await response.json();
+        } catch (jsonError) {
+          // JSONパースに失敗した場合はテキストとして読み取る
+          const errorText = await response.text();
+          errorData = { error: `APIエラー (${response.status}): ${errorText.substring(0, 200)}` };
+        }
         
         // レート制限エラー（429）の場合は特別なメッセージを表示
         if (response.status === 429) {
@@ -109,8 +116,15 @@ export default function Home() {
           return null;
         }
         
-        const errorMsg = `APIエラー: ${response.status} - ${errorData.error || JSON.stringify(errorData)}`;
+        // エラーメッセージを構築
+        const errorMsg = errorData.error 
+          ? `APIエラー (${response.status}): ${errorData.error}`
+          : `APIエラー (${response.status}): ${JSON.stringify(errorData).substring(0, 200)}`;
+        
         setDebugLog(errorMsg);
+        if (errorData.rawResponse) {
+          console.warn('API error details:', errorData.rawResponse);
+        }
         console.warn('Detection API error:', errorData);
         return null;
       }
