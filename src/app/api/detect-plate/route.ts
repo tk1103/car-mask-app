@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest, NextResponse } from 'next/server';
 
 // 明示的に Node.js ランタイムを指定（process.env を確実に使うため）
@@ -29,10 +28,6 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Gemini APIを初期化
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
     // Geminiへの最強プロンプト（日本のナンバープレート特化型）
     const prompt = `
       DETECT_LICENSE_PLATE_TASK:
@@ -57,18 +52,50 @@ export async function POST(request: NextRequest) {
       ※プレートが画像内に存在しない、または不明瞭な場合は必ず {"found": false} とのみ出力してください。
     `;
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType: mimeType,
-        },
-      },
-      prompt,
-    ]);
+    // REST API (v1) で直接呼び出し（v1betaによる404を回避）
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-    const response = await result.response;
-    const text = response.text();
+    const geminiResponse = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  data: base64Image,
+                  mimeType,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!geminiResponse.ok) {
+      const errorBody = await geminiResponse.text();
+      console.error('Gemini HTTP error:', geminiResponse.status, errorBody);
+      return NextResponse.json(
+        {
+          found: false,
+          error: 'Gemini API HTTPエラー',
+          status: geminiResponse.status,
+          rawResponse: errorBody,
+        },
+        { status: 500 }
+      );
+    }
+
+    const geminiJson: any = await geminiResponse.json();
+    const text =
+      geminiJson.candidates?.[0]?.content?.parts
+        ?.map((p: any) => p.text || '')
+        .join('') ?? '';
 
     // JSONを抽出（```json や ``` を除去）
     let jsonText = text.trim();
