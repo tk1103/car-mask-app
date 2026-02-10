@@ -53,8 +53,8 @@ export async function POST(request: NextRequest) {
     `;
 
     // REST API (v1) で直接呼び出し
-    // ※ 利用可能性の高いビジョン対応モデルを使用（1.0 pro vision latest）
-    const modelName = 'gemini-1.0-pro-vision-latest';
+    // ListModels で確認できたマルチモーダル対応モデルを使用
+    const modelName = 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`;
 
     const geminiResponse = await fetch(url, {
