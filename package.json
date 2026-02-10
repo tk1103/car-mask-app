@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "@tensorflow/tfjs": "^4.22.0",
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^4.2.0",
     "jszip": "^3.10.1",
