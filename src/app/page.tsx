@@ -325,9 +325,9 @@ export default function Home() {
       const avgWidth = (width1 + width2) / 2;
       const avgHeight = (height1 + height2) / 2;
       
-      // ロゴサイズをプレートサイズに合わせる（少し余白を追加）
-      const logoWidth = avgWidth * 1.05;
-      const logoHeight = avgHeight * 1.05;
+      // ロゴサイズをプレートサイズに合わせる（基本サイズ倍率1.0）
+      const logoWidth = avgWidth * 1.0;
+      const logoHeight = avgHeight * 1.0;
       
       const logoCanvas = document.createElement('canvas');
       logoCanvas.width = logoWidth;
@@ -369,8 +369,8 @@ export default function Home() {
           y: plateCenterY + (c.y - plateCenterY) * scale + oy / h,
         })) as Corners;
 
-        // パディングを小さく（0.08 → 0.02）
-        const pad = 0.02;
+        // パディングを0.02%に設定
+        const pad = 0.0002;
         const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
         const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
         const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
