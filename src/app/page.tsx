@@ -474,12 +474,12 @@ export default function Home() {
         lctx.closePath();
         lctx.fill();
         
-        // A_O_Iロゴテキスト
+        // Automoniロゴテキスト
         lctx.fillStyle = '#fff';
         lctx.font = `bold ${logoCanvas.height * 0.5}px system-ui, sans-serif`;
         lctx.textAlign = 'center';
         lctx.textBaseline = 'middle';
-        lctx.fillText('A_O_I', logoCanvas.width / 2, logoCanvas.height / 2);
+        lctx.fillText('Automoni', logoCanvas.width / 2, logoCanvas.height / 2);
       }
 
       // すべてのプレートにマスクを描画
@@ -520,7 +520,7 @@ export default function Home() {
           }
           const file = new File([blob], `number-mask-${Date.now()}.jpg`, { type: 'image/jpeg' });
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
-            await navigator.share({ files: [file], title: 'A_O_I CAMERA' });
+            await navigator.share({ files: [file], title: 'Auto mo Camera' });
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
           } else {
@@ -587,7 +587,7 @@ export default function Home() {
     <div className="min-h-screen bg-white" style={{ fontFamily }}>
       <header className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <h1 className="text-xl font-extralight text-gray-800 tracking-[0.2em]">A_O_I CAMERA</h1>
+          <h1 className="text-xl font-extralight text-gray-800 tracking-[0.2em]">Auto mo Camera</h1>
         </div>
       </header>
 
