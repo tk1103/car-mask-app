@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Loader2, CheckCircle, RotateCcw, Share2 } from 'lucide-react';
+import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy } from 'lucide-react';
 
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
@@ -86,6 +86,7 @@ export default function Home() {
   const [editLogoScale, setEditLogoScale] = useState(1);
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
   const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
+  const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -485,9 +486,18 @@ export default function Home() {
         lctx.closePath();
         lctx.fill();
         
-        // Automoniロゴテキスト
+        // Automoniロゴテキスト（マスクサイズに合わせて縮小）
         lctx.fillStyle = '#fff';
-        lctx.font = `bold ${logoCanvas.height * 0.5}px system-ui, sans-serif`;
+        // 文字幅をマスク幅の90%以内に収めるようにフォントサイズを調整
+        const testFontSize = logoCanvas.height * 0.5;
+        lctx.font = `bold ${testFontSize}px system-ui, sans-serif`;
+        const textMetrics = lctx.measureText('Automoni');
+        const textWidth = textMetrics.width;
+        const maxTextWidth = logoCanvas.width * 0.9; // マスク幅の90%
+        const fontSize = textWidth > maxTextWidth 
+          ? (testFontSize * maxTextWidth / textWidth) 
+          : testFontSize;
+        lctx.font = `bold ${Math.max(12, fontSize)}px system-ui, sans-serif`; // 最小12px
         lctx.textAlign = 'center';
         lctx.textBaseline = 'middle';
         lctx.fillText('Automoni', logoCanvas.width / 2, logoCanvas.height / 2);
@@ -542,6 +552,102 @@ export default function Home() {
             URL.revokeObjectURL(a.href);
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
+          }
+          setIsProcessing(false);
+        },
+        'image/jpeg',
+        0.92
+      );
+    } catch (e) {
+      setIsProcessing(false);
+    }
+  }, []);
+
+  const handleShareToSNS = useCallback(async (platform: 'facebook' | 'twitter' | 'instagram') => {
+    if (!previewCanvasRef.current) return;
+    setIsProcessing(true);
+    try {
+      previewCanvasRef.current.toBlob(
+        async (blob) => {
+          if (!blob) {
+            setIsProcessing(false);
+            return;
+          }
+
+          const file = new File([blob], `automoni-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          
+          // Share APIでSNSアプリを開く
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: 'Auto mo Camera',
+                text: 'Automoniでナンバープレートをマスクしました',
+              });
+              setShowShareMenu(false);
+              setShowSaveSuccess(true);
+              setTimeout(() => setShowSaveSuccess(false), 2500);
+            } catch (shareError) {
+              // ユーザーがキャンセルした場合など
+              console.log('Share cancelled:', shareError);
+            }
+          } else {
+            // Share APIが使えない場合、画像をクリップボードにコピー
+            try {
+              await navigator.clipboard.write([
+                new ClipboardItem({ 'image/jpeg': blob }),
+              ]);
+              setShowShareMenu(false);
+              setShowSaveSuccess(true);
+              setTimeout(() => setShowSaveSuccess(false), 2500);
+              // SNSアプリを開く（画像はクリップボードから貼り付け可能）
+              const urls: Record<string, string> = {
+                facebook: 'https://www.facebook.com',
+                twitter: 'https://twitter.com/compose/tweet',
+                instagram: 'https://www.instagram.com',
+              };
+              window.open(urls[platform], '_blank');
+            } catch (clipboardError) {
+              // クリップボードAPIが使えない場合、ダウンロードにフォールバック
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              a.download = file.name;
+              a.click();
+              URL.revokeObjectURL(a.href);
+              setShowShareMenu(false);
+              setShowSaveSuccess(true);
+              setTimeout(() => setShowSaveSuccess(false), 2500);
+            }
+          }
+          setIsProcessing(false);
+        },
+        'image/jpeg',
+        0.92
+      );
+    } catch (e) {
+      setIsProcessing(false);
+    }
+  }, []);
+
+  const handleCopyToClipboard = useCallback(async () => {
+    if (!previewCanvasRef.current) return;
+    setIsProcessing(true);
+    try {
+      previewCanvasRef.current.toBlob(
+        async (blob) => {
+          if (!blob) {
+            setIsProcessing(false);
+            return;
+          }
+          try {
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/jpeg': blob }),
+            ]);
+            setShowShareMenu(false);
+            setShowSaveSuccess(true);
+            setTimeout(() => setShowSaveSuccess(false), 2500);
+          } catch (clipboardError) {
+            setCameraError('クリップボードへのコピーに失敗しました');
           }
           setIsProcessing(false);
         },
@@ -712,22 +818,62 @@ export default function Home() {
                 />
               </label>
             </div>
-            <div className="flex justify-center gap-4">
-              <button
-                onClick={retake}
-                className="flex items-center gap-2 px-6 py-3 text-gray-600 text-sm font-light rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
-              >
-                <RotateCcw size={18} strokeWidth={1.5} />
-                撮り直す
-              </button>
-              <button
-                onClick={handleSaveFromPreview}
-                disabled={isProcessing}
-                className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white text-sm font-light rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
-              >
-                {isProcessing ? <Loader2 className="animate-spin" size={18} /> : <Share2 size={18} strokeWidth={1.5} />}
-                保存
-              </button>
+            <div className="flex flex-col gap-3">
+              <div className="flex justify-center gap-4">
+                <button
+                  onClick={retake}
+                  className="flex items-center gap-2 px-6 py-3 text-gray-600 text-sm font-light rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
+                >
+                  <RotateCcw size={18} strokeWidth={1.5} />
+                  撮り直す
+                </button>
+                <button
+                  onClick={() => setShowShareMenu(!showShareMenu)}
+                  disabled={isProcessing}
+                  className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white text-sm font-light rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
+                >
+                  {isProcessing ? <Loader2 className="animate-spin" size={18} /> : <Share2 size={18} strokeWidth={1.5} />}
+                  共有
+                </button>
+              </div>
+              
+              {/* SNS共有メニュー */}
+              {showShareMenu && (
+                <div className="flex justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => handleShareToSNS('facebook')}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-xs font-light rounded-full hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    <Facebook size={16} />
+                    Facebook
+                  </button>
+                  <button
+                    onClick={() => handleShareToSNS('twitter')}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-black text-white text-xs font-light rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  >
+                    <Twitter size={16} />
+                    X
+                  </button>
+                  <button
+                    onClick={() => handleShareToSNS('instagram')}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-light rounded-full hover:opacity-90 transition-colors disabled:opacity-50"
+                  >
+                    <Instagram size={16} />
+                    Instagram
+                  </button>
+                  <button
+                    onClick={handleCopyToClipboard}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-white text-xs font-light rounded-full hover:bg-gray-600 transition-colors disabled:opacity-50"
+                  >
+                    <Copy size={16} />
+                    コピー
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
