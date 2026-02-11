@@ -28,25 +28,26 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Geminiへの最強プロンプト（精度・速度特化型）
+    // ナンバープレートの四隅座標を返すプロンプト（パース補正用）
     const prompt = `
-TASK: Detect the precise bounding box of a Japanese License Plate.
+TASK: Detect the Japanese License Plate and return the exact four corner coordinates of the plate rectangle.
 
 CRITICAL RULES:
-1. Target only the license plate (rectangle part), excluding car body.
-2. Coordinate system: Use normalized coordinates where top-left is [0, 0] and bottom-right is [1000, 1000].
-3. Respond ONLY in the following JSON format:
+1. Target only the license plate (the rectangular plate part), excluding car body.
+2. Coordinate system: Normalized coordinates where image top-left is [0, 0] and bottom-right is [1000, 1000]. All x and y values are numbers 0-1000.
+3. Return the four corners in order: topLeft, topRight, bottomRight, bottomLeft (counter-clockwise from top-left).
+4. Respond ONLY with this JSON, no other text, no markdown:
 {
   "found": true,
-  "bbox": {
-    "ymin": number,
-    "xmin": number,
-    "ymax": number,
-    "xmax": number
-  }
+  "corners": [
+    {"x": number, "y": number},
+    {"x": number, "y": number},
+    {"x": number, "y": number},
+    {"x": number, "y": number}
+  ]
 }
-4. If no plate is clearly visible, return {"found": false}.
-5. Strictly no conversational text, no markdown code blocks. Just the JSON.
+5. If no plate is clearly visible, return {"found": false}.
+6. No conversational text. No code blocks. Just the JSON.
 `;
 
     // REST API (v1) で直接呼び出し
@@ -163,13 +164,10 @@ CRITICAL RULES:
       const parsed = JSON.parse(jsonText);
       console.log('Parsed JSON:', JSON.stringify(parsed));
       
-      // 0-1000の正規化座標をそのまま返す（フロントエンド側で比率に変換）
-      // xmin, ymin, xmax, ymax形式のまま返す
-      if (parsed.found && parsed.bbox && parsed.bbox.xmin !== undefined) {
-        // 座標変換は行わず、0-1000の座標をそのまま返す
-        console.log('Bbox (normalized 0-1000):', parsed.bbox);
+      if (parsed.found && parsed.corners && Array.isArray(parsed.corners) && parsed.corners.length === 4) {
+        console.log('Corners (normalized 0-1000):', parsed.corners);
       } else {
-        console.log('No bbox found in parsed result:', parsed);
+        console.log('No corners in parsed result:', parsed);
       }
       
       return NextResponse.json(parsed);

@@ -1,38 +1,88 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Loader2, CheckCircle } from 'lucide-react';
+import { Camera, Loader2, CheckCircle, RotateCcw, Share2 } from 'lucide-react';
 
-type PlateBbox = {
-  x: number; // 0-1の比率
-  y: number; // 0-1の比率
-  width: number; // 0-1の比率
-  height: number; // 0-1の比率
-};
+type Corner = { x: number; y: number }; // 0-1
+type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
+
+// 四角形に画像をパース補正して描画（2三角形でアフィン変換）
+function drawImageInQuad(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement | HTMLCanvasElement,
+  corners: Corners,
+  canvasWidth: number,
+  canvasHeight: number
+) {
+  const [p0, p1, p2, p3] = corners.map((c) => ({
+    x: c.x * canvasWidth,
+    y: c.y * canvasHeight,
+  }));
+
+  const drawTriangle = (
+    sx0: number,
+    sy0: number,
+    sx1: number,
+    sy1: number,
+    sx2: number,
+    sy2: number,
+    dx0: number,
+    dy0: number,
+    dx1: number,
+    dy1: number,
+    dx2: number,
+    dy2: number
+  ) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(dx0, dy0);
+    ctx.lineTo(dx1, dy1);
+    ctx.lineTo(dx2, dy2);
+    ctx.closePath();
+    ctx.clip();
+
+    const denom = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0);
+    if (Math.abs(denom) < 1e-10) {
+      ctx.restore();
+      return;
+    }
+    const a = ((dx1 - dx0) * (sy2 - sy0) - (dx2 - dx0) * (sy1 - sy0)) / denom;
+    const b = ((dx1 - dx0) * (sx0 - sx2) - (dx2 - dx0) * (sx0 - sx1)) / denom;
+    const c = ((dy1 - dy0) * (sy2 - sy0) - (dy2 - dy0) * (sy1 - sy0)) / denom;
+    const d = ((dy1 - dy0) * (sx0 - sx2) - (dy2 - dy0) * (sx0 - sx1)) / denom;
+    const e = dx0 - a * sx0 - b * sy0;
+    const f = dy0 - c * sx0 - d * sy0;
+    ctx.setTransform(a, c, b, d, e, f);
+    ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, 1, 1);
+    ctx.restore();
+  };
+
+  drawTriangle(0, 0, 1, 0, 0, 1, p0.x, p0.y, p1.x, p1.y, p3.x, p3.y);
+  drawTriangle(1, 0, 1, 1, 0, 1, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+}
 
 export default function Home() {
-  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [screenMode, setScreenMode] = useState<'idle' | 'camera' | 'preview_edit'>('idle');
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
-  const [debugLog, setDebugLog] = useState<string | null>(null);
-  const [detectedPlate, setDetectedPlate] = useState<PlateBbox | null>(null); // AR用：リアルタイム検出結果
-  const [isScanning, setIsScanning] = useState(false); // AR用：スキャン中フラグ
-  const [isRateLimited, setIsRateLimited] = useState(false); // レート制限フラグ
-  const [autoDetectionEnabled, setAutoDetectionEnabled] = useState(true); // 自動検出の有効/無効
+
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [detectedCorners, setDetectedCorners] = useState<Corners | null>(null);
+  const [editLogoOffset, setEditLogoOffset] = useState({ x: 0, y: 0 });
+  const [editLogoScale, setEditLogoScale] = useState(1);
+  const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const overlayRef = useRef<HTMLCanvasElement>(null); // AR用：オーバーレイCanvas
-  const saveCanvasRef = useRef<HTMLCanvasElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const playAttemptCountRef = useRef<number>(0);
-  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null); // AR用：検出ループのタイマー
-  const lastDetectionTimeRef = useRef<number>(0); // 最後に検出成功した時刻（永続化用）
-  const isDetectingRef = useRef<boolean>(false); // 検出中フラグ（重複実行防止）
+  const playAttemptCountRef = useRef(0);
+  const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
+  const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
+  const previewImageRef = useRef<HTMLImageElement | null>(null);
 
-  // Load mask image (optional)
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -41,706 +91,402 @@ export default function Home() {
     img.src = '/mask-logo.png';
   }, []);
 
-  // ナンバープレート検出関数（ARループと保存の両方で使用）
-  const detectPlate = useCallback(async (): Promise<PlateBbox | null> => {
-    // 既に検出中の場合はスキップ（重複実行防止）
-    if (isDetectingRef.current) {
-      return null;
-    }
-
-    const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) {
-      return null;
-    }
-
-    isDetectingRef.current = true;
-    try {
-      setIsScanning(true);
-      
-      // 現在のビデオフレームをキャプチャ（速度向上のため解像度を下げる）
-      const tempCanvas = document.createElement('canvas');
-      // 最大400pxにリサイズ（API呼び出しを高速化）
-      const maxWidth = 400;
-      const maxHeight = 300;
-      const scale = Math.min(maxWidth / video.videoWidth, maxHeight / video.videoHeight, 1);
-      tempCanvas.width = Math.round(video.videoWidth * scale);
-      tempCanvas.height = Math.round(video.videoHeight * scale);
-      const tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) {
-        return null;
-      }
-
-      // 画像の品質を向上させるため、スムージングを有効化
-      tempCtx.imageSmoothingEnabled = true;
-      tempCtx.imageSmoothingQuality = 'high';
-      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-
-      // CanvasをBlobに変換（品質を0.8に調整：速度と精度のバランス）
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        tempCanvas.toBlob((b) => {
-          if (b) resolve(b);
-          else reject(new Error('画像の変換に失敗しました'));
-        }, 'image/jpeg', 0.8);
-      });
-
-      // Gemini APIに送信
-      const formData = new FormData();
-      formData.append('image', blob, 'photo.jpg');
-      formData.append('width', tempCanvas.width.toString());
-      formData.append('height', tempCanvas.height.toString());
-
-      const response = await fetch('/api/detect-plate', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        let errorData: any;
-        try {
-          errorData = await response.json();
-        } catch (jsonError) {
-          // JSONパースに失敗した場合はテキストとして読み取る
-          const errorText = await response.text();
-          errorData = { error: `APIエラー (${response.status}): ${errorText.substring(0, 200)}` };
-        }
-        
-        // レート制限エラー（429）の場合は特別なメッセージを表示
-        if (response.status === 429) {
-          const rateLimitMsg = '⚠️ APIレート制限に達しました。無料プランは1日20リクエストまでです。自動検出を停止しました。「手動検出」ボタンで検出できます。';
-          setDebugLog(rateLimitMsg);
-          setCameraError(rateLimitMsg);
-          setIsRateLimited(true); // レート制限フラグを設定
-          setAutoDetectionEnabled(false); // 自動検出を無効化
-          console.warn('Rate limit exceeded:', errorData);
-          // 検出ループを停止
-          if (detectionIntervalRef.current) {
-            clearInterval(detectionIntervalRef.current);
-            detectionIntervalRef.current = null;
-          }
-          return null;
-        }
-        
-        // エラーメッセージを構築
-        const errorMsg = errorData.error 
-          ? `APIエラー (${response.status}): ${errorData.error}`
-          : `APIエラー (${response.status}): ${JSON.stringify(errorData).substring(0, 200)}`;
-        
-        setDebugLog(errorMsg);
-        if (errorData.rawResponse) {
-          console.warn('API error details:', errorData.rawResponse);
-        }
-        console.warn('Detection API error:', errorData);
-        return null;
-      }
-
-      const result = await response.json();
-      
-      // デバッグ情報を常に表示（検出状況を確認するため）
-      if (result.found && result.bbox && result.bbox.xmin !== undefined) {
-        // 0-1000の座標を0-1の比率に変換
-        const xmin = result.bbox.xmin / 1000;
-        const ymin = result.bbox.ymin / 1000;
-        const xmax = result.bbox.xmax / 1000;
-        const ymax = result.bbox.ymax / 1000;
-        
-        const ratioBbox: PlateBbox = {
-          x: xmin,
-          y: ymin,
-          width: xmax - xmin,
-          height: ymax - ymin,
-        };
-        
-        const logMsg = `✓ 検出成功: x=${(ratioBbox.x * 100).toFixed(1)}%, y=${(ratioBbox.y * 100).toFixed(1)}%, w=${(ratioBbox.width * 100).toFixed(1)}%, h=${(ratioBbox.height * 100).toFixed(1)}%`;
-        setDebugLog(logMsg);
-        console.log('Detection success (ratio):', ratioBbox);
-        return ratioBbox;
-      } else {
-        // found=falseの場合もログに記録（問題特定のため）
-        const errorMsg = result.error ? `検出失敗: ${result.error}` : 'ナンバープレートが見つかりませんでした';
-        setDebugLog(errorMsg);
-        if (result.rawResponse) {
-          console.warn('API raw response:', result.rawResponse);
-        }
-        return null;
-      }
-    } catch (error) {
-      const errorMsg = `検出エラー: ${error instanceof Error ? error.message : String(error)}`;
-      setDebugLog(errorMsg);
-      console.error('Detection error:', error);
-      return null;
-    } finally {
-      setIsScanning(false);
-      isDetectingRef.current = false;
-    }
-  }, []);
-
-  // AR用：リアルタイム検出ループ（自動検出が有効な場合のみ）
-  useEffect(() => {
-    // レート制限に達している、または自動検出が無効な場合は停止
-    if (!isCameraActive || !videoRef.current || isRateLimited || !autoDetectionEnabled) {
-      setDetectedPlate(null);
-      lastDetectionTimeRef.current = 0;
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
-        detectionIntervalRef.current = null;
-      }
-      return;
-    }
-
-    // 初回検出（すぐに実行）
-    setDebugLog('検出ループ開始...');
-    detectPlate().then((bbox) => {
-      if (bbox) {
-        setDetectedPlate(bbox);
-        lastDetectionTimeRef.current = Date.now();
-        console.log('First detection success:', bbox);
-      } else {
-        console.log('First detection: no plate found');
-      }
-    }).catch((err) => {
-      console.error('First detection error:', err);
-      setDebugLog(`初回検出エラー: ${err instanceof Error ? err.message : String(err)}`);
-    });
-
-    // 10秒おきに自動検出（レート制限対策：無料プランは1日20リクエストまで）
-    // 5秒 → 10秒に延長して、より安全に
-    detectionIntervalRef.current = setInterval(() => {
-      // レート制限チェック
-      if (isRateLimited || !autoDetectionEnabled) {
-        if (detectionIntervalRef.current) {
-          clearInterval(detectionIntervalRef.current);
-          detectionIntervalRef.current = null;
-        }
-        return;
-      }
-      
-      // 検出中でない場合のみ実行
-      if (!isDetectingRef.current) {
-        detectPlate().then((bbox) => {
-          if (bbox) {
-            setDetectedPlate(bbox);
-            lastDetectionTimeRef.current = Date.now(); // 検出成功時刻を記録
-            console.log('Interval detection success:', bbox);
-          } else {
-            // found=false の場合でも、最後の検出から15秒以内なら前回の結果を保持
-            const timeSinceLastDetection = Date.now() - lastDetectionTimeRef.current;
-            if (timeSinceLastDetection > 15000) {
-              // 15秒以上検出されない場合はクリア
-              setDetectedPlate(null);
-              console.log('Clearing detectedPlate (15s timeout)');
-            }
-            // 15秒以内なら setDetectedPlate を呼ばず、前回の値を保持
-          }
-        }).catch((err) => {
-          console.error('Interval detection error:', err);
-        });
-      } else {
-        console.log('Skipping detection (already detecting)');
-      }
-    }, 10000); // 5秒 → 10秒に延長（レート制限対策）
-
-    return () => {
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
-        detectionIntervalRef.current = null;
-      }
-    };
-  }, [isCameraActive, detectPlate, isRateLimited, autoDetectionEnabled]);
-
-  // AR用：オーバーレイCanvasにリアルタイムでA_O_Iロゴを描画
-  useEffect(() => {
-    if (!isCameraActive || !videoRef.current || !overlayRef.current) {
-      return;
-    }
-
-    const video = videoRef.current;
-    const overlay = overlayRef.current;
-    const overlayCtx = overlay.getContext('2d');
-    if (!overlayCtx) return;
-
-    const drawOverlay = () => {
-      if (!video.videoWidth || !video.videoHeight) {
-        requestAnimationFrame(drawOverlay);
-        return;
-      }
-
-      // Canvasサイズをビデオに合わせる
-      if (overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
-        overlay.width = video.videoWidth;
-        overlay.height = video.videoHeight;
-      }
-
-      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-
-      // 検出されたナンバープレート位置にA_O_Iロゴを描画（比率ベース）
-      if (detectedPlate) {
-        const bbox = detectedPlate; // 0-1の比率
-        // 比率を画面サイズに変換
-        const centerX = (bbox.x + bbox.width / 2) * overlay.width;
-        const bottomY = (bbox.y + bbox.height) * overlay.height;
-        const maskW = Math.max(overlay.width * 0.1, bbox.width * overlay.width * 1.2);
-        const maskH = Math.max(overlay.height * 0.03, bbox.height * overlay.height * 1.5);
-        const left = centerX - maskW / 2;
-        const top = bottomY - maskH * 0.8;
-
-        // デバッグ: マスク描画位置を確認
-        console.log(`Drawing mask (ratio-based): left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
-
-        if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-          overlayCtx.drawImage(maskImage, left, top, maskW, maskH);
-        } else {
-          // ダークグレーのマスク
-          overlayCtx.fillStyle = '#1a1a1a';
-          overlayCtx.fillRect(left, top, maskW, maskH);
-          
-          // A_O_Iロゴを白抜きテキストで表示
-          overlayCtx.fillStyle = '#FFFFFF';
-          overlayCtx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
-          overlayCtx.textAlign = 'center';
-          overlayCtx.textBaseline = 'middle';
-          overlayCtx.fillText('A_O_I', centerX, top + maskH / 2);
-        }
-      } else {
-        // デバッグ: detectedPlateがnullの場合
-        console.log('No detectedPlate, skipping mask drawing');
-      }
-
-      requestAnimationFrame(drawOverlay);
-    };
-
-    drawOverlay();
-  }, [isCameraActive, detectedPlate, maskImage]);
-
   const startCamera = useCallback(async () => {
     setCameraError(null);
-
     if (!navigator.mediaDevices?.getUserMedia) {
-      const errorMsg = 'カメラAPIが利用できません。スマホでは https:// でアクセスする必要があります。';
-      setCameraError(errorMsg);
+      setCameraError('カメラを利用するには https でアクセスしてください。');
       return;
     }
-
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
-      
       streamRef.current = s;
       setStream(s);
-      setIsCameraActive(true);
+      setScreenMode('camera');
     } catch (err) {
-      console.error('Camera error:', err);
-      
-      let errorMessage = 'カメラへのアクセスに失敗しました。';
-      
-      if (err instanceof Error) {
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          errorMessage = 'カメラの権限が拒否されました。ブラウザの設定でカメラへのアクセスを許可してください。';
-        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-          errorMessage = 'カメラが見つかりませんでした。デバイスにカメラが接続されているか確認してください。';
-        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-          errorMessage = 'カメラが使用中です。他のアプリでカメラを使用していないか確認してください。';
-        } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
-          errorMessage = `カメラの設定がサポートされていません。\nエラー詳細: ${err.message}`;
-        } else {
-          errorMessage = `カメラエラー: ${err.name} - ${err.message}`;
-        }
-      } else {
-        errorMessage = `カメラエラー: ${String(err)}`;
-      }
-      
-      setCameraError(errorMessage);
+      const msg = err instanceof Error ? err.message : String(err);
+      setCameraError(msg.includes('Permission') ? 'カメラの許可をオンにしてください。' : `カメラエラー: ${msg}`);
     }
   }, []);
 
   const stopCamera = useCallback(() => {
-    if (detectionIntervalRef.current) {
-      clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
-    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+    if (videoRef.current) videoRef.current.srcObject = null;
     setStream(null);
-    setIsCameraActive(false);
-    setDetectedPlate(null);
+    setScreenMode('idle');
     setCameraError(null);
-    setIsScanning(false);
-    setIsRateLimited(false); // レート制限フラグをリセット
-    setAutoDetectionEnabled(true); // 自動検出を再有効化
+    setPreviewImageUrl(null);
+    setDetectedCorners(null);
+    setEditLogoOffset({ x: 0, y: 0 });
+    setEditLogoScale(1);
     playAttemptCountRef.current = 0;
   }, []);
 
-  // 手動検出関数（レート制限時や自動検出無効時に使用）
-  const manualDetect = useCallback(async () => {
-    if (!isCameraActive || !videoRef.current) {
-      setDebugLog('カメラが起動していません');
-      return;
-    }
-    
-    setDebugLog('手動検出を実行中...');
-    const bbox = await detectPlate();
-    if (bbox) {
-      setDetectedPlate(bbox);
-      lastDetectionTimeRef.current = Date.now();
-      setDebugLog(`✓ 検出成功: x=${Math.round(bbox.x)}, y=${Math.round(bbox.y)}`);
-    } else {
-      setDebugLog('ナンバープレートが見つかりませんでした');
-    }
-  }, [isCameraActive, detectPlate]);
-
-  // streamの変化を監視してsrcObjectを接続
   useEffect(() => {
-    if (!stream || !videoRef.current) {
-      return;
-    }
-
+    if (!stream || !videoRef.current) return;
     const video = videoRef.current;
-    
-    const timeoutId = setTimeout(() => {
-      if (video && stream) {
-        video.srcObject = stream;
-        video.play().catch((playErr) => {
-          const playErrorMsg = `動画の再生に失敗しました: ${playErr instanceof Error ? playErr.message : String(playErr)}`;
-          setCameraError(playErrorMsg);
-          console.error('Video play error:', playErr);
-        });
-      }
+    const t = setTimeout(() => {
+      video.srcObject = stream;
+      video.play().catch(() => {});
     }, 100);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
+    return () => clearTimeout(t);
   }, [stream]);
 
-  // iOS/Android向けの強制再生タイマー
   useEffect(() => {
-    if (!isCameraActive || !videoRef.current) {
-      playAttemptCountRef.current = 0;
-      return;
-    }
-
-    const video = videoRef.current;
+    if (screenMode !== 'camera' || !videoRef.current) return;
+    const v = videoRef.current;
     playAttemptCountRef.current = 0;
-
-    const forcePlay = () => {
-      if (video && playAttemptCountRef.current < 3) {
-        playAttemptCountRef.current += 1;
-        video.play().catch((err) => {
-          console.warn(`Force play attempt ${playAttemptCountRef.current} failed:`, err);
-        });
+    const tryPlay = () => {
+      if (playAttemptCountRef.current < 5) {
+        playAttemptCountRef.current++;
+        v.play().catch(() => {});
       }
     };
+    tryPlay();
+    const id = setInterval(tryPlay, 400);
+    return () => clearInterval(id);
+  }, [screenMode]);
 
-    forcePlay();
-
-    const interval = setInterval(() => {
-      if (playAttemptCountRef.current < 3) {
-        forcePlay();
-      } else {
-        clearInterval(interval);
-      }
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [isCameraActive]);
-
-  const savePhoto = useCallback(async () => {
+  const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
-    const saveCanvas = saveCanvasRef.current;
-    if (!video || !saveCanvas || !video.videoWidth || !video.videoHeight) return;
+    if (!video || !video.videoWidth || !video.videoHeight) return;
 
     setIsProcessing(true);
     setCameraError(null);
 
     try {
-      // 最新の検出結果を使用（ARループで既に検出済みの場合）
-      let bbox: PlateBbox | null = detectedPlate;
-      
-      // 検出結果がない場合は、今すぐ検出を実行
-      if (!bbox) {
-        setDebugLog('ナンバープレートを検出中...');
-        bbox = await detectPlate();
-      }
-
-      const ctx = saveCanvas.getContext('2d');
-      if (!ctx) {
-        throw new Error('保存用Canvas context取得に失敗しました');
-      }
-
       const w = video.videoWidth;
       const h = video.videoHeight;
-      saveCanvas.width = w;
-      saveCanvas.height = h;
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = w;
+      tempCanvas.height = h;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) throw new Error('Canvas error');
+      tempCtx.drawImage(video, 0, 0, w, h);
 
-      // ビデオフレームを描画
-      ctx.drawImage(video, 0, 0, w, h);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        tempCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.95);
+      });
 
-      // ナンバープレートが見つかった場合、マスクを描画（比率ベース）
-      if (bbox) {
-        // 比率を画面サイズに変換
-        const centerX = (bbox.x + bbox.width / 2) * w;
-        const bottomY = (bbox.y + bbox.height) * h;
-        const maskW = Math.max(w * 0.1, bbox.width * w * 1.2);
-        const maskH = Math.max(h * 0.03, bbox.height * h * 1.5);
-        const left = centerX - maskW / 2;
-        const top = bottomY - maskH * 0.8;
+      const formData = new FormData();
+      formData.append('image', blob, 'photo.jpg');
+      formData.append('width', w.toString());
+      formData.append('height', h.toString());
 
-        console.log(`Save: Drawing mask (ratio-based): left=${Math.round(left)}, top=${Math.round(top)}, w=${Math.round(maskW)}, h=${Math.round(maskH)}`);
+      const res = await fetch('/api/detect-plate', { method: 'POST', body: formData });
+      const result = await res.json();
 
-        if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-          ctx.drawImage(maskImage, left, top, maskW, maskH);
-        } else {
-          // ダークグレーのマスク
-          ctx.fillStyle = '#1a1a1a';
-          ctx.fillRect(left, top, maskW, maskH);
-          
-          // A_O_Iロゴを白抜きテキストで表示
-          ctx.fillStyle = '#FFFFFF';
-          ctx.font = `bold ${Math.max(12, maskH * 0.5)}px system-ui, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('A_O_I', centerX, top + maskH / 2);
-        }
-        setDebugLog(`保存: マスクを描画しました (x=${(bbox.x * 100).toFixed(1)}%, y=${(bbox.y * 100).toFixed(1)}%)`);
-      } else {
-        setDebugLog('保存: ナンバープレートが見つかりませんでした');
+      if (!res.ok) {
+        setCameraError(result.error || `エラー ${res.status}`);
+        setIsProcessing(false);
+        return;
       }
 
-      // Share APIで保存（フォールバック付き）
-      saveCanvas.toBlob(
-        async (finalBlob) => {
-          if (!finalBlob) {
-            throw new Error('最終画像の生成に失敗しました');
+      if (result.found && result.corners && result.corners.length === 4) {
+        const corners: Corners = result.corners.map((c: { x: number; y: number }) => ({
+          x: c.x / 1000,
+          y: c.y / 1000,
+        }));
+        setDetectedCorners(corners);
+        setEditLogoOffset({ x: 0, y: 0 });
+        setEditLogoScale(1);
+        setPreviewImageUrl(URL.createObjectURL(blob));
+        setScreenMode('preview_edit');
+      } else {
+        setCameraError('ナンバープレートが見つかりませんでした。');
+      }
+    } catch (e) {
+      setCameraError(e instanceof Error ? e.message : '解析に失敗しました');
+    } finally {
+      setIsProcessing(false);
+    }
+  }, []);
+
+  const retake = useCallback(() => {
+    if (previewImageUrl) URL.revokeObjectURL(previewImageUrl);
+    setPreviewImageUrl(null);
+    setDetectedCorners(null);
+    setEditLogoOffset({ x: 0, y: 0 });
+    setEditLogoScale(1);
+    setScreenMode('camera');
+  }, [previewImageUrl]);
+
+  useEffect(() => {
+    if (!previewImageUrl) {
+      previewImageRef.current = null;
+      setPreviewImageLoaded(false);
+      return;
+    }
+    setPreviewImageLoaded(false);
+    const img = new Image();
+    img.onload = () => {
+      previewImageRef.current = img;
+      setPreviewImageLoaded(true);
+    };
+    img.src = previewImageUrl;
+    return () => {
+      previewImageRef.current = null;
+    };
+  }, [previewImageUrl]);
+
+  useEffect(() => {
+    if (screenMode !== 'preview_edit' || !previewCanvasRef.current || !previewImageLoaded) return;
+    const img = previewImageRef.current;
+    if (!img || !img.width) return;
+
+    const canvas = previewCanvasRef.current;
+    const w = img.width;
+    const h = img.height;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(img, 0, 0);
+
+    if (detectedCorners && (maskImage?.complete || true)) {
+      const scale = editLogoScale;
+      const ox = (editLogoOffset.x / 100) * w;
+      const oy = (editLogoOffset.y / 100) * h;
+      const centerX = (detectedCorners[0].x + detectedCorners[1].x + detectedCorners[2].x + detectedCorners[3].x) / 4;
+      const centerY = (detectedCorners[0].y + detectedCorners[1].y + detectedCorners[2].y + detectedCorners[3].y) / 4;
+      const shifted: Corners = detectedCorners.map((c) => ({
+        x: centerX + (c.x - centerX) * scale + ox / w,
+        y: centerY + (c.y - centerY) * scale + oy / h,
+      })) as Corners;
+
+      const logoSize = Math.min(w, h) * 0.25 * scale;
+      const logoCanvas = document.createElement('canvas');
+      logoCanvas.width = logoSize;
+      logoCanvas.height = logoSize * 0.35;
+      const lctx = logoCanvas.getContext('2d');
+      if (lctx) {
+        lctx.fillStyle = '#1a1a1a';
+        lctx.fillRect(0, 0, logoCanvas.width, logoCanvas.height);
+        lctx.fillStyle = '#fff';
+        lctx.font = `bold ${logoCanvas.height * 0.6}px system-ui, sans-serif`;
+        lctx.textAlign = 'center';
+        lctx.textBaseline = 'middle';
+        lctx.fillText('A_O_I', logoCanvas.width / 2, logoCanvas.height / 2);
+      }
+
+      const pad = 0.08;
+      const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
+      const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
+      const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
+      const c3: Corner = { x: Math.max(0, shifted[3].x - pad), y: Math.min(1, shifted[3].y + pad) };
+      const logoCorners: Corners = [c0, c1, c2, c3];
+
+      if (maskImage && maskImage.complete && maskImage.naturalWidth) {
+        drawImageInQuad(ctx, maskImage, logoCorners, w, h);
+      } else {
+        drawImageInQuad(ctx, logoCanvas, logoCorners, w, h);
+      }
+    }
+  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale]);
+
+  const handleSaveFromPreview = useCallback(async () => {
+    if (!previewCanvasRef.current) return;
+    setIsProcessing(true);
+    try {
+      previewCanvasRef.current.toBlob(
+        async (blob) => {
+          if (!blob) {
+            setIsProcessing(false);
+            return;
           }
-
-          // Share APIが使える場合はそれを使用
-          if (navigator.share && navigator.canShare) {
-            try {
-              const file = new File([finalBlob], `number-mask-${Date.now()}.jpg`, {
-                type: 'image/jpeg',
-              });
-
-              if (navigator.canShare({ files: [file] })) {
-                await navigator.share({
-                  files: [file],
-                  title: 'Number Mask',
-                });
-                setShowSaveSuccess(true);
-                setTimeout(() => setShowSaveSuccess(false), 2500);
-                setIsProcessing(false);
-                return;
-              }
-            } catch (shareError) {
-              // Share APIが失敗した場合はダウンロードにフォールバック
-              console.warn('Share API failed, falling back to download:', shareError);
-            }
+          const file = new File([blob], `number-mask-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file], title: 'A_O_I CAMERA' });
+            setShowSaveSuccess(true);
+            setTimeout(() => setShowSaveSuccess(false), 2500);
+          } else {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = file.name;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            setShowSaveSuccess(true);
+            setTimeout(() => setShowSaveSuccess(false), 2500);
           }
-
-          // Share APIが使えない、または失敗した場合はダウンロード
-          const url = URL.createObjectURL(finalBlob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `number-mask-${Date.now()}.jpg`;
-          a.click();
-          URL.revokeObjectURL(url);
-          setShowSaveSuccess(true);
-          setTimeout(() => setShowSaveSuccess(false), 2500);
           setIsProcessing(false);
         },
         'image/jpeg',
         0.92
       );
-    } catch (error) {
-      console.error('Save photo error:', error);
-      const message = error instanceof Error ? error.message : '画像の保存に失敗しました';
-      setCameraError(message);
-      setDebugLog((prev) => prev ?? `保存処理エラー: ${message}`);
+    } catch (e) {
       setIsProcessing(false);
     }
-  }, [detectedPlate, maskImage, detectPlate]);
+  }, []);
+
+  const onPreviewTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 1) {
+        dragStartRef.current = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+          startOffset: { ...editLogoOffset },
+        };
+      } else if (e.touches.length === 2) {
+        const dy = Math.abs(e.touches[1].clientY - e.touches[0].clientY);
+        scaleStartRef.current = { y: dy, startScale: editLogoScale };
+      }
+    },
+    [editLogoOffset, editLogoScale]
+  );
+
+  const onPreviewTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 1 && dragStartRef.current) {
+        const dx = e.touches[0].clientX - dragStartRef.current.x;
+        const dy = e.touches[0].clientY - dragStartRef.current.y;
+        setEditLogoOffset({
+          x: dragStartRef.current.startOffset.x + dx * 0.5,
+          y: dragStartRef.current.startOffset.y + dy * 0.5,
+        });
+      } else if (e.touches.length === 2 && scaleStartRef.current) {
+        const dy = Math.abs(e.touches[1].clientY - e.touches[0].clientY);
+        const delta = (dy - scaleStartRef.current.y) * 0.01;
+        setEditLogoScale(Math.max(0.3, Math.min(2, scaleStartRef.current.startScale + delta)));
+      }
+    },
+    []
+  );
+
+  const onPreviewTouchEnd = useCallback(() => {
+    dragStartRef.current = null;
+    scaleStartRef.current = null;
+  }, []);
+
+  const fontFamily = '"Helvetica Neue", Helvetica, "Hiragino Sans", "Yu Gothic", sans-serif';
 
   return (
-    <div className="min-h-screen bg-white pb-20" style={{ backgroundColor: '#FFFFFF' }}>
-      <header className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm" style={{ backgroundColor: '#FFFFFF' }}>
-        <div className="max-w-4xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-light text-gray-900" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '0.05em' }}>
-            A_O_I CAMERA
-          </h1>
+    <div className="min-h-screen bg-white" style={{ fontFamily }}>
+      <header className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+          <h1 className="text-xl font-extralight text-gray-800 tracking-[0.2em]">A_O_I CAMERA</h1>
         </div>
       </header>
 
       {showSaveSuccess && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center pointer-events-none">
-          <div className="bg-white rounded-lg p-8 flex flex-col items-center gap-4 shadow-2xl animate-scale-in">
-            <CheckCircle className="text-green-500" size={64} />
-            <p className="text-gray-900 font-bold text-2xl">保存しました</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 pointer-events-none">
+          <div className="bg-white rounded-2xl p-8 flex flex-col items-center gap-4 shadow-xl">
+            <CheckCircle className="text-gray-700" size={48} strokeWidth={1.5} />
+            <p className="text-gray-800 font-light text-lg">保存しました</p>
           </div>
         </div>
       )}
 
       <main className="max-w-4xl mx-auto px-4 py-6">
-        {debugLog && (
-          <div className={`mb-4 px-4 py-3 rounded-lg border text-xs font-mono whitespace-pre-wrap ${
-            debugLog.includes('レート制限') || debugLog.includes('APIエラー') 
-              ? 'bg-red-50 border-red-200 text-red-800' 
-              : debugLog.includes('検出成功') || debugLog.includes('マスクを描画')
-              ? 'bg-green-50 border-green-200 text-green-800'
-              : 'bg-gray-100 border-gray-200 text-gray-700'
-          }`}>
-            {debugLog}
-          </div>
-        )}
-        {!isCameraActive && (
-          <div className="flex flex-col items-center justify-center py-12 gap-6">
-            <p className="text-gray-600 text-center">
-              カメラを起動して車のナンバーをマスクできます
-            </p>
+        {screenMode === 'idle' && (
+          <div className="flex flex-col items-center justify-center py-16 gap-8">
+            <p className="text-gray-500 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
             <button
               onClick={startCamera}
-              className="flex items-center gap-2 px-8 py-4 bg-gray-900 text-white rounded-2xl font-medium shadow-lg hover:bg-gray-800 transition-colors"
-              style={{ backgroundColor: '#000000', color: '#FFFFFF' }}
+              className="flex items-center gap-3 px-10 py-4 bg-gray-900 text-white rounded-full font-light text-sm tracking-widest hover:bg-gray-800 transition-colors"
             >
-              <Camera size={24} />
+              <Camera size={22} strokeWidth={1.5} />
               カメラを起動
             </button>
             {cameraError && (
-              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg max-w-md">
-                <p className="text-red-800 text-sm font-medium mb-1">エラー</p>
-                <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
-              </div>
+              <p className="text-red-500/90 text-xs font-light max-w-xs text-center">{cameraError}</p>
             )}
           </div>
         )}
 
-        {isCameraActive && (
-          <div className="space-y-4">
+        {screenMode === 'camera' && (
+          <div className="space-y-6">
             {cameraError && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-800 text-sm font-medium mb-1">エラー</p>
-                <p className="text-red-700 text-sm whitespace-pre-wrap">{cameraError}</p>
+              <div className="py-2 px-4 rounded-lg bg-red-50 border border-red-100">
+                <p className="text-red-700 text-xs font-light">{cameraError}</p>
               </div>
             )}
-            {/* スマホ最適化: 画面からはみ出さないように調整 */}
-            <div className="relative w-full bg-gray-900 rounded-2xl overflow-hidden shadow-lg" style={{ maxHeight: 'calc(100vh - 250px)', aspectRatio: '9/16' }}>
+            <div className="relative w-full rounded-2xl overflow-hidden bg-gray-900 aspect-[9/16] max-h-[calc(100vh-220px)]">
               <video
                 ref={videoRef}
-                autoPlay={true}
-                playsInline={true}
-                muted={true}
-                className="w-full h-full"
-                style={{
-                  objectFit: 'cover',
-                  width: '100%',
-                  height: '100%',
-                  display: 'block',
-                }}
-                onLoadedMetadata={() => {
-                  if (videoRef.current) {
-                    videoRef.current.play().catch((err) => {
-                      console.warn('Auto-play failed on loadedMetadata:', err);
-                    });
-                  }
-                }}
-                onCanPlay={() => {
-                  if (videoRef.current) {
-                    videoRef.current.play().catch((err) => {
-                      console.warn('Auto-play failed on canPlay:', err);
-                    });
-                  }
-                }}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
               />
-              {/* AR用：オーバーレイCanvas（リアルタイムでA_O_Iロゴを描画） */}
-              <canvas
-                ref={overlayRef}
-                className="absolute inset-0 w-full h-full pointer-events-none"
-                style={{ objectFit: 'cover' }}
-              />
-              {/* AI Scanning... インジケーター（画面の隅に小さく表示） */}
-              {isScanning && (
-                <div className="absolute top-2 right-2 px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm animate-pulse">
-                  <p className="text-xs text-gray-700 font-medium flex items-center gap-1">
-                    <Loader2 className="animate-spin" size={12} />
-                    AI Scanning...
-                  </p>
-                </div>
-              )}
+              <button
+                onClick={captureAndDetect}
+                disabled={isProcessing}
+                className="absolute bottom-6 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white border-2 border-gray-200 shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
+              >
+                {isProcessing ? (
+                  <Loader2 className="animate-spin text-gray-600" size={28} strokeWidth={1.5} />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-gray-900" />
+                )}
+              </button>
             </div>
-            <div className="flex flex-col gap-3">
-              <div className="flex justify-center gap-4">
-                <button
-                  onClick={savePhoto}
-                  disabled={isProcessing}
-                  className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white rounded-2xl font-medium shadow hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#000000', color: '#FFFFFF' }}
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="animate-spin" size={20} />
-                      処理中...
-                    </>
-                  ) : (
-                    '保存'
-                  )}
-                </button>
-                <button
-                  onClick={stopCamera}
-                  disabled={isProcessing}
-                  className="flex items-center gap-2 px-8 py-3 bg-gray-200 text-gray-900 rounded-2xl font-medium shadow hover:bg-gray-300 transition-colors disabled:opacity-50"
-                >
-                  カメラを止める
-                </button>
-              </div>
-              {/* 手動検出ボタン（レート制限時や自動検出無効時に表示） */}
-              {(isRateLimited || !autoDetectionEnabled) && (
-                <div className="flex justify-center">
-                  <button
-                    onClick={manualDetect}
-                    disabled={isProcessing || isScanning}
-                    className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-medium shadow hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                  >
-                    {isScanning ? (
-                      <>
-                        <Loader2 className="animate-spin" size={16} />
-                        検出中...
-                      </>
-                    ) : (
-                      '手動検出'
-                    )}
-                  </button>
-                </div>
-              )}
-              {/* 自動検出の有効/無効切り替え */}
-              {!isRateLimited && (
-                <div className="flex justify-center">
-                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoDetectionEnabled}
-                      onChange={(e) => {
-                        setAutoDetectionEnabled(e.target.checked);
-                        setDebugLog(e.target.checked ? '自動検出を有効にしました' : '自動検出を無効にしました。手動検出ボタンを使用してください。');
-                      }}
-                      className="w-4 h-4"
-                    />
-                    <span>自動検出を有効にする</span>
-                  </label>
-                </div>
-              )}
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={stopCamera}
+                className="px-6 py-2.5 text-gray-600 text-sm font-light tracking-wide rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
+              >
+                終了
+              </button>
             </div>
           </div>
         )}
 
-        <canvas ref={saveCanvasRef} className="hidden" />
+        {screenMode === 'preview_edit' && previewImageUrl && (
+          <div className="space-y-6">
+            <p className="text-gray-500 text-xs font-extralight tracking-wide">ロゴの位置・サイズを調整してから保存できます</p>
+            <div
+              className="relative w-full rounded-2xl overflow-hidden bg-gray-100 aspect-[9/16] max-h-[60vh] touch-none"
+              onTouchStart={onPreviewTouchStart}
+              onTouchMove={onPreviewTouchMove}
+              onTouchEnd={onPreviewTouchEnd}
+              onTouchCancel={onPreviewTouchEnd}
+            >
+              <canvas
+                ref={previewCanvasRef}
+                className="w-full h-full object-contain block"
+                style={{ touchAction: 'none' }}
+              />
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-gray-500 text-xs font-light flex-1 flex items-center gap-2">
+                <span>サイズ</span>
+                <input
+                  type="range"
+                  min="0.3"
+                  max="2"
+                  step="0.05"
+                  value={editLogoScale}
+                  onChange={(e) => setEditLogoScale(Number(e.target.value))}
+                  className="flex-1 h-1.5 bg-gray-200 rounded-full appearance-none accent-gray-800"
+                />
+              </label>
+            </div>
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={retake}
+                className="flex items-center gap-2 px-6 py-3 text-gray-600 text-sm font-light rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
+              >
+                <RotateCcw size={18} strokeWidth={1.5} />
+                撮り直す
+              </button>
+              <button
+                onClick={handleSaveFromPreview}
+                disabled={isProcessing}
+                className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white text-sm font-light rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                {isProcessing ? <Loader2 className="animate-spin" size={18} /> : <Share2 size={18} strokeWidth={1.5} />}
+                保存
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
