@@ -248,9 +248,9 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.95);
       });
 
-      // API送信用にリサイズ（処理速度向上：最大1280x720）
-      const maxApiWidth = 1280;
-      const maxApiHeight = 720;
+      // API送信用にリサイズ（バランス重視：最大1600x900で精度と速度のバランス）
+      const maxApiWidth = 1600;
+      const maxApiHeight = 900;
       const apiScale = Math.min(maxApiWidth / originalW, maxApiHeight / originalH, 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
@@ -263,6 +263,19 @@ export default function Home() {
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'high';
       apiCtx.drawImage(video, 0, 0, apiW, apiH);
+
+      // 軽量な画像前処理：コントラスト強化（検出精度向上のため）
+      const imageData = apiCtx.getImageData(0, 0, apiW, apiH);
+      const data = imageData.data;
+      const contrast = 1.15; // 15%のコントラスト強化
+      const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+      
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));     // R
+        data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128)); // G
+        data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128)); // B
+      }
+      apiCtx.putImageData(imageData, 0, 0);
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
         apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.75);

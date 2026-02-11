@@ -28,13 +28,14 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Geminiへのプロンプト（複数プレート対応・厳格な四隅指定）
+    // Geminiへのプロンプト（複数プレート対応・厳格な四隅指定・精度向上版）
     const prompt = `
   DETECT_LICENSE_PLATE_CORNERS:
   1. 画像内の「すべての」日本のナンバープレートの「四隅」を正確に特定してください。
   2. 複数のプレートがある場合は、すべて検出してください。
-  3. 座標は[0, 0]（左上）から[1000, 1000]（右下）の範囲で答えてください。
-  4. 出力は必ず以下のJSON形式のみとし、マークダウン記法（\`\`\`json）も不要です。
+  3. 小さなプレート（画像の5%以下）でも検出してください。
+  4. 座標は[0, 0]（左上）から[1000, 1000]（右下）の範囲で答えてください。
+  5. 出力は必ず以下のJSON形式のみとし、マークダウン記法（\`\`\`json）も不要です。
 
   {
     "found": true,
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest) {
 
   ※見つからない場合は {"found": false} と返してください。
   ※1つのプレートのみの場合は、plates配列に1つの要素だけを返してください。
+  ※プレートが小さくても、四隅が明確に見える場合は検出してください。
 `;
 
     // REST API (v1) で直接呼び出し
