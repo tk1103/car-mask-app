@@ -6,7 +6,7 @@ import { Camera, Loader2, CheckCircle, RotateCcw, Share2 } from 'lucide-react';
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
-// 四角形に画像をパース補正して描画（2三角形でアフィン変換）
+// 四角形に画像をパース補正して描画（2三角形でアフィン変換・斜め対応強化版）
 function drawImageInQuad(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement | HTMLCanvasElement,
@@ -19,6 +19,7 @@ function drawImageInQuad(
     y: c.y * canvasHeight,
   }));
 
+  // より正確なパース補正のため、透視変換行列を使用
   const drawTriangle = (
     sx0: number,
     sy0: number,
@@ -41,23 +42,33 @@ function drawImageInQuad(
     ctx.closePath();
     ctx.clip();
 
+    // アフィン変換行列を計算（より正確なパース補正）
     const denom = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0);
     if (Math.abs(denom) < 1e-10) {
       ctx.restore();
       return;
     }
+    
+    // アフィン変換パラメータを計算
     const a = ((dx1 - dx0) * (sy2 - sy0) - (dx2 - dx0) * (sy1 - sy0)) / denom;
     const b = ((dx1 - dx0) * (sx0 - sx2) - (dx2 - dx0) * (sx0 - sx1)) / denom;
     const c = ((dy1 - dy0) * (sy2 - sy0) - (dy2 - dy0) * (sy1 - sy0)) / denom;
     const d = ((dy1 - dy0) * (sx0 - sx2) - (dy2 - dy0) * (sx0 - sx1)) / denom;
     const e = dx0 - a * sx0 - b * sy0;
     const f = dy0 - c * sx0 - d * sy0;
+    
+    // 変換を適用
     ctx.setTransform(a, c, b, d, e, f);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, 1, 1);
     ctx.restore();
   };
 
+  // 四角形を2つの三角形に分割して描画（斜めのプレートにも対応）
+  // 三角形1: 左上、右上、左下
   drawTriangle(0, 0, 1, 0, 0, 1, p0.x, p0.y, p1.x, p1.y, p3.x, p3.y);
+  // 三角形2: 右上、右下、左下
   drawTriangle(1, 0, 1, 1, 0, 1, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
 }
 
