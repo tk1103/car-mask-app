@@ -70,7 +70,7 @@ export default function Home() {
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
 
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-  const [detectedCorners, setDetectedCorners] = useState<Corners | null>(null);
+  const [detectedCorners, setDetectedCorners] = useState<Corners[]>([]); // 複数プレート対応
   const [editLogoOffset, setEditLogoOffset] = useState({ x: 0, y: 0 });
   const [editLogoScale, setEditLogoScale] = useState(1);
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
@@ -121,7 +121,7 @@ export default function Home() {
     setScreenMode('idle');
     setCameraError(null);
     setPreviewImageUrl(null);
-    setDetectedCorners(null);
+    setDetectedCorners([]);
     setEditLogoOffset({ x: 0, y: 0 });
     setEditLogoScale(1);
     playAttemptCountRef.current = 0;
@@ -209,13 +209,33 @@ export default function Home() {
         return;
       }
 
-      if (result.found && result.corners && result.corners.length === 4) {
-        // 修正後の計算ロジック
+      if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
+        // 複数プレート対応：すべてのプレートのcornersを変換
+        const platesCorners: Corners[] = result.plates
+          .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
+          .map((plate: any) =>
+            plate.corners.map((c: { x: number; y: number }) => ({
+              x: c.x / 1000, // 0-1の比率として保持
+              y: c.y / 1000, // 0-1の比率として保持
+            })) as Corners
+          );
+        
+        if (platesCorners.length > 0) {
+          setDetectedCorners(platesCorners);
+          setEditLogoOffset({ x: 0, y: 0 });
+          setEditLogoScale(1);
+          setPreviewImageUrl(URL.createObjectURL(fullResBlob));
+          setScreenMode('preview_edit');
+        } else {
+          throw new Error('プレートの座標が不正です');
+        }
+      } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
+        // 後方互換性：単一corners形式にも対応
         const corners: Corners = result.corners.map((c: { x: number; y: number }) => ({
-          x: (c.x / 1000), // 0-1の比率として保持
-          y: (c.y / 1000), // 0-1の比率として保持
+          x: c.x / 1000,
+          y: c.y / 1000,
         }));
-        setDetectedCorners(corners);
+        setDetectedCorners([corners]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setPreviewImageUrl(URL.createObjectURL(fullResBlob));
@@ -226,7 +246,7 @@ export default function Home() {
           { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
         ];
-        setDetectedCorners(defaultCorners);
+        setDetectedCorners([defaultCorners]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setPreviewImageUrl(URL.createObjectURL(fullResBlob));
@@ -243,7 +263,7 @@ export default function Home() {
   const retake = useCallback(() => {
     if (previewImageUrl) URL.revokeObjectURL(previewImageUrl);
     setPreviewImageUrl(null);
-    setDetectedCorners(null);
+    setDetectedCorners([]);
     setEditLogoOffset({ x: 0, y: 0 });
     setEditLogoScale(1);
     setScreenMode('camera');
@@ -283,22 +303,25 @@ export default function Home() {
     if (!ctx) return;
     ctx.drawImage(img, 0, 0);
 
-    if (detectedCorners && (maskImage?.complete || true)) {
+    if (detectedCorners.length > 0 && (maskImage?.complete || true)) {
       const scale = editLogoScale;
       const ox = (editLogoOffset.x / 100) * w;
       const oy = (editLogoOffset.y / 100) * h;
-      const centerX = (detectedCorners[0].x + detectedCorners[1].x + detectedCorners[2].x + detectedCorners[3].x) / 4;
-      const centerY = (detectedCorners[0].y + detectedCorners[1].y + detectedCorners[2].y + detectedCorners[3].y) / 4;
-      const shifted: Corners = detectedCorners.map((c) => ({
-        x: centerX + (c.x - centerX) * scale + ox / w,
-        y: centerY + (c.y - centerY) * scale + oy / h,
+
+      // ロゴCanvasを一度だけ作成（全プレートで共有、最初のプレートのサイズを基準に）
+      const firstCorners = detectedCorners[0];
+      const centerX = (firstCorners[0].x + firstCorners[1].x + firstCorners[2].x + firstCorners[3].x) / 4;
+      const centerY = (firstCorners[0].y + firstCorners[1].y + firstCorners[2].y + firstCorners[3].y) / 4;
+      const tempShifted: Corners = firstCorners.map((c) => ({
+        x: centerX + (c.x - centerX) * scale,
+        y: centerY + (c.y - centerY) * scale,
       })) as Corners;
 
       // 四隅から実際のプレートサイズを計算（対角線の平均）
-      const width1 = Math.hypot(shifted[1].x - shifted[0].x, shifted[1].y - shifted[0].y) * w;
-      const width2 = Math.hypot(shifted[2].x - shifted[3].x, shifted[2].y - shifted[3].y) * w;
-      const height1 = Math.hypot(shifted[3].x - shifted[0].x, shifted[3].y - shifted[0].y) * h;
-      const height2 = Math.hypot(shifted[2].x - shifted[1].x, shifted[2].y - shifted[1].y) * h;
+      const width1 = Math.hypot(tempShifted[1].x - tempShifted[0].x, tempShifted[1].y - tempShifted[0].y) * w;
+      const width2 = Math.hypot(tempShifted[2].x - tempShifted[3].x, tempShifted[2].y - tempShifted[3].y) * w;
+      const height1 = Math.hypot(tempShifted[3].x - tempShifted[0].x, tempShifted[3].y - tempShifted[0].y) * h;
+      const height2 = Math.hypot(tempShifted[2].x - tempShifted[1].x, tempShifted[2].y - tempShifted[1].y) * h;
       const avgWidth = (width1 + width2) / 2;
       const avgHeight = (height1 + height2) / 2;
       
@@ -337,19 +360,29 @@ export default function Home() {
         lctx.fillText('A_O_I', logoCanvas.width / 2, logoCanvas.height / 2);
       }
 
-      // パディングを小さく（0.08 → 0.02）
-      const pad = 0.02;
-      const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
-      const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
-      const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
-      const c3: Corner = { x: Math.max(0, shifted[3].x - pad), y: Math.min(1, shifted[3].y + pad) };
-      const logoCorners: Corners = [c0, c1, c2, c3];
+      // すべてのプレートにマスクを描画
+      detectedCorners.forEach((corners) => {
+        const plateCenterX = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+        const plateCenterY = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+        const shifted: Corners = corners.map((c) => ({
+          x: plateCenterX + (c.x - plateCenterX) * scale + ox / w,
+          y: plateCenterY + (c.y - plateCenterY) * scale + oy / h,
+        })) as Corners;
 
-      if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-        drawImageInQuad(ctx, maskImage, logoCorners, w, h);
-      } else {
-        drawImageInQuad(ctx, logoCanvas, logoCorners, w, h);
-      }
+        // パディングを小さく（0.08 → 0.02）
+        const pad = 0.02;
+        const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
+        const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
+        const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
+        const c3: Corner = { x: Math.max(0, shifted[3].x - pad), y: Math.min(1, shifted[3].y + pad) };
+        const logoCorners: Corners = [c0, c1, c2, c3];
+
+        if (maskImage && maskImage.complete && maskImage.naturalWidth) {
+          drawImageInQuad(ctx, maskImage, logoCorners, w, h);
+        } else {
+          drawImageInQuad(ctx, logoCanvas, logoCorners, w, h);
+        }
+      });
     }
   }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale]);
 

@@ -28,24 +28,38 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Geminiへのプロンプト（厳格な四隅指定）
+    // Geminiへのプロンプト（複数プレート対応・厳格な四隅指定）
     const prompt = `
   DETECT_LICENSE_PLATE_CORNERS:
-  1. 画像内の日本のナンバープレートの「四隅」を正確に特定してください。
-  2. 座標は[0, 0]（左上）から[1000, 1000]（右下）の範囲で答えてください。
-  3. 出力は必ず以下のJSON形式のみとし、マークダウン記法（\`\`\`json）も不要です。
+  1. 画像内の「すべての」日本のナンバープレートの「四隅」を正確に特定してください。
+  2. 複数のプレートがある場合は、すべて検出してください。
+  3. 座標は[0, 0]（左上）から[1000, 1000]（右下）の範囲で答えてください。
+  4. 出力は必ず以下のJSON形式のみとし、マークダウン記法（\`\`\`json）も不要です。
 
   {
     "found": true,
-    "corners": [
-      {"x": 左上のX, "y": 左上のY},
-      {"x": 右上のX, "y": 右上のY},
-      {"x": 右下のX, "y": 右下のY},
-      {"x": 左下のX, "y": 左下のY}
+    "plates": [
+      {
+        "corners": [
+          {"x": 左上のX, "y": 左上のY},
+          {"x": 右上のX, "y": 右上のY},
+          {"x": 右下のX, "y": 右下のY},
+          {"x": 左下のX, "y": 左下のY}
+        ]
+      },
+      {
+        "corners": [
+          {"x": 左上のX, "y": 左上のY},
+          {"x": 右上のX, "y": 右上のY},
+          {"x": 右下のX, "y": 右下のY},
+          {"x": 左下のX, "y": 左下のY}
+        ]
+      }
     ]
   }
 
   ※見つからない場合は {"found": false} と返してください。
+  ※1つのプレートのみの場合は、plates配列に1つの要素だけを返してください。
 `;
 
     // REST API (v1) で直接呼び出し
@@ -162,10 +176,18 @@ export async function POST(request: NextRequest) {
       const parsed = JSON.parse(jsonText);
       console.log('Parsed JSON:', JSON.stringify(parsed));
       
-      if (parsed.found && parsed.corners && Array.isArray(parsed.corners) && parsed.corners.length === 4) {
-        console.log('Corners (normalized 0-1000):', parsed.corners);
-      } else {
-        console.log('No corners in parsed result:', parsed);
+      // 複数プレート対応：plates配列または単一cornersの両方に対応
+      if (parsed.found) {
+        if (parsed.plates && Array.isArray(parsed.plates)) {
+          console.log(`Found ${parsed.plates.length} plate(s) (normalized 0-1000)`);
+        } else if (parsed.corners && Array.isArray(parsed.corners) && parsed.corners.length === 4) {
+          // 後方互換性：単一corners形式をplates配列に変換
+          parsed.plates = [{ corners: parsed.corners }];
+          delete parsed.corners;
+          console.log('Converted single corners to plates array');
+        } else {
+          console.log('No plates found in parsed result:', parsed);
+        }
       }
       
       return NextResponse.json(parsed);
