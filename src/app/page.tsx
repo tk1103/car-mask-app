@@ -160,23 +160,45 @@ export default function Home() {
     setCameraError(null);
 
     try {
-      const w = video.videoWidth;
-      const h = video.videoHeight;
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = w;
-      tempCanvas.height = h;
-      const tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) throw new Error('Canvas error');
-      tempCtx.drawImage(video, 0, 0, w, h);
+      const originalW = video.videoWidth;
+      const originalH = video.videoHeight;
+      
+      // 高解像度画像を保存用にキャプチャ（後で使用）
+      const fullResCanvas = document.createElement('canvas');
+      fullResCanvas.width = originalW;
+      fullResCanvas.height = originalH;
+      const fullResCtx = fullResCanvas.getContext('2d');
+      if (!fullResCtx) throw new Error('Canvas error');
+      fullResCtx.drawImage(video, 0, 0, originalW, originalH);
+      
+      const fullResBlob = await new Promise<Blob>((resolve, reject) => {
+        fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.95);
+      });
 
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        tempCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.95);
+      // API送信用にリサイズ（処理速度向上：最大1280x720）
+      const maxApiWidth = 1280;
+      const maxApiHeight = 720;
+      const apiScale = Math.min(maxApiWidth / originalW, maxApiHeight / originalH, 1);
+      const apiW = Math.round(originalW * apiScale);
+      const apiH = Math.round(originalH * apiScale);
+      
+      const apiCanvas = document.createElement('canvas');
+      apiCanvas.width = apiW;
+      apiCanvas.height = apiH;
+      const apiCtx = apiCanvas.getContext('2d');
+      if (!apiCtx) throw new Error('Canvas error');
+      apiCtx.imageSmoothingEnabled = true;
+      apiCtx.imageSmoothingQuality = 'high';
+      apiCtx.drawImage(video, 0, 0, apiW, apiH);
+
+      const apiBlob = await new Promise<Blob>((resolve, reject) => {
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.75);
       });
 
       const formData = new FormData();
-      formData.append('image', blob, 'photo.jpg');
-      formData.append('width', w.toString());
-      formData.append('height', h.toString());
+      formData.append('image', apiBlob, 'photo.jpg');
+      formData.append('width', apiW.toString());
+      formData.append('height', apiH.toString());
 
       const res = await fetch('/api/detect-plate', { method: 'POST', body: formData });
       const result = await res.json();
@@ -188,14 +210,15 @@ export default function Home() {
       }
 
       if (result.found && result.corners && result.corners.length === 4) {
+        // API座標（リサイズ後）を元画像サイズにスケール
         const corners: Corners = result.corners.map((c: { x: number; y: number }) => ({
-          x: c.x / 1000,
-          y: c.y / 1000,
+          x: (c.x / 1000) * (originalW / apiW),
+          y: (c.y / 1000) * (originalH / apiH),
         }));
         setDetectedCorners(corners);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
-        setPreviewImageUrl(URL.createObjectURL(blob));
+        setPreviewImageUrl(URL.createObjectURL(fullResBlob));
         setScreenMode('preview_edit');
       } else {
         setCameraError('ナンバープレートが見つかりませんでした。');
@@ -261,22 +284,34 @@ export default function Home() {
         y: centerY + (c.y - centerY) * scale + oy / h,
       })) as Corners;
 
-      const logoSize = Math.min(w, h) * 0.25 * scale;
+      // 四隅から実際のプレートサイズを計算（対角線の平均）
+      const width1 = Math.hypot(shifted[1].x - shifted[0].x, shifted[1].y - shifted[0].y) * w;
+      const width2 = Math.hypot(shifted[2].x - shifted[3].x, shifted[2].y - shifted[3].y) * w;
+      const height1 = Math.hypot(shifted[3].x - shifted[0].x, shifted[3].y - shifted[0].y) * h;
+      const height2 = Math.hypot(shifted[2].x - shifted[1].x, shifted[2].y - shifted[1].y) * h;
+      const avgWidth = (width1 + width2) / 2;
+      const avgHeight = (height1 + height2) / 2;
+      
+      // ロゴサイズをプレートサイズに合わせる（少し余白を追加）
+      const logoWidth = avgWidth * 1.05;
+      const logoHeight = avgHeight * 1.05;
+      
       const logoCanvas = document.createElement('canvas');
-      logoCanvas.width = logoSize;
-      logoCanvas.height = logoSize * 0.35;
+      logoCanvas.width = logoWidth;
+      logoCanvas.height = logoHeight;
       const lctx = logoCanvas.getContext('2d');
       if (lctx) {
         lctx.fillStyle = '#1a1a1a';
         lctx.fillRect(0, 0, logoCanvas.width, logoCanvas.height);
         lctx.fillStyle = '#fff';
-        lctx.font = `bold ${logoCanvas.height * 0.6}px system-ui, sans-serif`;
+        lctx.font = `bold ${logoCanvas.height * 0.5}px system-ui, sans-serif`;
         lctx.textAlign = 'center';
         lctx.textBaseline = 'middle';
         lctx.fillText('A_O_I', logoCanvas.width / 2, logoCanvas.height / 2);
       }
 
-      const pad = 0.08;
+      // パディングを小さく（0.08 → 0.02）
+      const pad = 0.02;
       const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
       const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
       const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
