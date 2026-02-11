@@ -148,9 +148,12 @@ export default function Home() {
         v.play().catch(() => {});
       }
     };
-    tryPlay();
-    const id = setInterval(tryPlay, 400);
-    return () => clearInterval(id);
+    // 少し遅延してから再生を試行（ストリームが確実に接続されるまで待つ）
+    setTimeout(() => {
+      tryPlay();
+      const id = setInterval(tryPlay, 400);
+      setTimeout(() => clearInterval(id), 2000);
+    }, 200);
   }, [screenMode]);
 
   // 画像の明るさを検知（0-255の平均輝度を返す）
@@ -374,7 +377,18 @@ export default function Home() {
     setDetectedCorners([]);
     setEditLogoOffset({ x: 0, y: 0 });
     setEditLogoScale(1);
+    setPreviewImageLoaded(false);
+    setCameraError(null);
     setScreenMode('camera');
+    
+    // カメラストリームが存在する場合、ビデオ要素を確実に再生
+    if (streamRef.current && videoRef.current) {
+      const video = videoRef.current;
+      video.srcObject = streamRef.current;
+      setTimeout(() => {
+        video.play().catch(() => {});
+      }, 100);
+    }
   }, [previewImageUrl]);
 
   useEffect(() => {
