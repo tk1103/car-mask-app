@@ -260,7 +260,7 @@ export default function Home() {
       }
       
       const fullResBlob = await new Promise<Blob>((resolve, reject) => {
-        fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.95);
+        fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
       // API送信用にリサイズ（バランス重視：最大1600x900で精度と速度のバランス）
@@ -435,6 +435,9 @@ export default function Home() {
     }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+    // 高品質描画設定（プレビュー表示用、保存時はtoBlobで品質を制御）
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0);
 
     if (detectedCorners.length > 0 && (maskImage?.complete || true)) {
@@ -558,7 +561,7 @@ export default function Home() {
           setIsProcessing(false);
         },
         'image/jpeg',
-        0.98
+        0.99
       );
     } catch (e) {
       setIsProcessing(false);
@@ -669,7 +672,7 @@ export default function Home() {
           setIsProcessing(false);
         },
         'image/jpeg',
-        0.98
+        0.99
       );
     } catch (e) {
       setIsProcessing(false);
@@ -700,7 +703,7 @@ export default function Home() {
           setIsProcessing(false);
         },
         'image/jpeg',
-        0.98
+        0.99
       );
     } catch (e) {
       setIsProcessing(false);
