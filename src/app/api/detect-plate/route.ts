@@ -28,44 +28,41 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Geminiへのプロンプト（複数プレート対応・厳格な四隅指定・精度向上版・斜め対応）
-    const prompt = `
-  DETECT_LICENSE_PLATE_CORNERS:
-  1. 画像内の「すべての」日本のナンバープレートの「四隅」を正確に特定してください。
-  2. 複数のプレートがある場合は、すべて検出してください。
-  3. 小さなプレート（画像の5%以下）でも検出してください。
-  4. **斜めに映ったプレート（パースがかかった状態）でも、四隅を正確に検出してください。**
-  5. プレートが台形や平行四辺形に見えても、実際のプレートの四隅（左上、右上、右下、左下）を正確に特定してください。
-  6. 座標は[0, 0]（左上）から[1000, 1000]（右下）の範囲で答えてください。
-  7. 出力は必ず以下のJSON形式のみとし、マークダウン記法（\`\`\`json）も不要です。
+    // Geminiへのプロンプト（厳格な四隅指定・精度向上版）
+    const prompt = `TASK: Detect the exact four corners of the Japanese license plate in the image for privacy masking.
 
-  {
-    "found": true,
-    "plates": [
-      {
-        "corners": [
-          {"x": 左上のX, "y": 左上のY},
-          {"x": 右上のX, "y": 右上のY},
-          {"x": 右下のX, "y": 右下のY},
-          {"x": 左下のX, "y": 左下のY}
-        ]
-      },
-      {
-        "corners": [
-          {"x": 左上のX, "y": 左上のY},
-          {"x": 右上のX, "y": 右上のY},
-          {"x": 右下のX, "y": 右下のY},
-          {"x": 左下のX, "y": 左下のY}
-        ]
-      }
-    ]
-  }
+ANALYSIS STEPS:
+1. Identify the rectangular boundary of the license plate (ナンバープレート).
+2. Locate the four specific corner points: Top-Left, Top-Right, Bottom-Right, and Bottom-Left.
+3. If multiple plates exist, detect ALL of them and return each as a separate entry in the plates array.
 
-  ※見つからない場合は {"found": false} と返してください。
-  ※1つのプレートのみの場合は、plates配列に1つの要素だけを返してください。
-  ※プレートが小さくても、四隅が明確に見える場合は検出してください。
-  ※斜めから見たプレートでも、四隅を正確に検出してください。
-`;
+COORDINATE SYSTEM:
+- Return coordinates in a normalized range of 0 to 1000.
+- [x: 0, y: 0] is the Top-Left corner of the image.
+- [x: 1000, y: 1000] is the Bottom-Right corner of the image.
+
+OUTPUT FORMAT (JSON only):
+{
+  "found": true/false,
+  "plates": [
+    {
+      "corners": [
+        {"x": number, "y": number}, // 1. Top-Left
+        {"x": number, "y": number}, // 2. Top-Right
+        {"x": number, "y": number}, // 3. Bottom-Right
+        {"x": number, "y": number}  // 4. Bottom-Left
+      ]
+    }
+  ]
+}
+
+STRICT RULES:
+- Only return the license plate boundary, NOT the car body or headlights.
+- If no plate is clearly visible, return {"found": false, "plates": []}.
+- Do not include any conversational text or markdown code blocks.
+- If multiple plates exist, return all of them in the plates array.
+- Detect plates even if they are small, slanted, or partially obscured.
+- Return coordinates in the exact order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.`;
 
     // REST API (v1) で直接呼び出し
     // ListModels で確認できたマルチモーダル対応モデルを使用

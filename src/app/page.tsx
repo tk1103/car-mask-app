@@ -472,7 +472,7 @@ export default function Home() {
         const cornerRadius = logoCanvas.height * 0.1;
         
         // 角丸の長方形を描画
-        lctx.fillStyle = '#0a0a0a'; // 真っ黒に近いグレー
+        lctx.fillStyle = '#000000'; // 真っ黒でメリハリを強化
         lctx.beginPath();
         lctx.moveTo(cornerRadius, 0);
         lctx.lineTo(logoCanvas.width - cornerRadius, 0);
@@ -486,8 +486,8 @@ export default function Home() {
         lctx.closePath();
         lctx.fill();
         
-        // Automoniロゴテキスト（マスクサイズに合わせて縮小）
-        lctx.fillStyle = '#fff';
+        // Automoniロゴテキスト（マスクサイズに合わせて縮小、純白でメリハリを強化）
+        lctx.fillStyle = '#ffffff';
         // 文字幅をマスク幅の90%以内に収めるようにフォントサイズを調整
         const testFontSize = logoCanvas.height * 0.5;
         lctx.font = `bold ${testFontSize}px system-ui, sans-serif`;
@@ -500,6 +500,8 @@ export default function Home() {
         lctx.font = `bold ${Math.max(12, fontSize)}px system-ui, sans-serif`; // 最小12px
         lctx.textAlign = 'center';
         lctx.textBaseline = 'middle';
+        // テキストをより鮮明に（純白で描画）
+        lctx.fillStyle = '#ffffff';
         lctx.fillText('Automoni', logoCanvas.width / 2, logoCanvas.height / 2);
       }
 
@@ -575,48 +577,93 @@ export default function Home() {
           }
 
           const file = new File([blob], `automoni-${Date.now()}.jpg`, { type: 'image/jpeg' });
-          
-          // Share APIでSNSアプリを開く
+
+          // navigator.share APIを使用してネイティブのShare Sheetを開く
+          // これにより、登録されているSNSアプリが直接選択できる
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
             try {
+              // プラットフォームに応じたテキストを設定
+              const shareTexts: Record<string, string> = {
+                facebook: 'Automoniでナンバープレートをマスクしました',
+                twitter: 'Automoniでナンバープレートをマスクしました',
+                instagram: 'Automoniでナンバープレートをマスクしました',
+              };
+
               await navigator.share({
                 files: [file],
                 title: 'Auto mo Camera',
-                text: 'Automoniでナンバープレートをマスクしました',
+                text: shareTexts[platform] || 'Automoniでナンバープレートをマスクしました',
               });
+              
               setShowShareMenu(false);
               setShowSaveSuccess(true);
               setTimeout(() => setShowSaveSuccess(false), 2500);
-            } catch (shareError) {
-              // ユーザーがキャンセルした場合など
-              console.log('Share cancelled:', shareError);
+            } catch (shareError: any) {
+              // ユーザーがキャンセルした場合はエラーを無視
+              if (shareError.name !== 'AbortError') {
+                console.error('Share error:', shareError);
+                setCameraError('共有に失敗しました');
+              }
             }
           } else {
-            // Share APIが使えない場合、画像をクリップボードにコピー
+            // Share APIが使えない場合、画像をサーバーに一時アップロードしてURLを共有
             try {
-              await navigator.clipboard.write([
-                new ClipboardItem({ 'image/jpeg': blob }),
-              ]);
-              setShowShareMenu(false);
-              setShowSaveSuccess(true);
-              setTimeout(() => setShowSaveSuccess(false), 2500);
-              // SNSアプリを開く（画像はクリップボードから貼り付け可能）
-              const urls: Record<string, string> = {
-                facebook: 'https://www.facebook.com',
-                twitter: 'https://twitter.com/compose/tweet',
-                instagram: 'https://www.instagram.com',
+              const formData = new FormData();
+              formData.append('image', file);
+
+              const uploadRes = await fetch('/api/upload-image', {
+                method: 'POST',
+                body: formData,
+              });
+
+              if (!uploadRes.ok) {
+                throw new Error('画像のアップロードに失敗しました');
+              }
+
+              const uploadData = await uploadRes.json();
+              const imageUrl = uploadData.url;
+
+              // 各SNSの共有URLを構築
+              const shareUrls: Record<string, string> = {
+                facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(imageUrl)}`,
+                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Automoniでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
+                instagram: `https://www.instagram.com/create/select/`,
               };
-              window.open(urls[platform], '_blank');
-            } catch (clipboardError) {
-              // クリップボードAPIが使えない場合、ダウンロードにフォールバック
-              const a = document.createElement('a');
-              a.href = URL.createObjectURL(blob);
-              a.download = file.name;
-              a.click();
-              URL.revokeObjectURL(a.href);
+
+              // SNSの共有URLを開く
+              window.open(shareUrls[platform], '_blank');
+              
               setShowShareMenu(false);
               setShowSaveSuccess(true);
               setTimeout(() => setShowSaveSuccess(false), 2500);
+            } catch (uploadError) {
+              console.error('Upload error:', uploadError);
+              // エラー時はクリップボードにコピーしてフォールバック
+              try {
+                await navigator.clipboard.write([
+                  new ClipboardItem({ 'image/jpeg': blob }),
+                ]);
+                const urls: Record<string, string> = {
+                  facebook: 'https://www.facebook.com',
+                  twitter: 'https://twitter.com/compose/tweet',
+                  instagram: 'https://www.instagram.com/create/select/',
+                };
+                window.open(urls[platform], '_blank');
+                setShowShareMenu(false);
+                setShowSaveSuccess(true);
+                setTimeout(() => setShowSaveSuccess(false), 2500);
+              } catch (clipboardError) {
+                // クリップボードAPIが使えない場合、ダウンロードにフォールバック
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = file.name;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                setShowShareMenu(false);
+                setShowSaveSuccess(true);
+                setTimeout(() => setShowSaveSuccess(false), 2500);
+                setCameraError('共有に失敗しました。画像をダウンロードしました。');
+              }
             }
           }
           setIsProcessing(false);
@@ -626,6 +673,7 @@ export default function Home() {
       );
     } catch (e) {
       setIsProcessing(false);
+      setCameraError('画像の処理に失敗しました');
     }
   }, []);
 
@@ -702,17 +750,17 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-white" style={{ fontFamily }}>
-      <header className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100">
+      <header className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-300">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <h1 className="text-xl font-extralight text-gray-800 tracking-[0.2em]">Auto mo Camera</h1>
+          <h1 className="text-xl font-extralight text-gray-900 tracking-[0.2em]">Auto mo Camera</h1>
         </div>
       </header>
 
       {showSaveSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 pointer-events-none">
           <div className="bg-white rounded-2xl p-8 flex flex-col items-center gap-4 shadow-xl">
-            <CheckCircle className="text-gray-700" size={48} strokeWidth={1.5} />
-            <p className="text-gray-800 font-light text-lg">保存しました</p>
+            <CheckCircle className="text-gray-900" size={48} strokeWidth={2} />
+            <p className="text-gray-900 font-light text-lg">保存しました</p>
           </div>
         </div>
       )}
@@ -720,7 +768,7 @@ export default function Home() {
       <main className="max-w-4xl mx-auto px-4 py-6">
         {screenMode === 'idle' && (
           <div className="flex flex-col items-center justify-center py-16 gap-8">
-            <p className="text-gray-500 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
+            <p className="text-gray-700 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
             <button
               onClick={startCamera}
               className="flex items-center gap-3 px-10 py-4 bg-gray-900 text-white rounded-full font-light text-sm tracking-widest hover:bg-gray-800 transition-colors"
@@ -729,7 +777,7 @@ export default function Home() {
               カメラを起動
             </button>
             {cameraError && (
-              <p className="text-red-500/90 text-xs font-light max-w-xs text-center">{cameraError}</p>
+              <p className="text-red-600 text-xs font-light max-w-xs text-center">{cameraError}</p>
             )}
           </div>
         )}
@@ -737,7 +785,7 @@ export default function Home() {
         {screenMode === 'camera' && (
           <div className="space-y-6">
             {cameraError && (
-              <div className="py-2 px-4 rounded-lg bg-red-50 border border-red-100">
+              <div className="py-2 px-4 rounded-lg bg-red-50 border border-red-300">
                 <p className="text-red-700 text-xs font-light">{cameraError}</p>
               </div>
             )}
@@ -761,17 +809,17 @@ export default function Home() {
               {/* 処理中のローディングオーバーレイ（より暗く） */}
               {isProcessing && (
                 <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10">
-                  <Loader2 className="animate-spin text-white" size={48} strokeWidth={2} />
+                  <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
                   <p className="text-white font-light text-sm tracking-wide">解析中...</p>
                 </div>
               )}
               <button
                 onClick={captureAndDetect}
                 disabled={isProcessing}
-                className="absolute bottom-6 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white border-2 border-gray-200 shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform z-20"
+                className="absolute bottom-6 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white border-2 border-gray-400 shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform z-20"
               >
                 {isProcessing ? (
-                  <Loader2 className="animate-spin text-gray-600" size={28} strokeWidth={1.5} />
+                  <Loader2 className="animate-spin text-gray-800" size={28} strokeWidth={2} />
                 ) : (
                   <div className="w-12 h-12 rounded-full bg-gray-900" />
                 )}
@@ -780,7 +828,7 @@ export default function Home() {
             <div className="flex justify-center gap-4">
               <button
                 onClick={stopCamera}
-                className="px-6 py-2.5 text-gray-600 text-sm font-light tracking-wide rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
+                className="px-6 py-2.5 text-gray-700 text-sm font-light tracking-wide rounded-full border border-gray-300 hover:bg-gray-50 transition-colors"
               >
                 終了
               </button>
@@ -790,7 +838,7 @@ export default function Home() {
 
         {screenMode === 'preview_edit' && previewImageUrl && (
           <div className="space-y-6">
-            <p className="text-gray-500 text-xs font-extralight tracking-wide">ロゴの位置・サイズを調整してから保存できます</p>
+            <p className="text-gray-700 text-xs font-extralight tracking-wide">ロゴの位置・サイズを調整してから保存できます</p>
             <div
               className="relative w-full rounded-2xl overflow-hidden bg-gray-100 aspect-[9/16] max-h-[60vh] touch-none"
               onTouchStart={onPreviewTouchStart}
@@ -805,7 +853,7 @@ export default function Home() {
               />
             </div>
             <div className="flex items-center gap-4">
-              <label className="text-gray-500 text-xs font-light flex-1 flex items-center gap-2">
+              <label className="text-gray-700 text-xs font-light flex-1 flex items-center gap-2">
                 <span>サイズ</span>
                 <input
                   type="range"
@@ -814,7 +862,7 @@ export default function Home() {
                   step="0.05"
                   value={editLogoScale}
                   onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                  className="flex-1 h-1.5 bg-gray-200 rounded-full appearance-none accent-gray-800"
+                  className="flex-1 h-1.5 bg-gray-300 rounded-full appearance-none accent-gray-900"
                 />
               </label>
             </div>
@@ -822,9 +870,9 @@ export default function Home() {
               <div className="flex justify-center gap-4">
                 <button
                   onClick={retake}
-                  className="flex items-center gap-2 px-6 py-3 text-gray-600 text-sm font-light rounded-full border border-gray-200 hover:bg-gray-50 transition-colors"
+                  className="flex items-center gap-2 px-6 py-3 text-gray-700 text-sm font-light rounded-full border border-gray-300 hover:bg-gray-50 transition-colors"
                 >
-                  <RotateCcw size={18} strokeWidth={1.5} />
+                  <RotateCcw size={18} strokeWidth={2} />
                   撮り直す
                 </button>
                 <button
@@ -832,7 +880,7 @@ export default function Home() {
                   disabled={isProcessing}
                   className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white text-sm font-light rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
                 >
-                  {isProcessing ? <Loader2 className="animate-spin" size={18} /> : <Share2 size={18} strokeWidth={1.5} />}
+                  {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
                   共有
                 </button>
               </div>
