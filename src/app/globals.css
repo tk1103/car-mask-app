@@ -74,13 +74,16 @@ body {
   animation: scan 2s ease-in-out infinite;
 }
 
-/* フラッシュアニメーション */
+/* フラッシュアニメーション（撮影効果） */
 @keyframes flash {
   0% {
     opacity: 0;
   }
-  50% {
-    opacity: 1;
+  10% {
+    opacity: 0.9;
+  }
+  20% {
+    opacity: 0.3;
   }
   100% {
     opacity: 0;

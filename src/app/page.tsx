@@ -74,6 +74,7 @@ export default function Home() {
   const [editLogoOffset, setEditLogoOffset] = useState({ x: 0, y: 0 });
   const [editLogoScale, setEditLogoScale] = useState(1);
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
+  const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -152,9 +153,64 @@ export default function Home() {
     return () => clearInterval(id);
   }, [screenMode]);
 
+  // 画像の明るさを検知（0-255の平均輝度を返す）
+  const detectBrightness = useCallback((canvas: HTMLCanvasElement): number => {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return 128; // デフォルト値（中間の明るさ）
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    let sum = 0;
+    
+    // RGB値から輝度を計算（サンプリング：10ピクセルごと）
+    for (let i = 0; i < data.length; i += 40) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      // 輝度計算式: 0.299*R + 0.587*G + 0.114*B
+      const brightness = r * 0.299 + g * 0.587 + b * 0.114;
+      sum += brightness;
+    }
+    
+    return sum / (data.length / 40);
+  }, []);
+
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
+
+    // フラッシュ効果を表示
+    setShowFlash(true);
+    setTimeout(() => setShowFlash(false), 200);
+
+    // 明るさを検知してフラッシュの必要性を判定
+    const brightnessCanvas = document.createElement('canvas');
+    brightnessCanvas.width = Math.min(video.videoWidth, 320);
+    brightnessCanvas.height = Math.min(video.videoHeight, 240);
+    const brightnessCtx = brightnessCanvas.getContext('2d');
+    if (brightnessCtx) {
+      brightnessCtx.drawImage(video, 0, 0, brightnessCanvas.width, brightnessCanvas.height);
+    }
+    const avgBrightness = detectBrightness(brightnessCanvas);
+    const isDark = avgBrightness < 100; // 閾値100（0-255の範囲で、100以下は暗いと判定）
+
+    // 実際のカメラフラッシュを有効化（暗い場合のみ、API能力を活かすため）
+    const videoTrack = streamRef.current?.getVideoTracks()[0];
+    let flashEnabled = false;
+    if (isDark && videoTrack && 'applyConstraints' in videoTrack) {
+      try {
+        await videoTrack.applyConstraints({
+          advanced: [{ torch: true } as any],
+        });
+        flashEnabled = true;
+        console.log(`Flash enabled (brightness: ${avgBrightness.toFixed(1)})`);
+      } catch (e) {
+        // フラッシュがサポートされていない場合は無視
+        console.log('Flash not supported:', e);
+      }
+    } else {
+      console.log(`Flash skipped (brightness: ${avgBrightness.toFixed(1)}, threshold: 100)`);
+    }
 
     setIsProcessing(true);
     setCameraError(null);
@@ -169,7 +225,24 @@ export default function Home() {
       fullResCanvas.height = originalH;
       const fullResCtx = fullResCanvas.getContext('2d');
       if (!fullResCtx) throw new Error('Canvas error');
+      
+      // フラッシュを有効化した後、少し待ってからキャプチャ（フラッシュが点灯する時間を確保）
+      if (flashEnabled) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      
       fullResCtx.drawImage(video, 0, 0, originalW, originalH);
+      
+      // キャプチャ後、フラッシュをオフ
+      if (flashEnabled && videoTrack && 'applyConstraints' in videoTrack) {
+        try {
+          await videoTrack.applyConstraints({
+            advanced: [{ torch: false } as any],
+          });
+        } catch (e) {
+          console.log('Failed to disable flash:', e);
+        }
+      }
       
       const fullResBlob = await new Promise<Blob>((resolve, reject) => {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.95);
@@ -204,6 +277,17 @@ export default function Home() {
       const result = await res.json();
 
       if (!res.ok) {
+        // エラー時もフラッシュをオフ
+        const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
+        if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
+          try {
+            await errorVideoTrack.applyConstraints({
+              advanced: [{ torch: false } as any],
+            });
+          } catch (e) {
+            // 無視
+          }
+        }
         setCameraError(result.error || `エラー ${res.status}`);
         setIsProcessing(false);
         return;
@@ -254,6 +338,17 @@ export default function Home() {
         setCameraError('AIが自動検出できなかったため、手動で調整してください。');
       }
     } catch (e) {
+      // エラー時もフラッシュを確実にオフにする
+      const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
+      if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
+        try {
+          await errorVideoTrack.applyConstraints({
+            advanced: [{ torch: false } as any],
+          });
+        } catch (flashError) {
+          // 無視
+        }
+      }
       setCameraError(e instanceof Error ? e.message : '解析に失敗しました');
     } finally {
       setIsProcessing(false);
@@ -510,9 +605,18 @@ export default function Home() {
                 muted
                 className="w-full h-full object-cover"
               />
-              {/* 処理中のローディングオーバーレイ */}
+              {/* フラッシュ効果 */}
+              {showFlash && (
+                <div 
+                  className="absolute inset-0 bg-white z-30 pointer-events-none"
+                  style={{
+                    animation: 'flash 0.2s ease-out',
+                  }}
+                />
+              )}
+              {/* 処理中のローディングオーバーレイ（より暗く） */}
               {isProcessing && (
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-4 z-10">
+                <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10">
                   <Loader2 className="animate-spin text-white" size={48} strokeWidth={2} />
                   <p className="text-white font-light text-sm tracking-wide">解析中...</p>
                 </div>
