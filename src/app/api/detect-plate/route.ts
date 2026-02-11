@@ -28,26 +28,28 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // ナンバープレートの四隅座標を返すプロンプト（パース補正用）
+    // Geminiへのプロンプト（四隅の点検出に特化）
     const prompt = `
-TASK: Detect the Japanese License Plate and return the exact four corner coordinates of the plate rectangle.
+  TASK: Detect the four precise corners of the Japanese license plate.
+  OUTPUT_FORMAT: JSON only.
+  
+  REQUIRED_JSON_STRUCTURE:
+  {
+    "found": true,
+    "corners": [
+      {"x": x1, "y": y1}, // Top-Left
+      {"x": x2, "y": y2}, // Top-Right
+      {"x": x3, "y": y3}, // Bottom-Right
+      {"x": x4, "y": y4}  // Bottom-Left
+    ]
+  }
 
-CRITICAL RULES:
-1. Target only the license plate (the rectangular plate part), excluding car body.
-2. Coordinate system: Normalized coordinates where image top-left is [0, 0] and bottom-right is [1000, 1000]. All x and y values are numbers 0-1000.
-3. Return the four corners in order: topLeft, topRight, bottomRight, bottomLeft (counter-clockwise from top-left).
-4. Respond ONLY with this JSON, no other text, no markdown:
-{
-  "found": true,
-  "corners": [
-    {"x": number, "y": number},
-    {"x": number, "y": number},
-    {"x": number, "y": number},
-    {"x": number, "y": number}
-  ]
-}
-5. If no plate is clearly visible, return {"found": false}.
-6. No conversational text. No code blocks. Just the JSON.
+  COORDINATE_SYSTEM:
+  - Top-left is {"x": 0, "y": 0}, bottom-right is {"x": 1000, "y": 1000}.
+  - Target ONLY the rectangular license plate.
+  - If no plate is found, return {"found": false}.
+  
+  STRICT_RULE: No conversational text. Just the raw JSON.
 `;
 
     // REST API (v1) で直接呼び出し
