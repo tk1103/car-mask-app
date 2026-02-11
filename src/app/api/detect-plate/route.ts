@@ -28,28 +28,24 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Geminiへのプロンプト（四隅の点検出に特化）
+    // Geminiへのプロンプト（厳格な四隅指定）
     const prompt = `
-  TASK: Detect the four precise corners of the Japanese license plate.
-  OUTPUT_FORMAT: JSON only.
-  
-  REQUIRED_JSON_STRUCTURE:
+  DETECT_LICENSE_PLATE_CORNERS:
+  1. 画像内の日本のナンバープレートの「四隅」を正確に特定してください。
+  2. 座標は[0, 0]（左上）から[1000, 1000]（右下）の範囲で答えてください。
+  3. 出力は必ず以下のJSON形式のみとし、マークダウン記法（\`\`\`json）も不要です。
+
   {
     "found": true,
     "corners": [
-      {"x": x1, "y": y1}, // Top-Left
-      {"x": x2, "y": y2}, // Top-Right
-      {"x": x3, "y": y3}, // Bottom-Right
-      {"x": x4, "y": y4}  // Bottom-Left
+      {"x": 左上のX, "y": 左上のY},
+      {"x": 右上のX, "y": 右上のY},
+      {"x": 右下のX, "y": 右下のY},
+      {"x": 左下のX, "y": 左下のY}
     ]
   }
 
-  COORDINATE_SYSTEM:
-  - Top-left is {"x": 0, "y": 0}, bottom-right is {"x": 1000, "y": 1000}.
-  - Target ONLY the rectangular license plate.
-  - If no plate is found, return {"found": false}.
-  
-  STRICT_RULE: No conversational text. Just the raw JSON.
+  ※見つからない場合は {"found": false} と返してください。
 `;
 
     // REST API (v1) で直接呼び出し

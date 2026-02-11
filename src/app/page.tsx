@@ -210,10 +210,10 @@ export default function Home() {
       }
 
       if (result.found && result.corners && result.corners.length === 4) {
-        // API座標（リサイズ後）を元画像サイズにスケール
+        // 修正後の計算ロジック
         const corners: Corners = result.corners.map((c: { x: number; y: number }) => ({
-          x: (c.x / 1000) * (originalW / apiW),
-          y: (c.y / 1000) * (originalH / apiH),
+          x: (c.x / 1000), // 0-1の比率として保持
+          y: (c.y / 1000), // 0-1の比率として保持
         }));
         setDetectedCorners(corners);
         setEditLogoOffset({ x: 0, y: 0 });
@@ -221,7 +221,17 @@ export default function Home() {
         setPreviewImageUrl(URL.createObjectURL(fullResBlob));
         setScreenMode('preview_edit');
       } else {
-        setCameraError('ナンバープレートが見つかりませんでした。');
+        // 感知できなかった場合、画面中央にデフォルトの四隅を設定（保険）
+        const defaultCorners: Corners = [
+          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
+          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
+        ];
+        setDetectedCorners(defaultCorners);
+        setEditLogoOffset({ x: 0, y: 0 });
+        setEditLogoScale(1);
+        setPreviewImageUrl(URL.createObjectURL(fullResBlob));
+        setScreenMode('preview_edit');
+        setCameraError('AIが自動検出できなかったため、手動で調整してください。');
       }
     } catch (e) {
       setCameraError(e instanceof Error ? e.message : '解析に失敗しました');
@@ -301,8 +311,25 @@ export default function Home() {
       logoCanvas.height = logoHeight;
       const lctx = logoCanvas.getContext('2d');
       if (lctx) {
-        lctx.fillStyle = '#1a1a1a';
-        lctx.fillRect(0, 0, logoCanvas.width, logoCanvas.height);
+        // 角丸の半径を計算（高さの10%程度）
+        const cornerRadius = logoCanvas.height * 0.1;
+        
+        // 角丸の長方形を描画
+        lctx.fillStyle = '#0a0a0a'; // 真っ黒に近いグレー
+        lctx.beginPath();
+        lctx.moveTo(cornerRadius, 0);
+        lctx.lineTo(logoCanvas.width - cornerRadius, 0);
+        lctx.quadraticCurveTo(logoCanvas.width, 0, logoCanvas.width, cornerRadius);
+        lctx.lineTo(logoCanvas.width, logoCanvas.height - cornerRadius);
+        lctx.quadraticCurveTo(logoCanvas.width, logoCanvas.height, logoCanvas.width - cornerRadius, logoCanvas.height);
+        lctx.lineTo(cornerRadius, logoCanvas.height);
+        lctx.quadraticCurveTo(0, logoCanvas.height, 0, logoCanvas.height - cornerRadius);
+        lctx.lineTo(0, cornerRadius);
+        lctx.quadraticCurveTo(0, 0, cornerRadius, 0);
+        lctx.closePath();
+        lctx.fill();
+        
+        // A_O_Iロゴテキスト
         lctx.fillStyle = '#fff';
         lctx.font = `bold ${logoCanvas.height * 0.5}px system-ui, sans-serif`;
         lctx.textAlign = 'center';
