@@ -510,10 +510,17 @@ export default function Home() {
                 muted
                 className="w-full h-full object-cover"
               />
+              {/* 処理中のローディングオーバーレイ */}
+              {isProcessing && (
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-4 z-10">
+                  <Loader2 className="animate-spin text-white" size={48} strokeWidth={2} />
+                  <p className="text-white font-light text-sm tracking-wide">解析中...</p>
+                </div>
+              )}
               <button
                 onClick={captureAndDetect}
                 disabled={isProcessing}
-                className="absolute bottom-6 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white border-2 border-gray-200 shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
+                className="absolute bottom-6 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white border-2 border-gray-200 shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform z-20"
               >
                 {isProcessing ? (
                   <Loader2 className="animate-spin text-gray-600" size={28} strokeWidth={1.5} />
