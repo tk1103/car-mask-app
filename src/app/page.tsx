@@ -556,7 +556,7 @@ export default function Home() {
           setIsProcessing(false);
         },
         'image/jpeg',
-        0.92
+        0.98
       );
     } catch (e) {
       setIsProcessing(false);
@@ -622,7 +622,7 @@ export default function Home() {
           setIsProcessing(false);
         },
         'image/jpeg',
-        0.92
+        0.98
       );
     } catch (e) {
       setIsProcessing(false);
@@ -652,7 +652,7 @@ export default function Home() {
           setIsProcessing(false);
         },
         'image/jpeg',
-        0.92
+        0.98
       );
     } catch (e) {
       setIsProcessing(false);
