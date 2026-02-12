@@ -121,13 +121,20 @@ STRICT RULES:
       } else if (errorJson?.error) {
         errorMessage = String(errorJson.error);
       }
-      
+
+      const isQuota = geminiResponse.status === 429 ||
+        errorMessage.toLowerCase().includes('quota') ||
+        errorMessage.toLowerCase().includes('rate limit');
+      const userMessage = isQuota
+        ? '本日のAI利用回数（20回）に達しました。明日またお試しください。'
+        : errorMessage;
+
       return NextResponse.json(
         {
           found: false,
-          error: errorMessage,
+          error: userMessage,
           status: geminiResponse.status,
-          rawResponse: errorBody.substring(0, 1000), // 最初の1000文字のみ
+          rawResponse: errorBody.substring(0, 1000),
         },
         { status: geminiResponse.status === 429 ? 429 : 500 }
       );

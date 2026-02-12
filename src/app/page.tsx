@@ -310,7 +310,6 @@ export default function Home() {
       const result = await res.json();
 
       if (!res.ok) {
-        // エラー時もフラッシュをオフ
         const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
         if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
           try {
@@ -321,7 +320,13 @@ export default function Home() {
             // 無視
           }
         }
-        setCameraError(result.error || `エラー ${res.status}`);
+        const raw = (result.error || '') as string;
+        const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
+        setCameraError(
+          isQuota
+            ? '本日のAI利用回数（20回）に達しました。明日またお試しください。'
+            : (result.error || `エラー ${res.status}`)
+        );
         setIsProcessing(false);
         return;
       }
