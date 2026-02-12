@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy } from 'lucide-react';
+import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor } from 'lucide-react';
 
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
@@ -462,9 +462,10 @@ export default function Home() {
       const avgWidth = (width1 + width2) / 2;
       const avgHeight = (height1 + height2) / 2;
       
-      // ロゴサイズをプレートサイズに合わせる（基本サイズ倍率1.0）
-      const logoWidth = avgWidth * 1.0;
-      const logoHeight = avgHeight * 1.0;
+      // ロゴサイズをプレートよりやや大きく（はみ出し防止・プレート全体を確実に隠す）
+      const sizeScale = 1.08;
+      const logoWidth = avgWidth * sizeScale;
+      const logoHeight = avgHeight * sizeScale;
       
       const logoCanvas = document.createElement('canvas');
       logoCanvas.width = logoWidth;
@@ -517,8 +518,8 @@ export default function Home() {
           y: plateCenterY + (c.y - plateCenterY) * scale + oy / h,
         })) as Corners;
 
-        // パディングを0.02%に設定
-        const pad = 0.0002;
+        // パディングを約2%に拡大（検出枠のわずかなずれや上部「群馬」「580」のはみ出しを確実に隠す）
+        const pad = 0.02;
         const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
         const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
         const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
@@ -680,6 +681,98 @@ export default function Home() {
     }
   }, []);
 
+  /** 端末に保存（ダウンロード or 共有シートで「画像を保存」を選択） */
+  const handleSaveToDevice = useCallback(async () => {
+    if (!previewCanvasRef.current) return;
+    setIsProcessing(true);
+    try {
+      previewCanvasRef.current.toBlob(
+        async (blob) => {
+          if (!blob) {
+            setIsProcessing(false);
+            return;
+          }
+          const file = new File([blob], `automoni-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: 'Auto mo Camera',
+                text: '画像を端末に保存する場合は「画像を保存」などを選んでください。',
+              });
+              setShowShareMenu(false);
+              setShowSaveSuccess(true);
+              setTimeout(() => setShowSaveSuccess(false), 2500);
+            } catch (shareErr: any) {
+              if (shareErr.name !== 'AbortError') {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = file.name;
+                a.click();
+                URL.revokeObjectURL(a.href);
+                setShowShareMenu(false);
+                setShowSaveSuccess(true);
+                setTimeout(() => setShowSaveSuccess(false), 2500);
+              }
+            }
+          } else {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = file.name;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            setShowShareMenu(false);
+            setShowSaveSuccess(true);
+            setTimeout(() => setShowSaveSuccess(false), 2500);
+          }
+          setIsProcessing(false);
+        },
+        'image/jpeg',
+        0.99
+      );
+    } catch (e) {
+      setIsProcessing(false);
+    }
+  }, []);
+
+  /** 近くのPCなどに共有（共有シートに「近くのデバイス」が出る場合あり） */
+  const handleShareToNearbyDevice = useCallback(async () => {
+    if (!previewCanvasRef.current) return;
+    setIsProcessing(true);
+    try {
+      previewCanvasRef.current.toBlob(
+        async (blob) => {
+          if (!blob) {
+            setIsProcessing(false);
+            return;
+          }
+          const file = new File([blob], `automoni-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: 'Auto mo Camera',
+                text: '近くのPCやデバイスを選択して共有できます。',
+              });
+              setShowShareMenu(false);
+              setShowSaveSuccess(true);
+              setTimeout(() => setShowSaveSuccess(false), 2500);
+            } catch (shareErr: any) {
+              if (shareErr.name !== 'AbortError') setCameraError('共有に失敗しました');
+            }
+          } else {
+            setCameraError('お使いの環境では共有シートを利用できません。');
+          }
+          setIsProcessing(false);
+        },
+        'image/jpeg',
+        0.99
+      );
+    } catch (e) {
+      setIsProcessing(false);
+    }
+  }, []);
+
   const handleCopyToClipboard = useCallback(async () => {
     if (!previewCanvasRef.current) return;
     setIsProcessing(true);
@@ -811,9 +904,10 @@ export default function Home() {
               )}
               {/* 処理中のローディングオーバーレイ（より暗く） */}
               {isProcessing && (
-                <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10">
+                <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10 px-4">
                   <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
                   <p className="text-white font-light text-sm tracking-wide">解析中...</p>
+                  <p className="text-white/90 text-xs font-extralight tracking-wide text-center max-w-xs">ロゴの位置・サイズを調整してから保存できます</p>
                 </div>
               )}
               <button
@@ -840,10 +934,9 @@ export default function Home() {
         )}
 
         {screenMode === 'preview_edit' && previewImageUrl && (
-          <div className="space-y-6">
-            <p className="text-gray-700 text-xs font-extralight tracking-wide">ロゴの位置・サイズを調整してから保存できます</p>
+          <div className="space-y-4 flex flex-col flex-1 min-h-0">
             <div
-              className="relative w-full rounded-2xl overflow-hidden bg-gray-100 aspect-[9/16] max-h-[60vh] touch-none"
+              className="relative w-full flex-1 min-h-0 rounded-2xl overflow-hidden bg-gray-100 aspect-[9/16] max-h-[calc(100vh-200px)] touch-none"
               onTouchStart={onPreviewTouchStart}
               onTouchMove={onPreviewTouchMove}
               onTouchEnd={onPreviewTouchEnd}
@@ -890,7 +983,7 @@ export default function Home() {
               
               {/* SNS共有メニュー */}
               {showShareMenu && (
-                <div className="flex justify-center gap-3 pt-2">
+                <div className="flex flex-wrap justify-center gap-3 pt-2">
                   <button
                     onClick={() => handleShareToSNS('facebook')}
                     disabled={isProcessing}
@@ -914,6 +1007,22 @@ export default function Home() {
                   >
                     <Instagram size={16} />
                     Instagram
+                  </button>
+                  <button
+                    onClick={handleSaveToDevice}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-xs font-light rounded-full hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                  >
+                    <Download size={16} />
+                    端末に保存
+                  </button>
+                  <button
+                    onClick={handleShareToNearbyDevice}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-slate-600 text-white text-xs font-light rounded-full hover:bg-slate-700 transition-colors disabled:opacity-50"
+                  >
+                    <Monitor size={16} />
+                    近くのPCに共有
                   </button>
                   <button
                     onClick={handleCopyToClipboard}
