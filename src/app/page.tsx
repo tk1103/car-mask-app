@@ -855,199 +855,145 @@ export default function Home() {
   const fontFamily = '"Helvetica Neue", Helvetica, "Hiragino Sans", "Yu Gothic", sans-serif';
 
   return (
-    <div className="min-h-screen bg-white" style={{ fontFamily }}>
-      <header className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-300">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <h1 className="text-xl font-extralight text-gray-900 tracking-[0.2em]">Auto mo Camera</h1>
-        </div>
-      </header>
+    <div className="min-h-screen bg-black" style={{ fontFamily }}>
+      {screenMode === 'idle' && (
+        <header className="sticky top-0 z-10 bg-black/80 backdrop-blur-sm border-b border-white/10">
+          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center">
+            <h1 className="text-lg font-extralight text-white tracking-[0.2em]">Auto mo Camera</h1>
+          </div>
+        </header>
+      )}
 
       {showSaveSuccess && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 pointer-events-none">
-          <div className="bg-white rounded-2xl p-8 flex flex-col items-center gap-4 shadow-xl">
-            <CheckCircle className="text-gray-900" size={48} strokeWidth={2} />
-            <p className="text-gray-900 font-light text-lg">保存しました</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 pointer-events-none">
+          <div className="bg-white/95 backdrop-blur rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
+            <CheckCircle className="text-emerald-600" size={40} strokeWidth={2} />
+            <p className="text-gray-900 font-light">保存しました</p>
           </div>
         </div>
       )}
 
-      <main className="max-w-4xl mx-auto px-4 py-6">
-        {screenMode === 'idle' && (
-          <div className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] gap-8">
-            <p className="text-gray-700 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
-            <button
-              onClick={startCamera}
-              className="flex items-center gap-3 px-10 py-4 bg-gray-900 text-white rounded-full font-light text-sm tracking-widest hover:bg-gray-800 transition-colors"
-            >
-              <Camera size={22} strokeWidth={1.5} />
-              カメラを起動
-            </button>
-            {cameraError && (
-              <p className="text-red-600 text-xs font-light max-w-xs text-center">{cameraError}</p>
-            )}
-          </div>
-        )}
-
-        {screenMode === 'camera' && (
-          <div className="space-y-6">
-            {cameraError && (
-              <div className="py-2 px-4 rounded-lg bg-red-50 border border-red-300">
-                <p className="text-red-700 text-xs font-light">{cameraError}</p>
-              </div>
-            )}
-            <div className="relative w-full rounded-2xl overflow-hidden bg-gray-900 aspect-[9/16] max-h-[calc(100vh-220px)]">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-              />
-              {/* フラッシュ効果 */}
-              {showFlash && (
-                <div 
-                  className="absolute inset-0 bg-white z-30 pointer-events-none"
-                  style={{
-                    animation: 'flash 0.2s ease-out',
-                  }}
-                />
-              )}
-              {/* 処理中のローディングオーバーレイ（より暗く） */}
-              {isProcessing && (
-                <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10 px-4">
-                  <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
-                  <p className="text-white font-light text-sm tracking-wide">解析中...</p>
-                  <p className="text-white/90 text-xs font-extralight tracking-wide text-center max-w-xs">ロゴの位置・サイズを調整してから保存できます</p>
-                </div>
-              )}
-              <button
-                onClick={captureAndDetect}
-                disabled={isProcessing}
-                className="absolute bottom-6 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white border-2 border-gray-400 shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform z-20"
-              >
-                {isProcessing ? (
-                  <Loader2 className="animate-spin text-gray-800" size={28} strokeWidth={2} />
-                ) : (
-                  <div className="w-12 h-12 rounded-full bg-gray-900" />
-                )}
-              </button>
+      {screenMode === 'camera' && (
+        <div className="fixed inset-0 z-0 bg-black">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          {showFlash && (
+            <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
+          )}
+          {isProcessing && (
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10 px-4">
+              <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
+              <p className="text-white font-light text-sm">解析中...</p>
+              <p className="text-white/80 text-xs font-extralight text-center max-w-xs">ロゴの位置・サイズを調整してから保存できます</p>
             </div>
-            <div className="flex justify-center gap-4">
+          )}
+          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-gradient-to-b from-black/50 to-transparent">
+            <div className="flex items-center justify-between">
+              <h1 className="text-base font-extralight text-white/95 tracking-widest">Auto mo Camera</h1>
               <button
                 onClick={stopCamera}
-                className="px-6 py-2.5 text-gray-700 text-sm font-light tracking-wide rounded-full border border-gray-300 hover:bg-gray-50 transition-colors"
+                className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-sm hover:bg-white/30 active:bg-white/40 transition-colors"
               >
                 終了
               </button>
             </div>
+            {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
           </div>
-        )}
-
-        {screenMode === 'preview_edit' && previewImageUrl && (
-          <div className="space-y-4 flex flex-col flex-1 min-h-0">
-            <div
-              className="relative w-full flex-1 min-h-0 rounded-2xl overflow-hidden bg-gray-100 aspect-[9/16] max-h-[calc(100vh-200px)] touch-none"
-              onTouchStart={onPreviewTouchStart}
-              onTouchMove={onPreviewTouchMove}
-              onTouchEnd={onPreviewTouchEnd}
-              onTouchCancel={onPreviewTouchEnd}
+          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-gradient-to-t from-black/40 to-transparent flex justify-center">
+            <button
+              onClick={captureAndDetect}
+              disabled={isProcessing}
+              className="w-16 h-16 rounded-full bg-white/95 backdrop-blur-sm border-2 border-white/60 shadow-xl flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
             >
-              <canvas
-                ref={previewCanvasRef}
-                className="w-full h-full object-contain block"
-                style={{ touchAction: 'none' }}
+              {isProcessing ? (
+                <Loader2 className="animate-spin text-gray-800" size={28} strokeWidth={2} />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-gray-900/90" />
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {screenMode === 'idle' && (
+        <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-8 px-6">
+          <p className="text-white/80 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
+          <button
+            onClick={startCamera}
+            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/20 text-white font-light text-sm tracking-widest backdrop-blur-sm border border-white/30 hover:bg-white/30 active:bg-white/40 transition-colors"
+          >
+            <Camera size={22} strokeWidth={1.5} />
+            カメラを起動
+          </button>
+          {cameraError && (
+            <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
+          )}
+        </main>
+      )}
+
+      {screenMode === 'preview_edit' && previewImageUrl && (
+        <div className="fixed inset-0 z-0 bg-black flex flex-col">
+          <div
+            className="flex-1 min-h-0 relative touch-none"
+            onTouchStart={onPreviewTouchStart}
+            onTouchMove={onPreviewTouchMove}
+            onTouchEnd={onPreviewTouchEnd}
+            onTouchCancel={onPreviewTouchEnd}
+          >
+            <canvas
+              ref={previewCanvasRef}
+              className="absolute inset-0 w-full h-full object-contain"
+              style={{ touchAction: 'none' }}
+            />
+          </div>
+          <div className="bg-black/40 backdrop-blur-xl border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-white/90 text-xs font-light">サイズ</span>
+              <input
+                type="range"
+                min="0.3"
+                max="2"
+                step="0.05"
+                value={editLogoScale}
+                onChange={(e) => setEditLogoScale(Number(e.target.value))}
+                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[200px]"
               />
             </div>
-            <div className="flex items-center gap-4">
-              <label className="text-gray-700 text-xs font-light flex-1 flex items-center gap-2">
-                <span>サイズ</span>
-                <input
-                  type="range"
-                  min="0.3"
-                  max="2"
-                  step="0.05"
-                  value={editLogoScale}
-                  onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                  className="flex-1 h-1.5 bg-gray-300 rounded-full appearance-none accent-gray-900"
-                />
-              </label>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={retake}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-sm hover:bg-white/30 active:bg-white/40 transition-colors"
+              >
+                <RotateCcw size={18} strokeWidth={2} />
+                撮り直す
+              </button>
+              <button
+                onClick={() => setShowShareMenu(!showShareMenu)}
+                disabled={isProcessing}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-white/95 text-gray-900 text-sm font-light hover:bg-white active:bg-gray-100 transition-colors disabled:opacity-50"
+              >
+                {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
+                共有
+              </button>
             </div>
-            <div className="flex flex-col gap-3">
-              <div className="flex justify-center gap-4">
-                <button
-                  onClick={retake}
-                  className="flex items-center gap-2 px-6 py-3 text-gray-700 text-sm font-light rounded-full border border-gray-300 hover:bg-gray-50 transition-colors"
-                >
-                  <RotateCcw size={18} strokeWidth={2} />
-                  撮り直す
-                </button>
-                <button
-                  onClick={() => setShowShareMenu(!showShareMenu)}
-                  disabled={isProcessing}
-                  className="flex items-center gap-2 px-8 py-3 bg-gray-900 text-white text-sm font-light rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
-                >
-                  {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
-                  共有
-                </button>
+            {showShareMenu && (
+              <div className="flex flex-wrap justify-center gap-2 mt-3 pt-3 border-t border-white/10">
+                <button onClick={() => handleShareToSNS('facebook')} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-blue-500/90 text-white text-xs font-light hover:bg-blue-500 transition-colors disabled:opacity-50"><Facebook size={14} /> Facebook</button>
+                <button onClick={() => handleShareToSNS('twitter')} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/80 text-white text-xs font-light hover:bg-black transition-colors disabled:opacity-50"><Twitter size={14} /> X</button>
+                <button onClick={() => handleShareToSNS('instagram')} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xs font-light hover:opacity-90 transition-colors disabled:opacity-50"><Instagram size={14} /> Instagram</button>
+                <button onClick={handleSaveToDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-emerald-500/90 text-white text-xs font-light hover:bg-emerald-500 transition-colors disabled:opacity-50"><Download size={14} /> 端末に保存</button>
+                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/25 text-white text-xs font-light hover:bg-white/35 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
+                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/25 text-white text-xs font-light hover:bg-white/35 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
               </div>
-              
-              {/* SNS共有メニュー */}
-              {showShareMenu && (
-                <div className="flex flex-wrap justify-center gap-3 pt-2">
-                  <button
-                    onClick={() => handleShareToSNS('facebook')}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-xs font-light rounded-full hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  >
-                    <Facebook size={16} />
-                    Facebook
-                  </button>
-                  <button
-                    onClick={() => handleShareToSNS('twitter')}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-black text-white text-xs font-light rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
-                  >
-                    <Twitter size={16} />
-                    X
-                  </button>
-                  <button
-                    onClick={() => handleShareToSNS('instagram')}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-light rounded-full hover:opacity-90 transition-colors disabled:opacity-50"
-                  >
-                    <Instagram size={16} />
-                    Instagram
-                  </button>
-                  <button
-                    onClick={handleSaveToDevice}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-xs font-light rounded-full hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                  >
-                    <Download size={16} />
-                    端末に保存
-                  </button>
-                  <button
-                    onClick={handleShareToNearbyDevice}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-slate-600 text-white text-xs font-light rounded-full hover:bg-slate-700 transition-colors disabled:opacity-50"
-                  >
-                    <Monitor size={16} />
-                    近くのPCに共有
-                  </button>
-                  <button
-                    onClick={handleCopyToClipboard}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-white text-xs font-light rounded-full hover:bg-gray-600 transition-colors disabled:opacity-50"
-                  >
-                    <Copy size={16} />
-                    コピー
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
           </div>
-        )}
-      </main>
+        </div>
+      )}
     </div>
   );
 }
