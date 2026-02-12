@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
         // Gemini APIを初期化
         const genAI = new GoogleGenerativeAI(apiKey);
 
-        // gemini-2.5-flashに完全固定（高速化のため）
+        // Gemini 2.0 は 2026年3月31日廃止のため、2.5 Flash に移行
         const modelName = 'gemini-2.5-flash';
         const model = genAI.getGenerativeModel({
             model: modelName,
@@ -93,284 +93,73 @@ export async function POST(request: NextRequest) {
                 responseSchema: {
                     type: "object" as const,
                     properties: {
-                        vendor: { type: "string" as const },
-                        amount: { type: "number" as const },
-                        currency: { type: "string" as const },
-                        date: { type: "string" as const },
-                        invoice_number: { type: "string" as const },
-                        expenseCategory: { 
-                            type: "string" as const,
-                            enum: ["仕入高", "広告宣伝費", "消耗品費", "会議費", "接待交際費", "旅費交通費", "通信費", "支払手数料", "新聞図書費", "雑費"]
-                        },
-                        categoryReason: { type: "string" as const },
-                        confidenceScore: { type: "number" as const },
-                        corners: {
+                        found: { type: "boolean" as const, description: "Whether at least one license plate was detected" },
+                        plates: {
                             type: "array" as const,
+                            description: "List of detected license plates, each with four corner coordinates (0-1000)",
                             items: {
                                 type: "object" as const,
                                 properties: {
-                                    x: { type: "number" as const },
-                                    y: { type: "number" as const }
+                                    corners: {
+                                        type: "array" as const,
+                                        description: "Four corners: Top-Left, Top-Right, Bottom-Right, Bottom-Left",
+                                        items: {
+                                            type: "object" as const,
+                                            properties: {
+                                                x: { type: "number" as const },
+                                                y: { type: "number" as const }
+                                            },
+                                            required: ["x", "y"]
+                                        },
+                                        minItems: 4,
+                                        maxItems: 4
+                                    }
                                 },
-                                required: ["x", "y"]
-                            },
-                            minItems: 4,
-                            maxItems: 4
-                        },
-                        rotation_needed: {
-                            type: "number" as const,
-                            minimum: 0,
-                            maximum: 3,
-                            description: "Number of 90-degree clockwise rotations needed (0, 1, 2, or 3)"
+                                required: ["corners"]
+                            }
                         }
                     },
-                    required: ["vendor", "amount", "currency", "date", "invoice_number", "corners", "expenseCategory", "categoryReason", "confidenceScore", "rotation_needed"]
+                    required: ["found", "plates"]
                 } as any
             }
         });
 
         console.log(`Using model: ${modelName} with JSON schema`);
 
-        // 高精度OCRプロンプト（商品化レベルの精度を目指す）
-        const prompt = `You are an expert OCR system for receipt scanning. Extract receipt information with maximum accuracy. The image is already cropped to focus on the receipt.
+        // ナンバープレート検知専用プロンプト（四隅の座標のみを返す）
+        const prompt = `TASK: Detect the exact four corners of the Japanese license plate in the image for privacy masking.
 
-ANALYSIS STEPS (execute in order):
+ANALYSIS STEPS:
+1. Identify the rectangular boundary of the license plate (ナンバープレート).
+2. Locate the four specific corner points: Top-Left, Top-Right, Bottom-Right, and Bottom-Left.
+3. If multiple plates exist, detect ALL of them and return each in the "plates" array (most prominent/foreground first).
 
-Step 1: RECEIPT BOUNDARY DETECTION
-- Carefully examine the entire image to find the physical edges of the receipt paper
-- Identify the four corners: top-left, top-right, bottom-right, bottom-left
-- Return normalized coordinates (0-1000) for each corner
-- Even if the image is cropped, detect the actual receipt edges within the frame
+COORDINATE SYSTEM:
+- Return coordinates in a normalized range of 0 to 1000.
+- [x: 0, y: 0] is the Top-Left corner of the image.
+- [x: 1000, y: 1000] is the Bottom-Right corner of the image.
 
-Step 2: COUNTRY AND CURRENCY IDENTIFICATION (GLOBAL SUPPORT)
-- Analyze ALL visual cues to identify the country and currency:
-  * Language patterns: Thai (ก-ฮ), Japanese (漢字/ひらがな/カタカナ), Chinese (中文), Korean (한글), English, European languages, etc.
-  * VAT/Tax labels: "VAT", "GST", "TAX", "消費税", "ภาษีมูลค่าเพิ่ม", "IVA", "TVA", "MwSt", etc.
-  * Date format: DD/MM/YYYY (European), MM/DD/YYYY (US), YYYY/MM/DD (ISO/Asian), Buddhist calendar (Thai)
-  * Phone number format: Country-specific patterns (e.g., +66 for Thailand, +81 for Japan, +1 for US)
-  * Business address: Country names, postal codes, area codes
-  * Currency symbols: $ (USD/CAD/AUD/etc), € (EUR), £ (GBP), ¥ (JPY/CNY), ฿ (THB), ₩ (KRW), ₹ (INR), etc.
-- If no currency symbol is found, infer the currency based on:
-  * Language detected in the receipt text
-  * Business address or location indicators
-  * VAT/Tax label format (country-specific)
-  * Date format patterns
-  * Phone number country codes
-- Output the ISO 4217 currency code (e.g., USD, EUR, GBP, JPY, THB, CNY, KRW, SGD, AUD, CAD, INR, etc.)
+OUTPUT FORMAT (JSON only). Use "found" and "plates". Each plate has "corners" with exactly 4 points in order: Top-Left, Top-Right, Bottom-Right, Bottom-Left:
+{
+  "found": true,
+  "plates": [
+    {
+      "corners": [
+        {"x": number, "y": number},
+        {"x": number, "y": number},
+        {"x": number, "y": number},
+        {"x": number, "y": number}
+      ]
+    }
+  ]
+}
 
-Step 3: DATA EXTRACTION (CRITICAL - MAXIMUM ACCURACY REQUIRED)
+STRICT RULES:
+- Only return the license plate boundary, NOT the car body or headlights.
+- If no plate is clearly visible, return {"found": false, "plates": []}.
+- Do not include any conversational text or markdown code blocks.`;
 
-A. VENDOR (Store Name):
-   - Read the store/company name EXACTLY as printed
-   - Preserve ALL characters: English, Thai (อักษรไทย), Japanese (日本語), numbers, symbols
-   - Common patterns: "ARNO'S", "ARNO'S GROUP", company names with "Co.,Ltd.", branch names like "Emquartier"
-   - If multiple lines, combine them logically (e.g., "ARNO'S GROUP" + "national Co.,Ltd.")
-   - Do NOT translate, transliterate, or modify the original text
-   - If text is partially visible, read what you can see clearly
-
-B. AMOUNT (Total Amount):
-   - Find the TOTAL amount on the receipt (usually labeled as "Total", "合計", "รวม", "TOTAL", "Amount", "Summe", "Total", "合計金額")
-   - Extract the EXACT numeric value as printed
-   - Remove ONLY currency symbols (฿, ¥, $, €, £, ₩, ₹, etc.) and thousand separators (commas, spaces, periods)
-   - Preserve decimal points and precision
-   - Examples: "฿1,063.61" → 1063.61, "¥1,200" → 1200, "$15.00" → 15.00, "€25.50" → 25.50, "£10.99" → 10.99
-   - If multiple amounts exist, choose the LARGEST number that appears near "Total" or similar labels
-   - Do NOT convert between currencies - use the value as printed
-   - VALIDATION: Consider typical price ranges for different currencies to avoid misreading:
-     * Small amounts (5-50): Likely USD/EUR/GBP/SGD/AUD/CAD/EUR (e.g., lunch $15.00, coffee €3.50)
-     * Medium amounts (50-500): Could be USD/EUR/GBP or THB/SGD (e.g., dinner $45.00, meal ฿350)
-     * Large amounts (500-5000): Likely JPY/KRW/CNY (e.g., lunch ¥1,500, dinner ₩25,000)
-     * Very large amounts (5000+): Likely JPY/KRW/CNY/VND (e.g., ¥12,000, ₩50,000)
-     * Use context clues (item descriptions, store type) to validate amount reasonableness
-
-C. CURRENCY (CRITICAL - GLOBAL INFERENCE WITH ISO 4217 CODES):
-   - PRIMARY INDICATORS (highest priority - currency symbols):
-     * Detect visible currency symbols: $ (USD/CAD/AUD/NZD/etc), € (EUR), £ (GBP), ¥ (JPY/CNY), ฿ (THB), ₩ (KRW), ₹ (INR), etc.
-     * Detect currency text: "USD", "EUR", "GBP", "JPY", "THB", "CNY", "KRW", "SGD", "AUD", "CAD", "INR", etc.
-   
-   - INFERENCE RULES (when currency symbol is NOT visible - analyze all visual cues):
-     
-     * LANGUAGE-BASED INFERENCE:
-       - Thai characters (ก-ฮ) → "THB" (Thai Baht)
-       - Japanese characters (漢字/ひらがな/カタカナ) → "JPY" (Japanese Yen)
-       - Chinese characters (中文) → "CNY" (Chinese Yuan) or "TWD" (Taiwan Dollar) based on context
-       - Korean characters (한글) → "KRW" (Korean Won)
-       - English + European context → "EUR" (Euro), "GBP" (British Pound), "USD" (US Dollar)
-       - English + Asian context → "SGD" (Singapore Dollar), "MYR" (Malaysian Ringgit), "PHP" (Philippine Peso)
-       - English + Oceania context → "AUD" (Australian Dollar), "NZD" (New Zealand Dollar)
-       - English + Americas context → "USD" (US Dollar), "CAD" (Canadian Dollar), "MXN" (Mexican Peso)
-     
-     * VAT/TAX LABEL-BASED INFERENCE:
-       - "VAT" (Value Added Tax) → European countries: "EUR", "GBP", etc.
-       - "GST" (Goods and Services Tax) → "SGD" (Singapore), "AUD" (Australia), "CAD" (Canada), "NZD" (New Zealand)
-       - "消費税" (Japanese consumption tax) → "JPY"
-       - "ภาษีมูลค่าเพิ่ม" (Thai VAT) → "THB"
-       - "IVA" (Impuesto sobre el Valor Añadido) → "EUR" (Spain), "MXN" (Mexico), etc.
-       - "TVA" (Taxe sur la Valeur Ajoutée) → "EUR" (France, Belgium, etc.)
-       - "MwSt" (Mehrwertsteuer) → "EUR" (Germany, Austria)
-     
-     * DATE FORMAT-BASED INFERENCE:
-       - DD/MM/YYYY → European countries ("EUR", "GBP"), Asian countries ("THB", "SGD")
-       - MM/DD/YYYY → "USD" (US), "CAD" (Canada)
-       - YYYY/MM/DD → "JPY" (Japan), "CNY" (China), "KRW" (Korea)
-       - Buddhist calendar (2560-2570) → "THB" (Thailand)
-     
-     * PHONE NUMBER-BASED INFERENCE:
-       - +66 → "THB" (Thailand)
-       - +81 → "JPY" (Japan)
-       - +86 → "CNY" (China)
-       - +82 → "KRW" (Korea)
-       - +65 → "SGD" (Singapore)
-       - +1 → "USD" (US), "CAD" (Canada)
-       - +44 → "GBP" (UK)
-       - +49 → "EUR" (Germany)
-       - +33 → "EUR" (France)
-       - +61 → "AUD" (Australia)
-     
-     * AMOUNT RANGE-BASED INFERENCE (consider typical price ranges):
-       - Small amounts (5-50): Likely "USD", "EUR", "GBP", "SGD", "AUD", "CAD" (e.g., lunch $15.00, coffee €3.50)
-       - Medium amounts (50-500): Could be "USD"/"EUR"/"GBP" or "THB"/"SGD" (e.g., dinner $45.00, meal ฿350)
-       - Large amounts (500-5000): Likely "JPY", "KRW", "CNY" (e.g., lunch ¥1,500, dinner ₩25,000)
-       - Very large amounts (5000+): Likely "JPY", "KRW", "CNY", "VND" (e.g., ¥12,000, ₩50,000)
-       - Use context clues (item descriptions, store type) to validate amount reasonableness
-     
-     * BUSINESS ADDRESS-BASED INFERENCE:
-       - Country names, city names, postal codes, area codes can indicate currency
-       - Example: "Bangkok" → "THB", "Tokyo" → "JPY", "Singapore" → "SGD", "New York" → "USD"
-     
-     * DEFAULT: If uncertain and no clear indicators, return "USD" as default (most common)
-   
-   - OUTPUT: ISO 4217 currency code (3-letter uppercase: USD, EUR, GBP, JPY, THB, CNY, KRW, SGD, AUD, CAD, INR, etc.)
-   - If multiple currencies are possible, choose the most likely based on strongest indicator
-
-D. DATE:
-   - Find the transaction date printed on the receipt
-   - Format: YYYY/MM/DD (e.g., 2024/12/25)
-   - If Thai calendar (Buddhist year 2560-2570 range), convert: Buddhist year - 543 = Gregorian year
-   - Example: 2568/12/25 → 2025/12/25
-   - If date format is different, convert to YYYY/MM/DD format
-   - Use context clues (day names, month names) to verify accuracy
-
-E. INVOICE_NUMBER:
-   - Look for invoice/receipt numbers (登録番号)
-   - CRITICAL: Only extract invoice numbers that match the format "T" followed by exactly 13 digits (T1234567890123)
-   - Thai receipts: Often "T" followed by 13 digits (T1234567890123) - this is the standard format
-   - Japanese receipts: Various formats, but if it doesn't match "T + 13 digits", return null
-   - VALIDATION RULES:
-     * Must start with "T" (uppercase or lowercase, will be normalized)
-     * Must be followed by exactly 13 digits (0-9)
-     * Examples of VALID formats: T1234567890123, t1234567890123
-     * Examples of INVALID formats: T123456789012 (12 digits), T12345678901234 (14 digits), 1234567890123 (no T), T-1234567890123 (has hyphen)
-   - If the extracted number does NOT match "T + 13 digits" format, return null
-   - If not found or unclear, return null
-   - Do NOT extract phone numbers, dates, or other numbers that happen to have 13 digits
-
-F. EXPENSE_CATEGORY (勘定科目):
-   - You are an excellent accounting assistant working at a Japanese tax accounting firm.
-   - Analyze the receipt content (vendor name, items purchased, location, amount) to determine the accounting category according to Japanese accounting standards.
-   - Follow the priority order and logic below:
-   
-   【判定の優先順位とロジック】
-   1. 店名や品目から「転売・加工・提供用」の仕入れと判断できれば最優先で「仕入高」。
-   2. 飲食の場合、金額と店名から「会議費」か「接待交際費」かを推論。
-   3. 判断に迷う場合は、その理由を categoryReason フィールドに記述し、最も可能性の高いものを選ぶ。
-   
-   【勘定科目リストと判定基準】
-     * "仕入高":
-       - 販売用の食材、商品、材料の買い出し
-       - 転売・加工・提供用の仕入れ
-       - Examples: 食材仕入れ, 商品仕入れ, 材料購入, 卸売, wholesale, ingredients for sale
-     
-     * "広告宣伝費":
-       - チラシ、名刺、SNS広告、宣伝用備品
-       - Examples: チラシ, 名刺, 広告, 宣伝, flyer, business card, advertising, promotion
-     
-     * "消耗品費":
-       - 10万円未満の備品、事務用品、日用品
-       - Examples: 文房具, オフィス用品, 事務用品, 日用品, office supplies, stationery, under 100,000 yen
-     
-     * "会議費":
-       - 1人または少人数の打ち合わせ飲食代
-       - 金額が5,000円以下目安
-       - Examples: 会議, 打ち合わせ, ミーティング, meeting, small group dining under 5,000 yen
-     
-     * "接待交際費":
-       - 取引先への贈答、会食、ゴルフ等
-       - 金額が5,000円超の飲食
-       - Examples: 接待, 交際費, 会食, ゴルフ, entertainment, client dining over 5,000 yen
-     
-     * "旅費交通費":
-       - 電車、タクシー、バス、駐車場、宿泊費
-       - Examples: 電車, タクシー, バス, 駐車場, ホテル, train, taxi, bus, parking, hotel
-     
-     * "通信費":
-       - 切手、宅配便、インターネット、電話代
-       - Examples: 切手, 宅配便, インターネット, 電話代, postage, delivery, internet, phone
-     
-     * "支払手数料":
-       - 振込手数料、代引き手数料、事務手数料
-       - Examples: 振込手数料, 代引き手数料, 事務手数料, transfer fee, cash on delivery fee
-     
-     * "新聞図書費":
-       - 書籍、雑誌、新聞
-       - Examples: 書籍, 雑誌, 新聞, book, magazine, newspaper
-     
-     * "雑費":
-       - 上記いずれにも当てはまらない一時的な費用
-       - Default category when uncertain
-   
-   G. CATEGORY_REASON (判定理由):
-   - Describe the reasoning for the category selection in Japanese
-   - If uncertain, explain why and what factors were considered
-   - Examples: "店名がレストランで金額が8,000円のため接待交際費と判定", "事務用品の購入のため消耗品費と判定"
-   
-   H. CONFIDENCE_SCORE (信頼度):
-   - Provide a confidence score from 0.0 to 1.0
-   - 1.0: Very confident (clear indicators match category)
-   - 0.7-0.9: Confident (most indicators match)
-   - 0.5-0.6: Somewhat confident (some indicators match, but uncertain)
-   - 0.0-0.4: Low confidence (unclear or ambiguous)
-
-I. CORNERS:
-   - Return array of 4 coordinates: [{x, y}, {x, y}, {x, y}, {x, y}]
-   - Order: top-left, top-right, bottom-right, bottom-left
-   - Normalized coordinates (0-1000 range)
-   - These should mark the physical edges of the receipt paper
-
-J. ROTATION_NEEDED (CONSERVATIVE - TEXT ORIENTATION DETECTION):
-   - Analyze the orientation of text lines in the receipt image, specifically focusing on:
-     * Price amounts (numbers with currency symbols)
-     * Item names and descriptions
-     * Text that should be read horizontally (left to right)
-   - Determine how many 90-degree clockwise rotations the image needs to make the text horizontal and readable
-   - Return 'rotation_needed' as a number:
-     * 0: Text is already horizontal and readable (no rotation needed) - DEFAULT if uncertain
-     * 1: Image is rotated 90 degrees clockwise (needs 270-degree counter-clockwise rotation to correct)
-     * 2: Image is rotated 180 degrees (upside down, needs 180-degree rotation to correct)
-     * 3: Image is rotated 90 degrees counter-clockwise (needs 90-degree clockwise rotation to correct)
-   - IMPORTANT: Be conservative - if you are uncertain about the rotation, return 0 (no rotation)
-   - IMPORTANT: Base your judgment on the actual text orientation, NOT on the physical shape of the receipt or logo orientation
-   - IMPORTANT: Only return 1, 2, or 3 if you are VERY CONFIDENT that the text is clearly rotated
-   - If the text orientation is ambiguous or unclear, return 0 to avoid incorrect automatic rotation
-   - Example: If a long receipt is photographed sideways but the prices are readable horizontally, return 0
-   - Example: If prices appear clearly vertically (rotated 90 degrees) and you are confident, return 1
-   - Example: If prices appear clearly upside down and you are confident, return 2
-   - Example: If prices appear clearly rotated 90 degrees counter-clockwise and you are confident, return 3
-   - When in doubt, return 0 (no rotation) - the user can manually rotate if needed
-
-QUALITY REQUIREMENTS:
-- Read every character carefully, especially numbers
-- Double-check amounts by verifying against itemized lists if visible
-- Verify date consistency (e.g., day of week matches date)
-- If text is blurry or unclear, make your best interpretation but flag uncertainty
-- For vendor names, prioritize accuracy over completeness (better to have partial accurate name than full incorrect name)
-
-RETURN:
-- Return the actual printed date/time, NOT the current date/time
-- All extracted values must match what is VISIBLY PRINTED on the receipt
-- If you cannot determine a value with confidence, use null or empty string appropriately`;
-
-        // 画像とプロンプトを送信（gemini-2.5-flashに固定、フォールバックなし）
+        // 画像とプロンプトを送信
         const imagePart = {
             inlineData: {
                 data: base64Image,
@@ -504,190 +293,30 @@ RETURN:
             throw new Error(`Failed to parse JSON response from Gemini API: ${parseError?.message || String(parseError)}`);
         }
 
-        // 金額のクリーニング（￥、¥、฿、カンマ、スペースを除去）
-        if (typeof parsedData.amount === 'string') {
-            // より厳密なクリーニング（スペースも除去）
-            parsedData.amount = parseFloat(parsedData.amount.replace(/[￥¥฿,\s]/g, '')) || 0;
+        // ナンバープレート用: found と plates の検証
+        const found = parsedData.found === true;
+        let plates = parsedData.plates;
+
+        if (!Array.isArray(plates)) {
+            plates = [];
         }
 
-        // 金額の検証（0より大きい値であることを確認）
-        if (parsedData.amount <= 0) {
-            console.warn('Amount is 0 or negative, this might indicate an extraction error');
-        }
-
-        // 店名の検証とクリーニング
-        if (parsedData.vendor) {
-            // 前後の空白を削除
-            parsedData.vendor = parsedData.vendor.trim();
-            // 複数の空白を1つに
-            parsedData.vendor = parsedData.vendor.replace(/\s+/g, ' ');
-        }
-
-        // cornersの検証（4つの座標があるか確認）
-        let corners = parsedData.corners;
-        if (corners && Array.isArray(corners) && corners.length === 4) {
-            // 各座標が正しい形式か確認
-            const validCorners = corners.every((c: any) =>
-                c && typeof c.x === 'number' && typeof c.y === 'number' &&
-                c.x >= 0 && c.x <= 1000 && c.y >= 0 && c.y <= 1000
-            );
-            if (!validCorners) {
-                console.warn('Invalid corners format, setting to undefined');
-                corners = undefined;
-            }
-        } else {
-            corners = undefined;
-        }
-
-        // 通貨の自動判別とタイ暦の変換（全世界対応の高精度判定ロジック）
-        let currency = parsedData.currency || null;
-        let amount = parsedData.amount || 0;
-        let inferenceReason = '';
-
-        // 通貨コードを大文字に正規化（ISO 4217形式）
-        if (currency) {
-            currency = currency.toUpperCase().trim();
-            // 主要なISO 4217通貨コードのリスト（一般的なもの）
-            const validCurrencyCodes = [
-                'USD', 'EUR', 'GBP', 'JPY', 'THB', 'CNY', 'KRW', 'SGD', 'AUD', 'CAD',
-                'INR', 'HKD', 'NZD', 'MXN', 'PHP', 'MYR', 'IDR', 'VND', 'TWD', 'BRL',
-                'CHF', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'RUB', 'ZAR', 'TRY'
-            ];
-            // AIが返した通貨コードが有効かチェック（無効な場合はnullにして後で推論）
-            if (!validCurrencyCodes.includes(currency)) {
-                console.warn(`Invalid currency code from AI: ${currency}, will infer from context`);
-                currency = null;
-            }
-        }
-
-        // 通貨が判別されていない場合、補完的な推論ロジックを適用（AIが推論するので、サーバーサイドは補完的）
-        if (!currency && text) {
-            const lowerText = text.toLowerCase();
-
-            // 通貨記号の検出（優先度最高）
-            if (text.includes('$') && !text.includes('US$') && !text.includes('CA$') && !text.includes('AU$')) {
-                // $記号は複数の通貨で使用されるため、コンテキストから判断
-                if (text.includes('+1') || text.match(/\b\d{3}-\d{3}-\d{4}\b/)) {
-                    currency = 'USD';
-                    inferenceReason = 'usd_symbol_with_us_context';
-                } else {
-                    currency = 'USD'; // デフォルト
-                    inferenceReason = 'dollar_symbol_detected';
-                }
-            } else if (text.includes('€') || text.includes('EUR')) {
-                currency = 'EUR';
-                inferenceReason = 'euro_symbol_detected';
-            } else if (text.includes('£') || text.includes('GBP')) {
-                currency = 'GBP';
-                inferenceReason = 'pound_symbol_detected';
-            } else if (text.includes('฿') || text.includes('บาท') || lowerText.includes('thb')) {
-                currency = 'THB';
-                inferenceReason = 'baht_symbol_detected';
-            } else if (text.includes('¥') || text.includes('円') || lowerText.includes('jpy')) {
-                currency = 'JPY';
-                inferenceReason = 'yen_symbol_detected';
-            } else if (text.includes('₩') || lowerText.includes('krw')) {
-                currency = 'KRW';
-                inferenceReason = 'won_symbol_detected';
-            } else if (text.includes('₹') || lowerText.includes('inr')) {
-                currency = 'INR';
-                inferenceReason = 'rupee_symbol_detected';
-            } else {
-                // 言語ベースの推論
-                const thaiCharPattern = /[ก-ฮ]/;
-                const japaneseCharPattern = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/;
-                const koreanCharPattern = /[가-힣]/;
-                const chineseCharPattern = /[\u4E00-\u9FFF]/;
-
-                if (thaiCharPattern.test(text)) {
-                    currency = 'THB';
-                    inferenceReason = 'thai_characters_detected';
-                } else if (japaneseCharPattern.test(text)) {
-                    currency = 'JPY';
-                    inferenceReason = 'japanese_characters_detected';
-                } else if (koreanCharPattern.test(text)) {
-                    currency = 'KRW';
-                    inferenceReason = 'korean_characters_detected';
-                } else if (chineseCharPattern.test(text)) {
-                    currency = 'CNY';
-                    inferenceReason = 'chinese_characters_detected';
-                } else if (amount >= 5.0 && amount <= 50.0) {
-                    // 小額（ランチ代など）→ USD/EUR/GBP/SGD/AUD/CADの可能性
-                    currency = 'USD';
-                    inferenceReason = 'amount_range_5_50_usd_likely';
-                } else if (amount >= 50.0 && amount <= 500.0) {
-                    // 中額 → USD/EUR/GBP/THB/SGDの可能性
-                    currency = 'USD';
-                    inferenceReason = 'amount_range_50_500_usd_likely';
-                } else if (amount >= 500 && amount <= 5000) {
-                    // 高額 → JPY/KRW/CNYの可能性
-                    currency = 'JPY';
-                    inferenceReason = 'amount_range_500_5000_jpy_likely';
-                } else if (amount >= 5000) {
-                    // 超高額 → JPY/KRW/CNY/VNDの可能性
-                    currency = 'JPY';
-                    inferenceReason = 'amount_range_5000_plus_jpy_likely';
-                } else {
-                    // デフォルト
-                    currency = 'USD';
-                    inferenceReason = 'default_usd_no_indicators';
-                }
-            }
-
-            console.log(`Currency inference (server-side): ${currency}, reason: ${inferenceReason}, amount: ${amount}`);
-        } else if (currency) {
-            // 通貨が既に判定されている場合でも、推論理由を記録
-            if (text.includes('$')) {
-                inferenceReason = 'dollar_symbol_in_response';
-            } else if (text.includes('€')) {
-                inferenceReason = 'euro_symbol_in_response';
-            } else if (text.includes('£')) {
-                inferenceReason = 'pound_symbol_in_response';
-            } else if (text.includes('฿') || text.includes('บาท')) {
-                inferenceReason = 'baht_symbol_in_response';
-            } else if (text.includes('¥') || text.includes('円')) {
-                inferenceReason = 'yen_symbol_in_response';
-            } else {
-                inferenceReason = 'ai_detected';
-            }
-        }
-
-        // タイ暦の変換（dateがタイ暦形式の場合）
-        let date = parsedData.date || '';
-        if (date && (date.includes('256') || date.includes('257'))) {
-            // タイ暦年を検出（2568年など）
-            const thaiYearMatch = date.match(/(\d{4})/);
-            if (thaiYearMatch) {
-                const thaiYear = parseInt(thaiYearMatch[1], 10);
-                if (thaiYear > 2500) {
-                    // タイ暦と判断（2500年以降はタイ暦の可能性が高い）
-                    const westernYear = thaiYear - 543;
-                    date = date.replace(thaiYear.toString(), westernYear.toString());
-                    console.log(`Converted Thai year ${thaiYear} to Western year ${westernYear}`);
-                }
-            }
-        }
-
-        // rotation_neededの検証とデフォルト値設定
-        let rotationNeeded = parsedData.rotation_needed;
-        if (rotationNeeded === undefined || rotationNeeded === null) {
-            rotationNeeded = 0; // デフォルトは回転不要
-        }
-        // 0-3の範囲に制限
-        rotationNeeded = Math.max(0, Math.min(3, Math.round(rotationNeeded)));
+        // 各プレートの corners を検証（4点・0-1000 の座標）
+        const validPlates = plates
+            .filter((plate: any) => plate && Array.isArray(plate.corners) && plate.corners.length === 4)
+            .map((plate: any) => {
+                const validCorners = plate.corners.every((c: any) =>
+                    c && typeof c.x === 'number' && typeof c.y === 'number' &&
+                    c.x >= 0 && c.x <= 1000 && c.y >= 0 && c.y <= 1000
+                );
+                if (!validCorners) return null;
+                return { corners: plate.corners };
+            })
+            .filter(Boolean);
 
         return NextResponse.json({
-            vendor: parsedData.vendor || '',
-            amount: amount,
-            currency: currency,
-            date: date,
-            invoice_number: parsedData.invoice_number || '',
-            corners: corners,
-            expenseCategory: parsedData.expenseCategory || '雑費',
-            categoryReason: parsedData.categoryReason || '',
-            confidenceScore: parsedData.confidenceScore !== undefined ? parsedData.confidenceScore : 0.5,
-            rotation_needed: rotationNeeded,
-            inference_reason: inferenceReason || null, // 通貨判定の推論理由
+            found: found && validPlates.length > 0,
+            plates: validPlates,
             rawText: text, // デバッグ用
         });
     } catch (error) {
