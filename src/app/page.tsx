@@ -150,9 +150,14 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [stream]);
 
+  // カメラ画面に戻ったとき（撮り直し含む）にストリームを再設定する。プレビューで video がアンマウントされるため必須。
   useEffect(() => {
     if (screenMode !== 'camera' || !videoRef.current) return;
     const v = videoRef.current;
+    const streamToUse = streamRef.current;
+    if (streamToUse) {
+      v.srcObject = streamToUse;
+    }
     playAttemptCountRef.current = 0;
     const tryPlay = () => {
       if (playAttemptCountRef.current < 5) {
@@ -160,12 +165,12 @@ export default function Home() {
         v.play().catch(() => {});
       }
     };
-    // 少し遅延してから再生を試行（ストリームが確実に接続されるまで待つ）
-    setTimeout(() => {
+    const t = setTimeout(() => {
       tryPlay();
       const id = setInterval(tryPlay, 400);
       setTimeout(() => clearInterval(id), 2000);
-    }, 200);
+    }, 150);
+    return () => clearTimeout(t);
   }, [screenMode]);
 
   // 画像の明るさを検知（0-255の平均輝度を返す）
@@ -392,14 +397,19 @@ export default function Home() {
     setPreviewImageLoaded(false);
     setCameraError(null);
     setScreenMode('camera');
-    
-    // カメラストリームが存在する場合、ビデオ要素を確実に再生
-    if (streamRef.current && videoRef.current) {
-      const video = videoRef.current;
-      video.srcObject = streamRef.current;
-      setTimeout(() => {
-        video.play().catch(() => {});
-      }, 100);
+    // ストリーム再設定は screenMode の useEffect で行う（video は再マウント後のため、ここでは ref がまだ更新されていない場合がある）
+    // フォールバック: DOM 更新後に再設定を試みる
+    const stream = streamRef.current;
+    if (stream) {
+      const applyStream = () => {
+        const video = videoRef.current;
+        if (video && stream.active) {
+          video.srcObject = stream;
+          video.play().catch(() => {});
+        }
+      };
+      setTimeout(applyStream, 250);
+      setTimeout(applyStream, 600);
     }
   }, [previewImageUrl]);
 
