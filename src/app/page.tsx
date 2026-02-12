@@ -873,7 +873,7 @@ export default function Home() {
 
       <main className="max-w-4xl mx-auto px-4 py-6">
         {screenMode === 'idle' && (
-          <div className="flex flex-col items-center justify-center py-16 gap-8">
+          <div className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] gap-8">
             <p className="text-gray-700 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
             <button
               onClick={startCamera}
