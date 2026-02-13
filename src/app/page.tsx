@@ -84,6 +84,7 @@ export default function Home() {
   const [detectedCorners, setDetectedCorners] = useState<Corners[]>([]); // 複数プレート対応
   const [editLogoOffset, setEditLogoOffset] = useState({ x: 0, y: 0 });
   const [editLogoScale, setEditLogoScale] = useState(1);
+  const [editLogoRotation, setEditLogoRotation] = useState(0); // 度（-30〜30）
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
   const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
@@ -137,6 +138,7 @@ export default function Home() {
     setDetectedCorners([]);
     setEditLogoOffset({ x: 0, y: 0 });
     setEditLogoScale(1);
+    setEditLogoRotation(0);
     playAttemptCountRef.current = 0;
   }, []);
 
@@ -346,6 +348,7 @@ export default function Home() {
           setDetectedCorners(platesCorners);
           setEditLogoOffset({ x: 0, y: 0 });
           setEditLogoScale(1);
+          setEditLogoRotation(0);
           setPreviewImageUrl(URL.createObjectURL(fullResBlob));
           setScreenMode('preview_edit');
         } else {
@@ -360,10 +363,10 @@ export default function Home() {
         setDetectedCorners([corners]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
+        setEditLogoRotation(0);
         setPreviewImageUrl(URL.createObjectURL(fullResBlob));
         setScreenMode('preview_edit');
       } else {
-        // 感知できなかった場合、画面中央にデフォルトの四隅を設定（保険）
         const defaultCorners: Corners = [
           { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
@@ -371,6 +374,7 @@ export default function Home() {
         setDetectedCorners([defaultCorners]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
+        setEditLogoRotation(0);
         setPreviewImageUrl(URL.createObjectURL(fullResBlob));
         setScreenMode('preview_edit');
         setCameraError('AIが自動検出できなかったため、手動で調整してください。');
@@ -399,6 +403,7 @@ export default function Home() {
     setDetectedCorners([]);
     setEditLogoOffset({ x: 0, y: 0 });
     setEditLogoScale(1);
+    setEditLogoRotation(0);
     setPreviewImageLoaded(false);
     setCameraError(null);
     setScreenMode('camera');
@@ -505,35 +510,52 @@ export default function Home() {
         lctx.closePath();
         lctx.fill();
         
-        // Automoniロゴテキスト（マスクサイズに合わせて縮小、純白でメリハリを強化）
+        // Automoロゴテキスト（ゴシック体・マスク幅の90%以内に収める）
+        const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
         lctx.fillStyle = '#ffffff';
-        // 文字幅をマスク幅の90%以内に収めるようにフォントサイズを調整
         const testFontSize = logoCanvas.height * 0.5;
-        lctx.font = `bold ${testFontSize}px system-ui, sans-serif`;
-        const textMetrics = lctx.measureText('Automoni');
+        lctx.font = `bold ${testFontSize}px ${gothicFont}`;
+        const textMetrics = lctx.measureText('Automo');
         const textWidth = textMetrics.width;
-        const maxTextWidth = logoCanvas.width * 0.9; // マスク幅の90%
+        const maxTextWidth = logoCanvas.width * 0.9;
         const fontSize = textWidth > maxTextWidth 
           ? (testFontSize * maxTextWidth / textWidth) 
           : testFontSize;
-        lctx.font = `bold ${Math.max(12, fontSize)}px system-ui, sans-serif`; // 最小12px
+        lctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
         lctx.textAlign = 'center';
         lctx.textBaseline = 'middle';
-        // テキストをより鮮明に（純白で描画）
         lctx.fillStyle = '#ffffff';
-        lctx.fillText('Automoni', logoCanvas.width / 2, logoCanvas.height / 2);
+        lctx.fillText('Automo', logoCanvas.width / 2, logoCanvas.height / 2);
       }
+
+      const degRad = (editLogoRotation * Math.PI) / 180;
+      const cosR = Math.cos(degRad);
+      const sinR = Math.sin(degRad);
 
       // すべてのプレートにマスクを描画
       detectedCorners.forEach((corners) => {
         const plateCenterX = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
         const plateCenterY = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
-        const shifted: Corners = corners.map((c) => ({
+        let shifted: Corners = corners.map((c) => ({
           x: plateCenterX + (c.x - plateCenterX) * scale + ox / w,
           y: plateCenterY + (c.y - plateCenterY) * scale + oy / h,
         })) as Corners;
 
-        // パディングを約2%に拡大（検出枠のわずかなずれや上部「群馬」「580」のはみ出しを確実に隠す）
+        // マスクの角度をユーザー調整（マスクの中心で回転）
+        if (editLogoRotation !== 0) {
+          const maskCx = (shifted[0].x + shifted[1].x + shifted[2].x + shifted[3].x) / 4;
+          const maskCy = (shifted[0].y + shifted[1].y + shifted[2].y + shifted[3].y) / 4;
+          shifted = shifted.map((p) => {
+            const dx = p.x - maskCx;
+            const dy = p.y - maskCy;
+            return {
+              x: maskCx + dx * cosR - dy * sinR,
+              y: maskCy + dx * sinR + dy * cosR,
+            };
+          }) as Corners;
+        }
+
+        // パディングを約2%に拡大
         const pad = 0.02;
         const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
         const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
@@ -548,7 +570,7 @@ export default function Home() {
         }
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale]);
+  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale, editLogoRotation]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
@@ -957,8 +979,21 @@ export default function Home() {
             />
           </div>
           <div className="bg-black/40 backdrop-blur-xl border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-white/90 text-xs font-light">サイズ</span>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-white/90 text-xs font-light w-12">角度</span>
+              <input
+                type="range"
+                min="-30"
+                max="30"
+                step="1"
+                value={editLogoRotation}
+                onChange={(e) => setEditLogoRotation(Number(e.target.value))}
+                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[200px]"
+              />
+              <span className="text-white/70 text-xs tabular-nums w-8">{editLogoRotation}°</span>
+            </div>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-white/90 text-xs font-light w-12">サイズ</span>
               <input
                 type="range"
                 min="0.3"
@@ -967,6 +1002,28 @@ export default function Home() {
                 value={editLogoScale}
                 onChange={(e) => setEditLogoScale(Number(e.target.value))}
                 className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[200px]"
+              />
+            </div>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-white/90 text-xs font-light w-12">位置X</span>
+              <input
+                type="range"
+                min="-20"
+                max="20"
+                step="1"
+                value={editLogoOffset.x}
+                onChange={(e) => setEditLogoOffset((p) => ({ ...p, x: Number(e.target.value) }))}
+                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[120px]"
+              />
+              <span className="text-white/90 text-xs font-light w-12">位置Y</span>
+              <input
+                type="range"
+                min="-20"
+                max="20"
+                step="1"
+                value={editLogoOffset.y}
+                onChange={(e) => setEditLogoOffset((p) => ({ ...p, y: Number(e.target.value) }))}
+                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[120px]"
               />
             </div>
             <div className="flex justify-center gap-3">
