@@ -506,51 +506,45 @@ export default function Home() {
 
     if (detectedCorners.length > 0 && (maskImage?.complete || true)) {
       const scale = editLogoScale;
-      const ox = (editLogoOffset.x / 100) * w;
-      const oy = (editLogoOffset.y / 100) * h;
-      const degRad = (editLogoRotation * Math.PI) / 180;
-      const cosR = Math.cos(degRad);
-      const sinR = Math.sin(degRad);
 
-      // 360度プレート角度同期: 各プレートごとに中心・角度を算出し ctx.rotate で描画
       detectedCorners.forEach((corners) => {
-        const plateCenterX = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
-        const plateCenterY = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
-        let shifted: Corners = corners.map((c) => ({
-          x: plateCenterX + (c.x - plateCenterX) * scale + ox / w,
-          y: plateCenterY + (c.y - plateCenterY) * scale + oy / h,
+        // 重心（スケールしても不変）
+        const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+        const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+        const centerX = centerNx * w;
+        const centerY = centerNy * h;
+
+        // スケール適用後の四隅（サイズ・角度算出用）
+        const scaled: Corners = corners.map((c) => ({
+          x: centerNx + (c.x - centerNx) * scale,
+          y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        if (editLogoRotation !== 0) {
-          const maskCx = (shifted[0].x + shifted[1].x + shifted[2].x + shifted[3].x) / 4;
-          const maskCy = (shifted[0].y + shifted[1].y + shifted[2].y + shifted[3].y) / 4;
-          shifted = shifted.map((p) => ({
-            x: maskCx + (p.x - maskCx) * cosR - (p.y - maskCy) * sinR,
-            y: maskCy + (p.x - maskCx) * sinR + (p.y - maskCy) * cosR,
-          })) as Corners;
-        }
-
-        // 中心点（ピクセル）
-        const centerX = ((shifted[0].x + shifted[1].x + shifted[2].x + shifted[3].x) / 4) * w;
-        const centerY = ((shifted[0].y + shifted[1].y + shifted[2].y + shifted[3].y) / 4) * h;
-        // 左上→右上のベクトルでプレート回転角度（デバイス向きに依存しない）
-        const rotation = Math.atan2(
-          shifted[1].y - shifted[0].y,
-          shifted[1].x - shifted[0].x
+        // 左上→右上からプレートの回転角 baseAngle、ユーザー調整を加えて finalRotation
+        const baseAngle = Math.atan2(
+          scaled[1].y - scaled[0].y,
+          scaled[1].x - scaled[0].x
         );
+        const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
 
-        // プレート幅・高さ（ピクセル）。ロゴは10%大きくして数字を確実に隠す
-        const plateWidth = Math.hypot((shifted[1].x - shifted[0].x) * w, (shifted[1].y - shifted[0].y) * h);
-        const plateHeightLeft = Math.hypot((shifted[3].x - shifted[0].x) * w, (shifted[3].y - shifted[0].y) * h);
-        const plateHeightRight = Math.hypot((shifted[2].x - shifted[1].x) * w, (shifted[2].y - shifted[1].y) * h);
+        // プレート幅・高さ（ピクセル）。ロゴは10%大きく
+        const plateWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
+        const plateHeightLeft = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
+        const plateHeightRight = Math.hypot((scaled[2].x - scaled[1].x) * w, (scaled[2].y - scaled[1].y) * h);
         const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
         const logoWidth = plateWidth * 1.1;
         const logoHeight = plateHeight * 1.1;
 
+        // 位置微調整は回転座標系で適用（プレートの横・縦方向にスライド）
+        const offsetX = (editLogoOffset.x / 100) * logoWidth;
+        const offsetY = (editLogoOffset.y / 100) * logoHeight;
+
         ctx.save();
         ctx.translate(centerX, centerY);
-        ctx.rotate(rotation);
+        ctx.rotate(finalRotation);
+        ctx.translate(offsetX, offsetY);
 
+        // 中心 (0,0) に黒角丸長方形＋白文字 Carkusu をセットで描画（マスクとロゴ角度一致）
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
