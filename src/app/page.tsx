@@ -138,6 +138,7 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 }
 
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
+const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
 
 export default function Home() {
   const [screenMode, setScreenMode] = useState<'idle' | 'camera' | 'preview_edit'>('idle');
@@ -397,7 +398,7 @@ export default function Home() {
         const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
         setCameraError(
           isQuota
-            ? '本日のAI利用回数（20回）に達しました。明日またお試しください。'
+            ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。`
             : (result.error || `エラー ${res.status}`)
         );
         setDetectedCorners([[
@@ -1008,8 +1009,9 @@ export default function Home() {
               </button>
             </div>
             {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
+            <p className="mt-1 text-white/50 text-[10px] font-extralight">本日の検出は{API_DAILY_LIMIT}回まで</p>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/30 backdrop-blur-md border-t border-white/10 flex justify-center">
+          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/30 backdrop-blur-md border-t border-white/10 flex flex-col items-center gap-2">
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
@@ -1021,6 +1023,7 @@ export default function Home() {
                 <div className="w-12 h-12 rounded-full bg-white/40" />
               )}
             </button>
+            <p className="text-white/40 text-[10px] font-extralight">検出 {API_DAILY_LIMIT}回/日</p>
           </div>
         </div>
       )}
@@ -1038,6 +1041,7 @@ export default function Home() {
           {cameraError && (
             <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
+          <p className="text-white/40 text-[10px] font-extralight mt-4">本日の検出は{API_DAILY_LIMIT}回まで</p>
         </main>
       )}
 
@@ -1054,6 +1058,9 @@ export default function Home() {
                 <>
                   <p className="text-amber-200 text-sm font-light text-center">
                     ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
+                  </p>
+                  <p className="text-white/70 text-xs font-extralight text-center">
+                    本日の検出は1日{API_DAILY_LIMIT}回まで。制限に達した場合は明日お試しください。
                   </p>
                   <button
                     type="button"
