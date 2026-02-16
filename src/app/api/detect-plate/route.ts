@@ -50,6 +50,13 @@ function incrementDailyCount(clientId: string): void {
   entry.count += 1;
 }
 
+function getDailyRemaining(clientId: string): number {
+  const today = getTodayDateString();
+  const entry = dailyLimitStore.get(clientId);
+  if (!entry || entry.date !== today) return DAILY_LIMIT_PER_IP;
+  return Math.max(0, DAILY_LIMIT_PER_IP - entry.count);
+}
+
 function isRateLimited(clientId: string): boolean {
   const now = Date.now();
   const cutoff = now - RATE_LIMIT_WINDOW_MS;
@@ -112,6 +119,7 @@ export async function POST(request: NextRequest) {
           error: '1日の利用制限に達しました',
           userMessage: 'Carkusuベータ版の1日あたりの利用制限（20回）に達しました。また明日お試しください',
           status: 429,
+          remainingToday: 0,
         },
         { status: 429 }
       );
@@ -275,6 +283,7 @@ export async function POST(request: NextRequest) {
         parsed.plates = [];
       }
 
+      (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
       return NextResponse.json(parsed);
     } catch (parseError) {
       console.error('JSON parse error:', parseError);

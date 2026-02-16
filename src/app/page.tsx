@@ -134,6 +134,7 @@ export default function Home() {
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
   const [isBlurWarning, setIsBlurWarning] = useState(false);
   const [detectionFailed, setDetectionFailed] = useState(false);
+  const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -375,6 +376,8 @@ export default function Home() {
         const message = (result as { userMessage?: string }).userMessage
           ?? (isQuota ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。` : (result.error || `エラー ${res.status}`));
         setCameraError(message);
+        const remaining = (result as { remainingToday?: number }).remainingToday;
+        setDailyRemaining(remaining !== undefined ? remaining : 0);
         setDetectedCorners([[
           { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
@@ -420,6 +423,8 @@ export default function Home() {
         setEditLogoRotation(0);
         setCameraError('AIが自動検出できなかったため、手動で調整してください。');
       }
+      const remaining = (result as { remainingToday?: number }).remainingToday;
+      if (remaining !== undefined) setDailyRemaining(remaining);
       setIsProcessing(false);
     } catch (e) {
       const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
@@ -940,7 +945,7 @@ export default function Home() {
               </button>
             </div>
             {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
-            <p className="mt-1 text-white/50 text-[10px] font-extralight">本日の検出は{API_DAILY_LIMIT}回まで</p>
+            <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
           </div>
           <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/30 backdrop-blur-md border-t border-white/10 flex flex-col items-center gap-2">
             <button
@@ -954,7 +959,7 @@ export default function Home() {
                 <div className="w-12 h-12 rounded-full bg-white/40" />
               )}
             </button>
-            <p className="text-white/40 text-[10px] font-extralight">検出 {API_DAILY_LIMIT}回/日</p>
+            <p className="text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
           </div>
         </div>
       )}
@@ -972,7 +977,7 @@ export default function Home() {
           {cameraError && (
             <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
-          <p className="text-white/40 text-[10px] font-extralight mt-4">本日の検出は{API_DAILY_LIMIT}回まで</p>
+          <p className="text-white/70 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
         </main>
       )}
 
@@ -990,8 +995,8 @@ export default function Home() {
                   <p className="text-amber-200 text-sm font-light text-center">
                     ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
                   </p>
-                  <p className="text-white/70 text-xs font-extralight text-center">
-                    本日の検出は1日{API_DAILY_LIMIT}回まで。制限に達した場合は明日お試しください。
+                  <p className="text-white/70 text-sm font-light text-center">
+                    本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}。制限に達した場合は明日お試しください。
                   </p>
                   <button
                     type="button"
