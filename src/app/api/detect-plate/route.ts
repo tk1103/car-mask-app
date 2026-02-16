@@ -28,8 +28,10 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // Geminiへのプロンプト（実際の四隅・斜め対応・精度向上版）
+    // 画像サイズをプロンプトに含め、座標系を明確にする（アスペクト比のずれ防止）
     const prompt = `TASK: Detect the exact four corners of the Japanese license plate AS THEY APPEAR IN THE IMAGE (for privacy masking).
+
+IMAGE: The image is exactly ${imageWidth} pixels wide and ${imageHeight} pixels tall.
 
 CRITICAL - SHAPE:
 - Return the REAL quadrilateral of the plate in image space. If the plate is tilted, rotated, or viewed at an angle, the four corners MUST form a trapezoid or parallelogram (NOT an axis-aligned rectangle).
@@ -41,8 +43,10 @@ ANALYSIS STEPS:
 3. Locate the four corners in image order: Top-Left, Top-Right, Bottom-Right, Bottom-Left (as seen in the photo).
 4. If multiple plates exist, detect ALL of them and return each as a separate entry in the plates array.
 
-COORDINATE SYSTEM:
-- Normalized range 0 to 1000. [0,0]=image top-left, [1000,1000]=image bottom-right.
+COORDINATE SYSTEM (match the image aspect ratio above):
+- x: 0 = left edge, 1000 = right edge of the image.
+- y: 0 = top edge, 1000 = bottom edge of the image.
+- So top-left = (0,0), bottom-right = (1000,1000). Use this scale for both axes so coordinates match the ${imageWidth}x${imageHeight} image.
 
 OUTPUT FORMAT (JSON only):
 {

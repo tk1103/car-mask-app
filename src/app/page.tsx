@@ -314,7 +314,7 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は video の同じフレームから作成（プレビュー画像と完全に同一フレーム・座標一致のため）
+      // API送信画像は fullResCanvas から作成（プレビューと必ず同一フレームにし、座標ずれを防ぐ）
       const maxApiWidth = 1600;
       const maxApiHeight = 900;
       const apiScale = Math.min(maxApiWidth / originalW, maxApiHeight / originalH, 1);
@@ -327,7 +327,7 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'high';
-      apiCtx.drawImage(video, 0, 0, apiW, apiH);
+      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
 
       const imageData = apiCtx.getImageData(0, 0, apiW, apiH);
       const data = imageData.data;
