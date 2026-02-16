@@ -317,10 +317,9 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は fullResCanvas から作成（プレビューと必ず同一フレームにし、座標ずれを防ぐ）
-      const maxApiWidth = 1600;
-      const maxApiHeight = 900;
-      const apiScale = Math.min(maxApiWidth / originalW, maxApiHeight / originalH, 1);
+      // API送信画像は長辺1024に制限（横向き・高解像度でもアップロードとGeminiを軽くし、タイムアウトを防ぐ）
+      const maxApiLongEdge = 1024;
+      const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
       const apiCanvas = document.createElement('canvas');
@@ -361,7 +360,27 @@ export default function Home() {
       const blurScore = getBlurScore(apiCanvas);
       setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
 
-      const res = await fetch('/api/detect-plate', { method: 'POST', body: formData });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60_000); // 60秒でタイムアウト
+      let res: Response;
+      try {
+        res = await fetch('/api/detect-plate', { method: 'POST', body: formData, signal: controller.signal });
+      } catch (fetchErr: unknown) {
+        clearTimeout(timeoutId);
+        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+          setCameraError('解析がタイムアウトしました。通信環境を確認してもう一度お試しください。');
+        } else {
+          setCameraError(fetchErr instanceof Error ? fetchErr.message : '解析に失敗しました');
+        }
+        setDetectedCorners([[
+          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
+          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
+        ]]);
+        setDetectionFailed(true);
+        setIsProcessing(false);
+        return;
+      }
+      clearTimeout(timeoutId);
       const result = await res.json();
 
       if (!res.ok) {

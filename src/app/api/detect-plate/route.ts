@@ -170,27 +170,48 @@ export async function POST(request: NextRequest) {
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
-    const geminiResponse = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              { inlineData: { data: base64Image, mimeType } },
-            ],
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 55_000); // 55秒でタイムアウト（クライアント60sより短く）
+    let geminiResponse: Response;
+    try {
+      geminiResponse = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                { inlineData: { data: base64Image, mimeType } },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            topP: 0.95,
+            topK: 40,
+            responseMimeType: 'application/json',
+            responseSchema: RESPONSE_SCHEMA,
           },
-        ],
-        generationConfig: {
-          temperature: 0,
-          topP: 0.95,
-          topK: 40,
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-        },
-      }),
-    });
+        }),
+      });
+    } catch (fetchErr: unknown) {
+      clearTimeout(timeoutId);
+      if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+        return NextResponse.json(
+          {
+            found: false,
+            error: '解析がタイムアウトしました',
+            userMessage: '解析に時間がかかりすぎました。もう一度お試しください。',
+            status: 504,
+          },
+          { status: 504 }
+        );
+      }
+      throw fetchErr;
+    }
+    clearTimeout(timeoutId);
 
     if (!geminiResponse.ok) {
       let errorBody: string;
