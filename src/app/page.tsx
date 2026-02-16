@@ -6,7 +6,7 @@ import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Ins
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
-// API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 は左上原点（y=0=上端）なのでそのまま
+// API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 座標系に完全一致（Y軸反転なし）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
   return plate.corners.map((c) => ({
     x: c.x / 1000,
@@ -396,11 +396,9 @@ export default function Home() {
         }
         const raw = (result.error || '') as string;
         const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
-        setCameraError(
-          isQuota
-            ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。`
-            : (result.error || `エラー ${res.status}`)
-        );
+        const message = (result as { userMessage?: string }).userMessage
+          ?? (isQuota ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。` : (result.error || `エラー ${res.status}`));
+        setCameraError(message);
         setDetectedCorners([[
           { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
@@ -971,6 +969,21 @@ export default function Home() {
         </div>
       )}
 
+      {cameraError && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+          <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl px-6 py-5 max-w-sm shadow-2xl flex flex-col items-center gap-4">
+            <p className="text-white font-light text-sm text-center leading-relaxed">{cameraError}</p>
+            <button
+              type="button"
+              onClick={() => setCameraError(null)}
+              className="px-6 py-2.5 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
       {screenMode === 'camera' && (
         <div className="fixed inset-0 z-0 bg-black">
           <video
@@ -991,7 +1004,7 @@ export default function Home() {
                 <p className="text-white/80 text-xs font-extralight text-center max-w-xs">ナンバープレートを検出しています</p>
               </div>
               <div className="w-full min-h-[100px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
-                <span className="text-white/40 text-xs">広告スペース</span>
+                <span className="text-white/40 text-xs">AD SPACE (BETA)</span>
               </div>
             </div>
           )}
@@ -1094,7 +1107,7 @@ export default function Home() {
                   <p className="text-white/60 text-xs font-extralight">ナンバープレートを検出しています</p>
                 </div>
                 <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
-                  <span className="text-white/40 text-xs">広告スペース</span>
+                  <span className="text-white/40 text-xs">AD SPACE (BETA)</span>
                 </div>
               </div>
             )}
@@ -1207,7 +1220,7 @@ export default function Home() {
               </div>
             )}
             <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
-              <span className="text-white/40 text-xs">広告スペース</span>
+              <span className="text-white/40 text-xs">AD SPACE (BETA)</span>
             </div>
           </div>
         </div>

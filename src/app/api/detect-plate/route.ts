@@ -2,8 +2,36 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-// 2026年3月の2.0系廃止を見越し、Gemini 3 系に統一（安定版は gemini-3-flash に切り替え可）
-const MODEL_NAME = 'gemini-3-flash-preview';
+// 2026年3月廃止対応: Gemini 3 系に統一
+const MODEL_NAME = 'gemini-3-flash';
+
+// 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
+const RATE_LIMIT_PER_MINUTE = 5;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+
+const rateLimitStore = new Map<string, number[]>();
+
+function getClientId(request: NextRequest): string {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) {
+    const first = forwarded.split(',')[0]?.trim() ?? '';
+    if (first) return first;
+  }
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp) return realIp;
+  return 'anonymous';
+}
+
+function isRateLimited(clientId: string): boolean {
+  const now = Date.now();
+  const cutoff = now - RATE_LIMIT_WINDOW_MS;
+  let timestamps = rateLimitStore.get(clientId) ?? [];
+  timestamps = timestamps.filter((t) => t > cutoff);
+  if (timestamps.length >= RATE_LIMIT_PER_MINUTE) return true;
+  timestamps.push(now);
+  rateLimitStore.set(clientId, timestamps);
+  return false;
+}
 
 // ナンバープレート検知専用レスポンススキーマ: found + plates[]（各要素は found と corners: {x,y}[]）
 const RESPONSE_SCHEMA = {
@@ -47,6 +75,19 @@ const RESPONSE_SCHEMA = {
 
 export async function POST(request: NextRequest) {
   try {
+    const clientId = getClientId(request);
+    if (isRateLimited(clientId)) {
+      return NextResponse.json(
+        {
+          found: false,
+          error: 'リクエストが多すぎます',
+          userMessage: 'しばらく待ってからもう一度お試しください。（1分間に5回まで）',
+          status: 429,
+        },
+        { status: 429 }
+      );
+    }
+
     const formData = await request.formData();
     const imageFile = formData.get('image') as File;
     const imageWidth = parseInt(formData.get('width') as string) || 0;
@@ -68,24 +109,12 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // ナンバープレート検知専用プロンプト（レシート・領収書・他用途の記述は一切含めない）
-    const prompt = `タスク: 画像内の日本のナンバープレート（自動車の登録番号標）の四隅のみを検出し、指定スキーマのJSONだけを返す。
+    // ナンバープレート四隅検知専用（0-1000）。余計な解析ロジックは含めない
+    const prompt = `画像内の日本のナンバープレートの四隅を、0〜1000の正規化座標で検出する。
 
-座標系:
-- 画像は幅 ${imageWidth}px・高さ ${imageHeight}px。座標は 0〜1000 で正規化する。
-- x: 0=左端、1000=右端。y: 0=上端、1000=下端（画面座標。上端が0）。
+画像: 幅 ${imageWidth}px、高さ ${imageHeight}px。座標は x,y ともに 0=左端/上端、1000=右端/下端。
 
-検出対象:
-- ナンバープレートのみ。上段（地域名・分類番号）と下段（ひらがな＋数字）を含む、プレートだけを囲む最小の四角形。
-- 車体・モニター枠・周囲の余白は含めない。レシート・領収書・その他文書は対象外。
-
-四隅の順序（厳守）:
-- 時計回りに 左上 → 右上 → 右下 → 左下 の4点を返す。
-- プレートが傾いている場合は、その傾きに合わせた四角形の4頂点をこの順で返す。
-
-出力:
-- プレートが1つも写っていない場合: found=false, plates=[]。
-- 検出したプレートごとに plates に1要素ずつ、found=true と corners（4点の配列）を入れる。`;
+出力: 四隅のみ。時計回りに 左上・右上・右下・左下 の4点。プレートなしなら found=false, plates=[]。`;
 
     const url = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
@@ -134,13 +163,14 @@ export async function POST(request: NextRequest) {
         geminiResponse.status === 429 ||
         /quota|rate limit|exceeded/i.test(String(errorMessage));
       const userMessage = isQuota
-        ? '本日のAI利用回数（20回）に達しました。明日またお試しください。'
+        ? '本日の検出回数の上限に達しました。明日またお試しください。'
         : errorMessage;
 
       return NextResponse.json(
         {
           found: false,
           error: userMessage,
+          userMessage,
           status: geminiResponse.status,
           rawResponse: errorBody?.substring?.(0, 1000),
         },
