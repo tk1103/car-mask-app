@@ -6,6 +6,20 @@ import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Ins
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
+// API返却の四隅を必ず TL, TR, BR, BL の順に並べ替え（角度・ねじれ防止）
+function normalizeCornersOrder(corners: Corners): Corners {
+  const [a, b, c, d] = corners;
+  const pts = [a, b, c, d];
+  const byY = [...pts].sort((p, q) => p.y - q.y);
+  const top = [byY[0], byY[1]].sort((p, q) => p.x - q.x);
+  const bottom = [byY[2], byY[3]].sort((p, q) => p.x - q.x);
+  const topLeft = top[0];
+  const topRight = top[1];
+  const bottomLeft = bottom[0];
+  const bottomRight = bottom[1];
+  return [topLeft, topRight, bottomRight, bottomLeft];
+}
+
 // 四角形に画像をパース補正して描画（2三角形でアフィン変換・斜め対応強化版）
 function drawImageInQuad(
   ctx: CanvasRenderingContext2D,
@@ -395,7 +409,7 @@ export default function Home() {
           );
         if (platesCorners.length > 0) {
           setDetectionFailed(false);
-          setDetectedCorners(platesCorners);
+          setDetectedCorners(platesCorners.map((c) => normalizeCornersOrder(c)));
           setEditLogoOffset({ x: 0, y: 0 });
           setEditLogoScale(1);
           setEditLogoRotation(0);
@@ -409,10 +423,11 @@ export default function Home() {
         }
       } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
         setDetectionFailed(false);
-        setDetectedCorners([result.corners.map((c: { x: number; y: number }) => ({
+        const single: Corners = result.corners.map((c: { x: number; y: number }) => ({
           x: c.x / 1000,
           y: c.y / 1000,
-        })) as Corners]);
+        })) as Corners;
+        setDetectedCorners([normalizeCornersOrder(single)]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setEditLogoRotation(0);
@@ -605,8 +620,8 @@ export default function Home() {
           }) as Corners;
         }
 
-        // 検出がプレートの一部だけ返す場合に備え、わずかに外側に拡張（2%）して数字がはみ出さないようにする
-        const pad = 0.02;
+        // わずかに外側に拡張（1%）して端の切り欠きを防ぐ。大きくなりすぎないよう控えめに
+        const pad = 0.01;
         const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
         const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
         const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };

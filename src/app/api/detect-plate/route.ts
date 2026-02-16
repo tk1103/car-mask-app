@@ -28,47 +28,25 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // 画像サイズをプロンプトに含め、座標系を明確にする（アスペクト比のずれ防止）
-    const prompt = `TASK: Detect the exact four corners of the Japanese license plate AS THEY APPEAR IN THE IMAGE (for privacy masking).
+    // 画像サイズをプロンプトに含め、サイズ・角度の精度を上げる
+    const prompt = `TASK: Detect the four corners of the Japanese license plate for precise masking. Return a TIGHT quad that matches the plate's SIZE and ANGLE exactly.
 
-IMAGE: The image is exactly ${imageWidth} pixels wide and ${imageHeight} pixels tall.
+IMAGE: ${imageWidth} x ${imageHeight} pixels. x: 0=left, 1000=right. y: 0=top, 1000=bottom.
 
-CRITICAL - SHAPE:
-- Return the REAL quadrilateral of the plate in image space. If the plate is tilted, rotated, or viewed at an angle, the four corners MUST form a trapezoid or parallelogram (NOT an axis-aligned rectangle).
-- Do NOT return a horizontal bounding box. Return the actual corner positions so that the quad matches the plate's slant and perspective.
+SIZE (critical):
+- Return the SMALLEST quad that encloses ONLY the plate. Do NOT include monitor bezel, car body, or surrounding area.
+- The quad must include both the top line (地域名・分類番号) and the number line (ひらがな + numbers). No extra margin.
 
-ANALYSIS STEPS:
-1. Identify the ENTIRE license plate (ナンバープレート): the full rectangle from top edge to bottom edge.
-2. The quad must cover BOTH: (a) the top line (地域名・分類番号 e.g. "多摩 583", "ま") AND (b) the main number line (ひらがな + numbers e.g. "11-73"). Do NOT return only the top part; extend to the bottom edge of the plate.
-3. Locate the four corners in image order: Top-Left, Top-Right, Bottom-Right, Bottom-Left (as seen in the photo).
-4. If multiple plates exist, detect ALL of them and return each as a separate entry in the plates array.
+ANGLE (critical):
+- The quad must have the SAME orientation as the plate in the image. If the plate is horizontal, return a horizontal quad (same y for top two corners, same y for bottom two). If the plate is tilted, return the same tilt. Do not add rotation.
 
-COORDINATE SYSTEM (match the image aspect ratio above):
-- x: 0 = left edge, 1000 = right edge of the image.
-- y: 0 = top edge, 1000 = bottom edge of the image.
-- So top-left = (0,0), bottom-right = (1000,1000). Use this scale for both axes so coordinates match the ${imageWidth}x${imageHeight} image.
+CORNER ORDER (strict):
+- Exactly in this order: Top-Left, Top-Right, Bottom-Right, Bottom-Left. So: first point = top-left, second = top-right, third = bottom-right, fourth = bottom-left. This order defines a rectangle/parallelogram with correct orientation.
 
-OUTPUT FORMAT (JSON only):
-{
-  "found": true/false,
-  "plates": [
-    {
-      "corners": [
-        {"x": number, "y": number},
-        {"x": number, "y": number},
-        {"x": number, "y": number},
-        {"x": number, "y": number}
-      ]
-    }
-  ]
-}
+OUTPUT (JSON only):
+{"found": true/false, "plates": [{"corners": [{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]}
 
-STRICT RULES:
-- Return the FULL plate boundary (top to bottom, left to right), NOT just the upper half. NOT the car body or headlights.
-- If no plate is clearly visible, return {"found": false, "plates": []}.
-- Detect plates even when they appear small; no minimum size. Works for plates on screens/photos too.
-- No conversational text or markdown.
-- If the plate appears slanted, corners must form that slant. Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.`;
+RULES: Plate only, tight boundary. If no plate visible: {"found": false, "plates": []}. No extra text.`;
 
     // REST API (v1) で直接呼び出し
     // ListModels で確認できたマルチモーダル対応モデルを使用
