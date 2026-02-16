@@ -317,8 +317,8 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は長辺1024に制限（横向き・高解像度でもアップロードとGeminiを軽くし、タイムアウトを防ぐ）
-      const maxApiLongEdge = 1024;
+      // API送信画像は長辺768に制限（横向き・高解像度でもアップロードとGeminiを軽くし、タイムアウトを防ぐ）
+      const maxApiLongEdge = 768;
       const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
@@ -343,13 +343,8 @@ export default function Home() {
       apiCtx.putImageData(imageData, 0, 0);
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.75);
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.5);
       });
-
-      const formData = new FormData();
-      formData.append('image', apiBlob, 'photo.jpg');
-      formData.append('width', apiW.toString());
-      formData.append('height', apiH.toString());
 
       // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は fetch と並列で実行しリクエストを遅らせない
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
@@ -360,13 +355,36 @@ export default function Home() {
       const blurScore = getBlurScore(apiCanvas);
       setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60_000); // 60秒でタイムアウト
+      const createFormData = () => {
+        const fd = new FormData();
+        fd.append('image', apiBlob, 'photo.jpg');
+        fd.append('width', apiW.toString());
+        fd.append('height', apiH.toString());
+        return fd;
+      };
+
+      const performFetch = async (retryCount: number): Promise<Response> => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 25_000); // 25秒でタイムアウト
+        try {
+          const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
+          clearTimeout(timeoutId);
+          return res;
+        } catch (fetchErr: unknown) {
+          clearTimeout(timeoutId);
+          if (retryCount === 0 && (fetchErr instanceof Error && fetchErr.name === 'AbortError' || fetchErr instanceof TypeError)) {
+            setCameraError('画像サイズを小さくして再試行しています...');
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            return performFetch(1);
+          }
+          throw fetchErr;
+        }
+      };
+
       let res: Response;
       try {
-        res = await fetch('/api/detect-plate', { method: 'POST', body: formData, signal: controller.signal });
+        res = await performFetch(0);
       } catch (fetchErr: unknown) {
-        clearTimeout(timeoutId);
         if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
           setCameraError('解析がタイムアウトしました。通信環境を確認してもう一度お試しください。');
         } else {
@@ -380,7 +398,6 @@ export default function Home() {
         setIsProcessing(false);
         return;
       }
-      clearTimeout(timeoutId);
       const result = await res.json();
 
       if (!res.ok) {
@@ -396,7 +413,7 @@ export default function Home() {
           ?? (isQuota ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。` : (result.error || `エラー ${res.status}`));
         setCameraError(message);
         const remaining = (result as { remainingToday?: number }).remainingToday;
-        setDailyRemaining(remaining !== undefined ? remaining : 0);
+        if (remaining !== undefined) setDailyRemaining(remaining);
         setDetectedCorners([[
           { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }

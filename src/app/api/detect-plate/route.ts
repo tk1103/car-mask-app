@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
 // 2026年3月廃止対応: Gemini 3 系（v1beta で responseSchema 対応）
 const MODEL_NAME = 'gemini-3-flash-preview';
@@ -132,6 +133,7 @@ export async function POST(request: NextRequest) {
           error: 'リクエストが多すぎます',
           userMessage: 'しばらく待ってからもう一度お試しください。（1分間に5回まで）',
           status: 429,
+          remainingToday: getDailyRemaining(clientId),
         },
         { status: 429 }
       );
@@ -160,18 +162,14 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // ナンバープレート四隅検知専用（0-1000）。余計な解析ロジックは含めない
-    const prompt = `画像内の日本のナンバープレートの四隅を、0〜1000の正規化座標で検出する。
-
-画像: 幅 ${imageWidth}px、高さ ${imageHeight}px。座標は x,y ともに 0=左端/上端、1000=右端/下端。
-
-出力: 四隅のみ。時計回りに 左上・右上・右下・左下 の4点。プレートなしなら found=false, plates=[]。`;
+    // ナンバープレート四隅検知専用（0-1000）。プロンプトを最小化してレスポンス速度を優先
+    const prompt = `日本のナンバープレートの四隅を検出。座標0-1000（左上・右上・右下・左下）。画像: ${imageWidth}x${imageHeight}px。プレートなしなら found=false, plates=[]。`;
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 55_000); // 55秒でタイムアウト（クライアント60sより短く）
+    const timeoutId = setTimeout(() => controller.abort(), 24_000); // 24秒でタイムアウト（クライアント25sより短く）
     let geminiResponse: Response;
     try {
       geminiResponse = await fetch(url, {
@@ -205,6 +203,7 @@ export async function POST(request: NextRequest) {
             error: '解析がタイムアウトしました',
             userMessage: '解析に時間がかかりすぎました。もう一度お試しください。',
             status: 504,
+            remainingToday: getDailyRemaining(clientId),
           },
           { status: 504 }
         );
