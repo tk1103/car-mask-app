@@ -31,70 +31,47 @@ function normalizeCornersOrder(corners: Corners): Corners {
   return [ccw[0], ccw[3], ccw[2], ccw[1]] as Corners;
 }
 
-// 四角形に画像をパース補正して描画（2三角形でアフィン変換・斜め対応強化版）
-function drawImageInQuad(
+// 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（角丸黒背景＋白文字、任意で透過）
+function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement | HTMLCanvasElement,
-  corners: Corners,
-  canvasWidth: number,
-  canvasHeight: number
+  logoWidth: number,
+  logoHeight: number,
+  options?: { backgroundAlpha?: number }
 ) {
-  const [p0, p1, p2, p3] = corners.map((c) => ({
-    x: c.x * canvasWidth,
-    y: c.y * canvasHeight,
-  }));
+  const alpha = options?.backgroundAlpha ?? 0.95;
+  const halfW = logoWidth / 2;
+  const halfH = logoHeight / 2;
+  const cornerRadius = Math.min(logoHeight * 0.1, halfW, halfH);
 
-  // より正確なパース補正のため、透視変換行列を使用
-  const drawTriangle = (
-    sx0: number,
-    sy0: number,
-    sx1: number,
-    sy1: number,
-    sx2: number,
-    sy2: number,
-    dx0: number,
-    dy0: number,
-    dx1: number,
-    dy1: number,
-    dx2: number,
-    dy2: number
-  ) => {
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(dx0, dy0);
-    ctx.lineTo(dx1, dy1);
-    ctx.lineTo(dx2, dy2);
-    ctx.closePath();
-    ctx.clip();
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(-halfW + cornerRadius, -halfH);
+  ctx.lineTo(halfW - cornerRadius, -halfH);
+  ctx.quadraticCurveTo(halfW, -halfH, halfW, -halfH + cornerRadius);
+  ctx.lineTo(halfW, halfH - cornerRadius);
+  ctx.quadraticCurveTo(halfW, halfH, halfW - cornerRadius, halfH);
+  ctx.lineTo(-halfW + cornerRadius, halfH);
+  ctx.quadraticCurveTo(-halfW, halfH, -halfW, halfH - cornerRadius);
+  ctx.lineTo(-halfW, -halfH + cornerRadius);
+  ctx.quadraticCurveTo(-halfW, -halfH, -halfW + cornerRadius, -halfH);
+  ctx.closePath();
+  ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+  ctx.fill();
 
-    // アフィン変換行列を計算（より正確なパース補正）
-    const denom = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0);
-    if (Math.abs(denom) < 1e-10) {
-      ctx.restore();
-      return;
-    }
-    
-    // アフィン変換パラメータを計算
-    const a = ((dx1 - dx0) * (sy2 - sy0) - (dx2 - dx0) * (sy1 - sy0)) / denom;
-    const b = ((dx1 - dx0) * (sx0 - sx2) - (dx2 - dx0) * (sx0 - sx1)) / denom;
-    const c = ((dy1 - dy0) * (sy2 - sy0) - (dy2 - dy0) * (sy1 - sy0)) / denom;
-    const d = ((dy1 - dy0) * (sx0 - sx2) - (dy2 - dy0) * (sx0 - sx1)) / denom;
-    const e = dx0 - a * sx0 - b * sy0;
-    const f = dy0 - c * sx0 - d * sy0;
-    
-    // 変換を適用
-    ctx.setTransform(a, c, b, d, e, f);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, 1, 1);
-    ctx.restore();
-  };
-
-  // 四角形を2つの三角形に分割して描画（斜めのプレートにも対応）
-  // 三角形1: 左上、右上、左下
-  drawTriangle(0, 0, 1, 0, 0, 1, p0.x, p0.y, p1.x, p1.y, p3.x, p3.y);
-  // 三角形2: 右上、右下、左下
-  drawTriangle(1, 0, 1, 1, 0, 1, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+  const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
+  ctx.fillStyle = '#ffffff';
+  const testFontSize = logoHeight * 0.5;
+  ctx.font = `bold ${testFontSize}px ${gothicFont}`;
+  const textMetrics = ctx.measureText('Carkusu');
+  const maxTextWidth = logoWidth * 0.9;
+  const fontSize = textMetrics.width > maxTextWidth
+    ? (testFontSize * maxTextWidth / textMetrics.width)
+    : testFontSize;
+  ctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Carkusu', 0, 0);
+  ctx.restore();
 }
 
 // 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
@@ -531,75 +508,11 @@ export default function Home() {
       const scale = editLogoScale;
       const ox = (editLogoOffset.x / 100) * w;
       const oy = (editLogoOffset.y / 100) * h;
-
-      // ロゴCanvasを一度だけ作成（全プレートで共有、最初のプレートのサイズを基準に）
-      const firstCorners = detectedCorners[0];
-      const centerX = (firstCorners[0].x + firstCorners[1].x + firstCorners[2].x + firstCorners[3].x) / 4;
-      const centerY = (firstCorners[0].y + firstCorners[1].y + firstCorners[2].y + firstCorners[3].y) / 4;
-      const tempShifted: Corners = firstCorners.map((c) => ({
-        x: centerX + (c.x - centerX) * scale,
-        y: centerY + (c.y - centerY) * scale,
-      })) as Corners;
-
-      // 四隅から実際のプレートサイズを計算（対角線の平均）
-      const width1 = Math.hypot(tempShifted[1].x - tempShifted[0].x, tempShifted[1].y - tempShifted[0].y) * w;
-      const width2 = Math.hypot(tempShifted[2].x - tempShifted[3].x, tempShifted[2].y - tempShifted[3].y) * w;
-      const height1 = Math.hypot(tempShifted[3].x - tempShifted[0].x, tempShifted[3].y - tempShifted[0].y) * h;
-      const height2 = Math.hypot(tempShifted[2].x - tempShifted[1].x, tempShifted[2].y - tempShifted[1].y) * h;
-      const avgWidth = (width1 + width2) / 2;
-      const avgHeight = (height1 + height2) / 2;
-      
-      // ロゴサイズをプレートよりやや大きく（はみ出し防止・プレート全体を確実に隠す）
-      const sizeScale = 1.08;
-      const logoWidth = avgWidth * sizeScale;
-      const logoHeight = avgHeight * sizeScale;
-      
-      const logoCanvas = document.createElement('canvas');
-      logoCanvas.width = logoWidth;
-      logoCanvas.height = logoHeight;
-      const lctx = logoCanvas.getContext('2d');
-      if (lctx) {
-        // 角丸の半径を計算（高さの10%程度）
-        const cornerRadius = logoCanvas.height * 0.1;
-        
-        // 角丸の長方形を描画
-        lctx.fillStyle = '#000000'; // 真っ黒でメリハリを強化
-        lctx.beginPath();
-        lctx.moveTo(cornerRadius, 0);
-        lctx.lineTo(logoCanvas.width - cornerRadius, 0);
-        lctx.quadraticCurveTo(logoCanvas.width, 0, logoCanvas.width, cornerRadius);
-        lctx.lineTo(logoCanvas.width, logoCanvas.height - cornerRadius);
-        lctx.quadraticCurveTo(logoCanvas.width, logoCanvas.height, logoCanvas.width - cornerRadius, logoCanvas.height);
-        lctx.lineTo(cornerRadius, logoCanvas.height);
-        lctx.quadraticCurveTo(0, logoCanvas.height, 0, logoCanvas.height - cornerRadius);
-        lctx.lineTo(0, cornerRadius);
-        lctx.quadraticCurveTo(0, 0, cornerRadius, 0);
-        lctx.closePath();
-        lctx.fill();
-        
-        // Carkusuロゴテキスト（ゴシック体・マスク幅の90%以内に収める）
-        const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
-        lctx.fillStyle = '#ffffff';
-        const testFontSize = logoCanvas.height * 0.5;
-        lctx.font = `bold ${testFontSize}px ${gothicFont}`;
-        const textMetrics = lctx.measureText('Carkusu');
-        const textWidth = textMetrics.width;
-        const maxTextWidth = logoCanvas.width * 0.9;
-        const fontSize = textWidth > maxTextWidth 
-          ? (testFontSize * maxTextWidth / textWidth) 
-          : testFontSize;
-        lctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
-        lctx.textAlign = 'center';
-        lctx.textBaseline = 'middle';
-        lctx.fillStyle = '#ffffff';
-        lctx.fillText('Carkusu', logoCanvas.width / 2, logoCanvas.height / 2);
-      }
-
       const degRad = (editLogoRotation * Math.PI) / 180;
       const cosR = Math.cos(degRad);
       const sinR = Math.sin(degRad);
 
-      // すべてのプレートにマスクを描画
+      // 360度プレート角度同期: 各プレートごとに中心・角度を算出し ctx.rotate で描画
       detectedCorners.forEach((corners) => {
         const plateCenterX = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
         const plateCenterY = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
@@ -608,33 +521,45 @@ export default function Home() {
           y: plateCenterY + (c.y - plateCenterY) * scale + oy / h,
         })) as Corners;
 
-        // マスクの角度をユーザー調整（マスクの中心で回転）
         if (editLogoRotation !== 0) {
           const maskCx = (shifted[0].x + shifted[1].x + shifted[2].x + shifted[3].x) / 4;
           const maskCy = (shifted[0].y + shifted[1].y + shifted[2].y + shifted[3].y) / 4;
-          shifted = shifted.map((p) => {
-            const dx = p.x - maskCx;
-            const dy = p.y - maskCy;
-            return {
-              x: maskCx + dx * cosR - dy * sinR,
-              y: maskCy + dx * sinR + dy * cosR,
-            };
-          }) as Corners;
+          shifted = shifted.map((p) => ({
+            x: maskCx + (p.x - maskCx) * cosR - (p.y - maskCy) * sinR,
+            y: maskCy + (p.x - maskCx) * sinR + (p.y - maskCy) * cosR,
+          })) as Corners;
         }
 
-        // プレートの端がはみ出さないよう、四隅を外側に1.5%拡張
-        const pad = 0.015;
-        const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
-        const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
-        const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
-        const c3: Corner = { x: Math.max(0, shifted[3].x - pad), y: Math.min(1, shifted[3].y + pad) };
-        const logoCorners: Corners = [c0, c1, c2, c3];
+        // 中心点（ピクセル）
+        const centerX = ((shifted[0].x + shifted[1].x + shifted[2].x + shifted[3].x) / 4) * w;
+        const centerY = ((shifted[0].y + shifted[1].y + shifted[2].y + shifted[3].y) / 4) * h;
+        // 左上→右上のベクトルでプレート回転角度（デバイス向きに依存しない）
+        const rotation = Math.atan2(
+          shifted[1].y - shifted[0].y,
+          shifted[1].x - shifted[0].x
+        );
+
+        // プレート幅・高さ（ピクセル）。ロゴは10%大きくして数字を確実に隠す
+        const plateWidth = Math.hypot((shifted[1].x - shifted[0].x) * w, (shifted[1].y - shifted[0].y) * h);
+        const plateHeightLeft = Math.hypot((shifted[3].x - shifted[0].x) * w, (shifted[3].y - shifted[0].y) * h);
+        const plateHeightRight = Math.hypot((shifted[2].x - shifted[1].x) * w, (shifted[2].y - shifted[1].y) * h);
+        const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
+        const logoWidth = plateWidth * 1.1;
+        const logoHeight = plateHeight * 1.1;
+
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(rotation);
 
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-          drawImageInQuad(ctx, maskImage, logoCorners, w, h);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(maskImage, -logoWidth / 2, -logoHeight / 2, logoWidth, logoHeight);
         } else {
-          drawImageInQuad(ctx, logoCanvas, logoCorners, w, h);
+          drawCarkusuLogoAtOrigin(ctx, logoWidth, logoHeight, { backgroundAlpha: 0.92 });
         }
+
+        ctx.restore();
       });
     }
   }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale, editLogoRotation]);
