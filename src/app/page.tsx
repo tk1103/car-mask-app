@@ -6,15 +6,15 @@ import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Ins
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
-// API座標をクライアント座標に変換（0-1000 → 0-1）。Y軸が反転している場合の補正を行う
+// API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 は左上原点（y=0=上端）なのでそのまま
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
   return plate.corners.map((c) => ({
     x: c.x / 1000,
-    y: 1 - c.y / 1000, // モデルがy=0を下端にしている場合の反転補正
+    y: c.y / 1000,
   })) as Corners;
 }
 
-// 四隅を重心に対する角度で並べ替え、TL→TR→BR→BL の順にする（傾いた四角でもねじれない）
+// 四隅を重心からの角度でソートし、左上（x+y最小）から時計回りに TL→TR→BR→BL で並べる
 function normalizeCornersOrder(corners: Corners): Corners {
   const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
   const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
@@ -24,12 +24,11 @@ function normalizeCornersOrder(corners: Corners): Corners {
   }));
   withAngle.sort((a, b) => a.angle - b.angle);
   const ordered = withAngle.map(({ x, y }) => ({ x, y }));
-  const topLeftIdx = ordered.reduce((best, _, i) => {
-    const sum = ordered[i].x + ordered[i].y;
-    return sum < ordered[best].x + ordered[best].y ? i : best;
-  }, 0);
-  const rot = [ordered[topLeftIdx], ordered[(topLeftIdx + 1) % 4], ordered[(topLeftIdx + 2) % 4], ordered[(topLeftIdx + 3) % 4]];
-  return [rot[0], rot[3], rot[2], rot[1]] as Corners;
+  const topLeftIdx = ordered.reduce((best, _, i) => (
+    ordered[i].x + ordered[i].y < ordered[best].x + ordered[best].y ? i : best
+  ), 0);
+  const ccw = [ordered[topLeftIdx], ordered[(topLeftIdx + 1) % 4], ordered[(topLeftIdx + 2) % 4], ordered[(topLeftIdx + 3) % 4]];
+  return [ccw[0], ccw[3], ccw[2], ccw[1]] as Corners;
 }
 
 // 四角形に画像をパース補正して描画（2三角形でアフィン変換・斜め対応強化版）
@@ -579,12 +578,12 @@ export default function Home() {
         lctx.closePath();
         lctx.fill();
         
-        // Automoロゴテキスト（ゴシック体・マスク幅の90%以内に収める）
+        // Carkusuロゴテキスト（ゴシック体・マスク幅の90%以内に収める）
         const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
         lctx.fillStyle = '#ffffff';
         const testFontSize = logoCanvas.height * 0.5;
         lctx.font = `bold ${testFontSize}px ${gothicFont}`;
-        const textMetrics = lctx.measureText('Automo');
+        const textMetrics = lctx.measureText('Carkusu');
         const textWidth = textMetrics.width;
         const maxTextWidth = logoCanvas.width * 0.9;
         const fontSize = textWidth > maxTextWidth 
@@ -594,7 +593,7 @@ export default function Home() {
         lctx.textAlign = 'center';
         lctx.textBaseline = 'middle';
         lctx.fillStyle = '#ffffff';
-        lctx.fillText('Automo', logoCanvas.width / 2, logoCanvas.height / 2);
+        lctx.fillText('Carkusu', logoCanvas.width / 2, logoCanvas.height / 2);
       }
 
       const degRad = (editLogoRotation * Math.PI) / 180;
@@ -624,8 +623,8 @@ export default function Home() {
           }) as Corners;
         }
 
-        // わずかに外側に拡張（1%）して端の切り欠きを防ぐ。大きくなりすぎないよう控えめに
-        const pad = 0.01;
+        // プレートの端がはみ出さないよう、四隅を外側に1.5%拡張
+        const pad = 0.015;
         const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
         const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
         const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
@@ -653,7 +652,7 @@ export default function Home() {
           }
           const file = new File([blob], `number-mask-${Date.now()}.jpg`, { type: 'image/jpeg' });
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
-            await navigator.share({ files: [file], title: 'Auto mo Camera' });
+            await navigator.share({ files: [file], title: 'Carkusu' });
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
           } else {
@@ -694,15 +693,15 @@ export default function Home() {
             try {
               // プラットフォームに応じたテキストを設定
               const shareTexts: Record<string, string> = {
-                facebook: 'Automoniでナンバープレートをマスクしました',
-                twitter: 'Automoniでナンバープレートをマスクしました',
-                instagram: 'Automoniでナンバープレートをマスクしました',
+                facebook: 'Carkusuでナンバープレートをマスクしました',
+                twitter: 'Carkusuでナンバープレートをマスクしました',
+                instagram: 'Carkusuでナンバープレートをマスクしました',
               };
 
               await navigator.share({
                 files: [file],
-                title: 'Auto mo Camera',
-                text: shareTexts[platform] || 'Automoniでナンバープレートをマスクしました',
+                title: 'Carkusu',
+                text: shareTexts[platform] || 'Carkusuでナンバープレートをマスクしました',
               });
               
               setShowShareMenu(false);
@@ -736,7 +735,7 @@ export default function Home() {
               // 各SNSの共有URLを構築
               const shareUrls: Record<string, string> = {
                 facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(imageUrl)}`,
-                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Automoniでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
+                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Carkusuでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
                 instagram: `https://www.instagram.com/create/select/`,
               };
 
@@ -803,7 +802,7 @@ export default function Home() {
             try {
               await navigator.share({
                 files: [file],
-                title: 'Auto mo Camera',
+                title: 'Carkusu',
                 text: '画像を端末に保存する場合は「画像を保存」などを選んでください。',
               });
               setShowShareMenu(false);
@@ -857,7 +856,7 @@ export default function Home() {
             try {
               await navigator.share({
                 files: [file],
-                title: 'Auto mo Camera',
+                title: 'Carkusu',
                 text: '近くのPCやデバイスを選択して共有できます。',
               });
               setShowShareMenu(false);
@@ -953,18 +952,20 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
       {screenMode === 'idle' && (
-        <header className="sticky top-0 z-10 bg-black/80 backdrop-blur-sm border-b border-white/10">
-          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center">
-            <h1 className="text-lg font-extralight text-white tracking-[0.2em]">Auto mo Camera</h1>
+        <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
+          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2">
+            <h1 className="text-lg font-extralight text-white tracking-[0.2em]">Carkusu</h1>
+            <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
           </div>
         </header>
       )}
 
       {showSaveSuccess && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 pointer-events-none">
-          <div className="bg-white/95 backdrop-blur rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
-            <CheckCircle className="text-emerald-600" size={40} strokeWidth={2} />
-            <p className="text-gray-900 font-light">保存しました</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div className="bg-white/20 backdrop-blur-xl border border-white/10 rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
+            <CheckCircle className="text-emerald-300" size={40} strokeWidth={2} />
+            <p className="text-white font-light">保存しました</p>
+            <p className="text-white/80 text-xs font-extralight">ご利用ありがとうございます</p>
           </div>
         </div>
       )}
@@ -982,39 +983,42 @@ export default function Home() {
             <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
           )}
           {isProcessing && (
-            <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-between z-10 px-4 py-8">
+            <div className="absolute inset-0 bg-black/30 backdrop-blur-md flex flex-col items-center justify-between z-10 px-4 py-8">
               <div className="flex-1 flex flex-col items-center justify-center gap-4">
                 <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
                 <p className="text-white font-light text-sm">解析中...</p>
                 <p className="text-white/80 text-xs font-extralight text-center max-w-xs">ナンバープレートを検出しています</p>
               </div>
-              <div className="w-full min-h-[100px] flex items-center justify-center rounded-lg border border-dashed border-white/20 bg-white/5">
+              <div className="w-full min-h-[100px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
                 <span className="text-white/40 text-xs">広告スペース</span>
               </div>
             </div>
           )}
-          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-gradient-to-b from-black/50 to-transparent">
+          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
-              <h1 className="text-base font-extralight text-white/95 tracking-widest">Auto mo Camera</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
+                <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+              </div>
               <button
                 onClick={stopCamera}
-                className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-sm hover:bg-white/30 active:bg-white/40 transition-colors"
+                className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
               >
                 終了
               </button>
             </div>
             {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
           </div>
-          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-gradient-to-t from-black/40 to-transparent flex justify-center">
+          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/30 backdrop-blur-md border-t border-white/10 flex justify-center">
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
-              className="w-16 h-16 rounded-full bg-white/95 backdrop-blur-sm border-2 border-white/60 shadow-xl flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
+              className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md border border-white/10 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
             >
               {isProcessing ? (
-                <Loader2 className="animate-spin text-gray-800" size={28} strokeWidth={2} />
+                <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
               ) : (
-                <div className="w-12 h-12 rounded-full bg-gray-900/90" />
+                <div className="w-12 h-12 rounded-full bg-white/40" />
               )}
             </button>
           </div>
@@ -1026,7 +1030,7 @@ export default function Home() {
           <p className="text-white/80 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
           <button
             onClick={startCamera}
-            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/20 text-white font-light text-sm tracking-widest backdrop-blur-sm border border-white/30 hover:bg-white/30 active:bg-white/40 transition-colors"
+            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/20 text-white font-light text-sm tracking-widest backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
           >
             <Camera size={22} strokeWidth={1.5} />
             カメラを起動
@@ -1040,7 +1044,7 @@ export default function Home() {
       {screenMode === 'preview_edit' && previewImageUrl && (
         <div className="fixed inset-0 z-0 bg-black flex flex-col">
           {(isBlurWarning || detectionFailed) && (
-            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/70 backdrop-blur-sm border-b border-white/10">
+            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/30 backdrop-blur-md border-b border-white/10">
               {isBlurWarning && (
                 <p className="text-amber-200 text-sm font-light text-center">
                   写真がぼやけている可能性があります。撮り直すことをお勧めします。
@@ -1076,19 +1080,19 @@ export default function Home() {
               style={{ touchAction: 'none' }}
             />
             {isProcessing && detectedCorners.length === 0 && (
-              <div className="absolute inset-0 flex flex-col bg-black/80 backdrop-blur-sm">
+              <div className="absolute inset-0 flex flex-col bg-black/30 backdrop-blur-md">
                 <div className="flex-1 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
                   <p className="text-white/90 text-sm font-light">解析中...</p>
                   <p className="text-white/60 text-xs font-extralight">ナンバープレートを検出しています</p>
                 </div>
-                <div className="w-full min-h-[80px] flex items-center justify-center rounded-lg border border-dashed border-white/20 bg-white/5 mx-4 mb-4">
+                <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
                   <span className="text-white/40 text-xs">広告スペース</span>
                 </div>
               </div>
             )}
           </div>
-          <div className="bg-black/40 backdrop-blur-xl border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="bg-black/30 backdrop-blur-md border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <div className="flex items-center gap-3 mb-2">
               <span className="text-white/90 text-xs font-light w-12">角度</span>
               <input
@@ -1098,7 +1102,7 @@ export default function Home() {
                 step="1"
                 value={editLogoRotation}
                 onChange={(e) => setEditLogoRotation(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[200px]"
+                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
               <span className="text-white/70 text-xs tabular-nums w-8">{editLogoRotation}°</span>
             </div>
@@ -1111,7 +1115,7 @@ export default function Home() {
                 step="0.05"
                 value={editLogoScale}
                 onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[200px]"
+                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
             </div>
             <div className="flex items-center gap-3 mb-3">
@@ -1123,7 +1127,7 @@ export default function Home() {
                 step="1"
                 value={editLogoOffset.x}
                 onChange={(e) => setEditLogoOffset((p) => ({ ...p, x: Number(e.target.value) }))}
-                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[120px]"
+                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[120px]"
               />
               <span className="text-white/90 text-xs font-light w-12">位置Y</span>
               <input
@@ -1133,15 +1137,15 @@ export default function Home() {
                 step="1"
                 value={editLogoOffset.y}
                 onChange={(e) => setEditLogoOffset((p) => ({ ...p, y: Number(e.target.value) }))}
-                className="flex-1 h-1.5 bg-white/30 rounded-full appearance-none accent-white max-w-[120px]"
+                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[120px]"
               />
             </div>
-            <div className="flex justify-center gap-3">
+            <div className="flex justify-center items-center gap-2 flex-wrap">
               <button
                 onClick={retake}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-sm transition-colors ${
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-md border border-white/10 transition-colors ${
                   detectionFailed
-                    ? 'bg-amber-500 text-gray-900 font-medium hover:bg-amber-400 active:bg-amber-300'
+                    ? 'bg-amber-500/90 text-gray-900 font-medium hover:bg-amber-400 active:bg-amber-300'
                     : 'bg-white/20 text-white hover:bg-white/30 active:bg-white/40'
                 }`}
               >
@@ -1149,24 +1153,55 @@ export default function Home() {
                 撮り直す
               </button>
               <button
+                onClick={handleSaveToDevice}
+                disabled={isProcessing}
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white hover:bg-white/30 active:bg-white/40 transition-colors disabled:opacity-50"
+                title="端末に保存"
+              >
+                <Download size={18} strokeWidth={2} />
+              </button>
+              <button
+                onClick={() => handleShareToSNS('facebook')}
+                disabled={isProcessing}
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
+                title="Facebook"
+              >
+                <Facebook size={18} strokeWidth={2} />
+              </button>
+              <button
+                onClick={() => handleShareToSNS('twitter')}
+                disabled={isProcessing}
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
+                title="X"
+              >
+                <Twitter size={18} strokeWidth={2} />
+              </button>
+              <button
+                onClick={() => handleShareToSNS('instagram')}
+                disabled={isProcessing}
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
+                title="Instagram"
+              >
+                <Instagram size={18} strokeWidth={2} />
+              </button>
+              <button
                 onClick={() => setShowShareMenu(!showShareMenu)}
                 disabled={isProcessing}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-white/95 text-gray-900 text-sm font-light hover:bg-white active:bg-gray-100 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-sm font-light hover:bg-white/30 active:bg-white/40 transition-colors disabled:opacity-50"
               >
                 {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
-                共有
+                その他
               </button>
             </div>
             {showShareMenu && (
               <div className="flex flex-wrap justify-center gap-2 mt-3 pt-3 border-t border-white/10">
-                <button onClick={() => handleShareToSNS('facebook')} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-blue-500/90 text-white text-xs font-light hover:bg-blue-500 transition-colors disabled:opacity-50"><Facebook size={14} /> Facebook</button>
-                <button onClick={() => handleShareToSNS('twitter')} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-black/80 text-white text-xs font-light hover:bg-black transition-colors disabled:opacity-50"><Twitter size={14} /> X</button>
-                <button onClick={() => handleShareToSNS('instagram')} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xs font-light hover:opacity-90 transition-colors disabled:opacity-50"><Instagram size={14} /> Instagram</button>
-                <button onClick={handleSaveToDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-emerald-500/90 text-white text-xs font-light hover:bg-emerald-500 transition-colors disabled:opacity-50"><Download size={14} /> 端末に保存</button>
-                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/25 text-white text-xs font-light hover:bg-white/35 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
-                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/25 text-white text-xs font-light hover:bg-white/35 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
+                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-xs font-light hover:bg-white/30 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
+                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-xs font-light hover:bg-white/30 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
               </div>
             )}
+            <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
+              <span className="text-white/40 text-xs">広告スペース</span>
+            </div>
           </div>
         </div>
       )}
