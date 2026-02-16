@@ -317,8 +317,8 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は長辺768に制限（横向き・高解像度でもアップロードとGeminiを軽くし、タイムアウトを防ぐ）
-      const maxApiLongEdge = 768;
+      // API送信画像は長辺512に制限（超軽量化でタイムアウトを防ぐ）
+      const maxApiLongEdge = 512;
       const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
@@ -328,22 +328,12 @@ export default function Home() {
       const apiCtx = apiCanvas.getContext('2d');
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'high';
+      apiCtx.imageSmoothingQuality = 'low'; // 速度優先
       apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
-
-      const imageData = apiCtx.getImageData(0, 0, apiW, apiH);
-      const data = imageData.data;
-      const contrast = 1.15;
-      const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
-      for (let i = 0; i < data.length; i += 4) {
-        data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
-        data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128));
-        data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
-      }
-      apiCtx.putImageData(imageData, 0, 0);
+      // コントラスト調整を削除して処理速度を優先
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.5);
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.3);
       });
 
       // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は fetch と並列で実行しリクエストを遅らせない
@@ -365,7 +355,7 @@ export default function Home() {
 
       const performFetch = async (retryCount: number): Promise<Response> => {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 25_000); // 25秒でタイムアウト
+        const timeoutId = setTimeout(() => controller.abort(), 15_000); // 15秒でタイムアウト
         try {
           const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
           clearTimeout(timeoutId);
@@ -374,7 +364,7 @@ export default function Home() {
           clearTimeout(timeoutId);
           if (retryCount === 0 && (fetchErr instanceof Error && fetchErr.name === 'AbortError' || fetchErr instanceof TypeError)) {
             setCameraError('画像サイズを小さくして再試行しています...');
-            await new Promise((resolve) => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 300));
             return performFetch(1);
           }
           throw fetchErr;
@@ -560,11 +550,21 @@ export default function Home() {
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // 左上→右上からプレートの回転角 baseAngle、ユーザー調整を加えて finalRotation
-        const baseAngle = Math.atan2(
-          scaled[1].y - scaled[0].y,
-          scaled[1].x - scaled[0].x
-        );
+        // プレートの「上辺」（左上→右上）の角度を算出
+        // normalizeCornersOrder により corners[0]=左上, corners[1]=右上 が保証されている
+        const dx = scaled[1].x - scaled[0].x;
+        const dy = scaled[1].y - scaled[0].y;
+        // Canvas座標系（Y軸下向き）で左上→右上のベクトル角度を計算
+        // 90度回転バグ修正: 横向きプレートで角度がずれる場合の補正
+        // プレートの実際の幅と高さを計算して向きを判定
+        const actualWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
+        const actualHeight = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
+        const isLandscape = actualWidth > actualHeight;
+        let baseAngle = Math.atan2(dy, dx);
+        // 横向きで角度が大きくずれている場合（±45度以上）、90度補正を試す
+        if (isLandscape && Math.abs(baseAngle) > Math.PI / 4 && Math.abs(baseAngle) < 3 * Math.PI / 4) {
+          baseAngle -= Math.PI / 2;
+        }
         const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
 
         // プレート幅・高さ（ピクセル）。ロゴは10%大きく

@@ -163,13 +163,13 @@ export async function POST(request: NextRequest) {
     const mimeType = imageFile.type || 'image/jpeg';
 
     // ナンバープレート四隅検知専用（0-1000）。プロンプトを最小化してレスポンス速度を優先
-    const prompt = `日本のナンバープレートの四隅を検出。座標0-1000（左上・右上・右下・左下）。画像: ${imageWidth}x${imageHeight}px。プレートなしなら found=false, plates=[]。`;
+    const prompt = `ナンバープレート四隅検出。座標0-1000。左上・右上・右下・左下。${imageWidth}x${imageHeight}。なしならfound=false。`;
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 24_000); // 24秒でタイムアウト（クライアント25sより短く）
+    const timeoutId = setTimeout(() => controller.abort(), 14_000); // 14秒でタイムアウト（クライアント15sより短く）
     let geminiResponse: Response;
     try {
       geminiResponse = await fetch(url, {
