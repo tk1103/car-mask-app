@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-// 2026年3月廃止対応: Gemini 3 系に統一
-const MODEL_NAME = 'gemini-3-flash';
+// 2026年3月廃止対応: Gemini 3 系（v1beta で responseSchema 対応）
+const MODEL_NAME = 'gemini-3-flash-preview';
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
@@ -116,7 +116,8 @@ export async function POST(request: NextRequest) {
 
 出力: 四隅のみ。時計回りに 左上・右上・右下・左下 の4点。プレートなしなら found=false, plates=[]。`;
 
-    const url = `https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
+    // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
     const geminiResponse = await fetch(url, {
       method: 'POST',
