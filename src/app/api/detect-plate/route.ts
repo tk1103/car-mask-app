@@ -28,25 +28,21 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // 画像サイズをプロンプトに含め、サイズ・角度の精度を上げる
-    const prompt = `TASK: Detect the four corners of the Japanese license plate for precise masking. Return a TIGHT quad that matches the plate's SIZE and ANGLE exactly.
+    // ナンバープレート検出専用プロンプト（レシート・他用途の記述は含めない）
+    const prompt = `あなたは日本のナンバープレート（自動車の登録番号標）の四隅検出専用です。レシート・領収書・その他の文書は対象外です。
 
-IMAGE: ${imageWidth} x ${imageHeight} pixels. x: 0=left, 1000=right. y: 0=top, 1000=bottom.
+タスク: 画像内のナンバープレートの四隅の座標を返す。
 
-SIZE (critical):
-- Return the SMALLEST quad that encloses ONLY the plate. Do NOT include monitor bezel, car body, or surrounding area.
-- The quad must include both the top line (地域名・分類番号) and the number line (ひらがな + numbers). No extra margin.
+画像: 幅 ${imageWidth}px、高さ ${imageHeight}px。座標は 0〜1000 で正規化。x: 0=左端, 1000=右端。y: 0=上端, 1000=下端。
 
-ANGLE (critical):
-- The quad must have the SAME orientation as the plate in the image. If the plate is horizontal, return a horizontal quad (same y for top two corners, same y for bottom two). If the plate is tilted, return the same tilt. Do not add rotation.
+検出対象: ナンバープレートのみ。プレートの上段（地域名・分類番号）と下段（ひらがな＋数字）を含む、プレートだけを囲む最小の四角形。車体・モニター枠・周囲は含めない。
 
-CORNER ORDER (strict):
-- Exactly in this order: Top-Left, Top-Right, Bottom-Right, Bottom-Left. So: first point = top-left, second = top-right, third = bottom-right, fourth = bottom-left. This order defines a rectangle/parallelogram with correct orientation.
+向き: プレートが水平なら水平の四角、傾いていれば同じ傾きで返す。頂点の順序は必ず: 左上 → 右上 → 右下 → 左下。
 
-OUTPUT (JSON only):
-{"found": true/false, "plates": [{"corners": [{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]}
+出力 (JSONのみ、他テキスト禁止):
+{"found": true または false, "plates": [{"corners": [{"x":数値,"y":数値}, {"x":数値,"y":数値}, {"x":数値,"y":数値}, {"x":数値,"y":数値}]}]}
 
-RULES: Plate only, tight boundary. If no plate visible: {"found": false, "plates": []}. No extra text.`;
+プレートが写っていない場合: {"found": false, "plates": []}`;
 
     // REST API (v1) で直接呼び出し
     // ListModels で確認できたマルチモーダル対応モデルを使用

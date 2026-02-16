@@ -978,10 +978,15 @@ export default function Home() {
             <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
           )}
           {isProcessing && (
-            <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-10 px-4">
-              <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
-              <p className="text-white font-light text-sm">解析中...</p>
-              <p className="text-white/80 text-xs font-extralight text-center max-w-xs">ロゴの位置・サイズを調整してから保存できます</p>
+            <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-between z-10 px-4 py-8">
+              <div className="flex-1 flex flex-col items-center justify-center gap-4">
+                <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
+                <p className="text-white font-light text-sm">解析中...</p>
+                <p className="text-white/80 text-xs font-extralight text-center max-w-xs">ナンバープレートを検出しています</p>
+              </div>
+              <div className="w-full min-h-[100px] flex items-center justify-center rounded-lg border border-dashed border-white/20 bg-white/5">
+                <span className="text-white/40 text-xs">広告スペース</span>
+              </div>
             </div>
           )}
           <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-gradient-to-b from-black/50 to-transparent">
@@ -1067,9 +1072,15 @@ export default function Home() {
               style={{ touchAction: 'none' }}
             />
             {isProcessing && detectedCorners.length === 0 && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
-                <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
-                <p className="mt-3 text-white/90 text-sm font-light">解析中...</p>
+              <div className="absolute inset-0 flex flex-col bg-black/80 backdrop-blur-sm">
+                <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                  <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
+                  <p className="text-white/90 text-sm font-light">解析中...</p>
+                  <p className="text-white/60 text-xs font-extralight">ナンバープレートを検出しています</p>
+                </div>
+                <div className="w-full min-h-[80px] flex items-center justify-center rounded-lg border border-dashed border-white/20 bg-white/5 mx-4 mb-4">
+                  <span className="text-white/40 text-xs">広告スペース</span>
+                </div>
               </div>
             )}
           </div>
