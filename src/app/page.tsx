@@ -6,18 +6,30 @@ import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Ins
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
-// API返却の四隅を必ず TL, TR, BR, BL の順に並べ替え（角度・ねじれ防止）
+// API座標をクライアント座標に変換（0-1000 → 0-1）。Y軸が反転している場合の補正を行う
+function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
+  return plate.corners.map((c) => ({
+    x: c.x / 1000,
+    y: 1 - c.y / 1000, // モデルがy=0を下端にしている場合の反転補正
+  })) as Corners;
+}
+
+// 四隅を重心に対する角度で並べ替え、TL→TR→BR→BL の順にする（傾いた四角でもねじれない）
 function normalizeCornersOrder(corners: Corners): Corners {
-  const [a, b, c, d] = corners;
-  const pts = [a, b, c, d];
-  const byY = [...pts].sort((p, q) => p.y - q.y);
-  const top = [byY[0], byY[1]].sort((p, q) => p.x - q.x);
-  const bottom = [byY[2], byY[3]].sort((p, q) => p.x - q.x);
-  const topLeft = top[0];
-  const topRight = top[1];
-  const bottomLeft = bottom[0];
-  const bottomRight = bottom[1];
-  return [topLeft, topRight, bottomRight, bottomLeft];
+  const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+  const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+  const withAngle = corners.map((p) => ({
+    ...p,
+    angle: Math.atan2(p.y - cy, p.x - cx),
+  }));
+  withAngle.sort((a, b) => a.angle - b.angle);
+  const ordered = withAngle.map(({ x, y }) => ({ x, y }));
+  const topLeftIdx = ordered.reduce((best, _, i) => {
+    const sum = ordered[i].x + ordered[i].y;
+    return sum < ordered[best].x + ordered[best].y ? i : best;
+  }, 0);
+  const rot = [ordered[topLeftIdx], ordered[(topLeftIdx + 1) % 4], ordered[(topLeftIdx + 2) % 4], ordered[(topLeftIdx + 3) % 4]];
+  return [rot[0], rot[3], rot[2], rot[1]] as Corners;
 }
 
 // 四角形に画像をパース補正して描画（2三角形でアフィン変換・斜め対応強化版）
@@ -401,15 +413,10 @@ export default function Home() {
       if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
         const platesCorners: Corners[] = result.plates
           .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
-          .map((plate: any) =>
-            plate.corners.map((c: { x: number; y: number }) => ({
-              x: c.x / 1000,
-              y: c.y / 1000,
-            })) as Corners
-          );
+          .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
         if (platesCorners.length > 0) {
           setDetectionFailed(false);
-          setDetectedCorners(platesCorners.map((c) => normalizeCornersOrder(c)));
+          setDetectedCorners(platesCorners);
           setEditLogoOffset({ x: 0, y: 0 });
           setEditLogoScale(1);
           setEditLogoRotation(0);
@@ -423,11 +430,8 @@ export default function Home() {
         }
       } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
         setDetectionFailed(false);
-        const single: Corners = result.corners.map((c: { x: number; y: number }) => ({
-          x: c.x / 1000,
-          y: c.y / 1000,
-        })) as Corners;
-        setDetectedCorners([normalizeCornersOrder(single)]);
+        const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
+        setDetectedCorners([single]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setEditLogoRotation(0);
