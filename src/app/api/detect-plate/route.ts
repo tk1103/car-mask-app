@@ -36,10 +36,10 @@ CRITICAL - SHAPE:
 - Do NOT return a horizontal bounding box. Return the actual corner positions so that the quad matches the plate's slant and perspective.
 
 ANALYSIS STEPS:
-1. Identify the license plate (ナンバープレート) boundary.
-2. Locate the four corners in image order: Top-Left, Top-Right, Bottom-Right, Bottom-Left (as seen in the photo).
-3. If multiple plates exist, detect ALL of them and return each as a separate entry in the plates array.
-4. Include the full plate area: the top line (地域名・分類番号 e.g. "多摩 583") and the main number line.
+1. Identify the ENTIRE license plate (ナンバープレート): the full rectangle from top edge to bottom edge.
+2. The quad must cover BOTH: (a) the top line (地域名・分類番号 e.g. "多摩 583", "ま") AND (b) the main number line (ひらがな + numbers e.g. "11-73"). Do NOT return only the top part; extend to the bottom edge of the plate.
+3. Locate the four corners in image order: Top-Left, Top-Right, Bottom-Right, Bottom-Left (as seen in the photo).
+4. If multiple plates exist, detect ALL of them and return each as a separate entry in the plates array.
 
 COORDINATE SYSTEM:
 - Normalized range 0 to 1000. [0,0]=image top-left, [1000,1000]=image bottom-right.
@@ -60,11 +60,11 @@ OUTPUT FORMAT (JSON only):
 }
 
 STRICT RULES:
-- Return only the plate boundary, NOT the car body or headlights.
+- Return the FULL plate boundary (top to bottom, left to right), NOT just the upper half. NOT the car body or headlights.
 - If no plate is clearly visible, return {"found": false, "plates": []}.
-- Detect plates even when they appear small in the image (e.g. distant cars); there is no minimum size.
+- Detect plates even when they appear small; no minimum size. Works for plates on screens/photos too.
 - No conversational text or markdown.
-- If the plate appears slanted in the image, corners must form that slant (tilted quad). Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.`;
+- If the plate appears slanted, corners must form that slant. Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.`;
 
     // REST API (v1) で直接呼び出し
     // ListModels で確認できたマルチモーダル対応モデルを使用

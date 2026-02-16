@@ -605,11 +605,12 @@ export default function Home() {
           }) as Corners;
         }
 
-        // パディングなし＝検出した四隅にぴったり同じ大きさで被せる（はみ出しが心配な場合はサイズスライダーで少し大きくできる）
-        const c0: Corner = { x: shifted[0].x, y: shifted[0].y };
-        const c1: Corner = { x: shifted[1].x, y: shifted[1].y };
-        const c2: Corner = { x: shifted[2].x, y: shifted[2].y };
-        const c3: Corner = { x: shifted[3].x, y: shifted[3].y };
+        // 検出がプレートの一部だけ返す場合に備え、わずかに外側に拡張（2%）して数字がはみ出さないようにする
+        const pad = 0.02;
+        const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
+        const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
+        const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
+        const c3: Corner = { x: Math.max(0, shifted[3].x - pad), y: Math.min(1, shifted[3].y + pad) };
         const logoCorners: Corners = [c0, c1, c2, c3];
 
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
