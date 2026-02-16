@@ -9,7 +9,11 @@ const MODEL_NAME = 'gemini-3-flash-preview';
 const RATE_LIMIT_PER_MINUTE = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
+// 簡易IP制限: 1日あたり20回（サーバー再起動でリセット。ベータ用）
+const DAILY_LIMIT_PER_IP = 20;
+
 const rateLimitStore = new Map<string, number[]>();
+const dailyLimitStore = new Map<string, { count: number; date: string }>();
 
 function getClientId(request: NextRequest): string {
   const forwarded = request.headers.get('x-forwarded-for');
@@ -20,6 +24,30 @@ function getClientId(request: NextRequest): string {
   const realIp = request.headers.get('x-real-ip');
   if (realIp) return realIp;
   return 'anonymous';
+}
+
+function getTodayDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isOverDailyLimit(clientId: string): boolean {
+  const today = getTodayDateString();
+  let entry = dailyLimitStore.get(clientId);
+  if (!entry || entry.date !== today) {
+    entry = { count: 0, date: today };
+    dailyLimitStore.set(clientId, entry);
+  }
+  return entry.count >= DAILY_LIMIT_PER_IP;
+}
+
+function incrementDailyCount(clientId: string): void {
+  const today = getTodayDateString();
+  let entry = dailyLimitStore.get(clientId);
+  if (!entry || entry.date !== today) {
+    entry = { count: 0, date: today };
+    dailyLimitStore.set(clientId, entry);
+  }
+  entry.count += 1;
 }
 
 function isRateLimited(clientId: string): boolean {
@@ -76,6 +104,19 @@ const RESPONSE_SCHEMA = {
 export async function POST(request: NextRequest) {
   try {
     const clientId = getClientId(request);
+
+    if (isOverDailyLimit(clientId)) {
+      return NextResponse.json(
+        {
+          found: false,
+          error: '1日の利用制限に達しました',
+          userMessage: 'Carkusuベータ版の1日あたりの利用制限（20回）に達しました。また明日お試しください',
+          status: 429,
+        },
+        { status: 429 }
+      );
+    }
+
     if (isRateLimited(clientId)) {
       return NextResponse.json(
         {
@@ -87,6 +128,8 @@ export async function POST(request: NextRequest) {
         { status: 429 }
       );
     }
+
+    incrementDailyCount(clientId);
 
     const formData = await request.formData();
     const imageFile = formData.get('image') as File;
