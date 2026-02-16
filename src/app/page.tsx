@@ -72,6 +72,48 @@ function drawImageInQuad(
   drawTriangle(1, 0, 1, 1, 0, 1, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
 }
 
+// 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
+function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
+  const maxSize = 320;
+  const w = sourceCanvas.width;
+  const h = sourceCanvas.height;
+  const scale = w > h ? maxSize / w : maxSize / h;
+  const sw = Math.round(w * scale);
+  const sh = Math.round(h * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return 0;
+  ctx.drawImage(sourceCanvas, 0, 0, w, h, 0, 0, sw, sh);
+  const img = ctx.getImageData(0, 0, sw, sh);
+  const d = img.data;
+  const stride = sw * 4;
+  let sum = 0;
+  let sumSq = 0;
+  let n = 0;
+  for (let y = 1; y < sh - 1; y++) {
+    for (let x = 1; x < sw - 1; x++) {
+      const i = y * stride + x * 4;
+      const g = (d[i] + d[i + 1] + d[i + 2]) / 3;
+      const l =
+        4 * g -
+        (d[i - stride] + d[i - stride + 1] + d[i - stride + 2]) / 3 -
+        (d[i + stride] + d[i + stride + 1] + d[i + stride + 2]) / 3 -
+        (d[i - 4] + d[i - 3] + d[i - 2]) / 3 -
+        (d[i + 4] + d[i + 5] + d[i + 6]) / 3;
+      sum += l;
+      sumSq += l * l;
+      n++;
+    }
+  }
+  if (n === 0) return 0;
+  const mean = sum / n;
+  return sumSq / n - mean * mean;
+}
+
+const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
+
 export default function Home() {
   const [screenMode, setScreenMode] = useState<'idle' | 'camera' | 'preview_edit'>('idle');
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -88,6 +130,8 @@ export default function Home() {
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
   const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
+  const [isBlurWarning, setIsBlurWarning] = useState(false);
+  const [detectionFailed, setDetectionFailed] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -270,7 +314,16 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信用にリサイズ（バランス重視：最大1600x900で精度と速度のバランス）
+      // 体感速度短縮：撮影後すぐプレビューを表示し、検出はバックグラウンドで実行
+      // その他の短縮案: (1) API送信画像を小さくする max 1024x576 等 → アップロード・推論が速くなるが小さいプレートで精度低下の可能性
+      // (2) API用JPEG品質を 0.75→0.6 に下げて送信サイズ削減 (3) ブレ検出を fetch と並列化してリクエスト開始を前倒し
+      setPreviewImageUrl(URL.createObjectURL(fullResBlob));
+      setScreenMode('preview_edit');
+      setDetectedCorners([]);
+      setIsProcessing(true);
+      setCameraError(null);
+
+      // API送信用画像は fullRes から生成（動画参照不要）
       const maxApiWidth = 1600;
       const maxApiHeight = 900;
       const apiScale = Math.min(maxApiWidth / originalW, maxApiHeight / originalH, 1);
@@ -284,20 +337,21 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'high';
-      apiCtx.drawImage(video, 0, 0, apiW, apiH);
+      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
 
-      // 軽量な画像前処理：コントラスト強化（検出精度向上のため）
       const imageData = apiCtx.getImageData(0, 0, apiW, apiH);
       const data = imageData.data;
-      const contrast = 1.15; // 15%のコントラスト強化
+      const contrast = 1.15;
       const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
-      
       for (let i = 0; i < data.length; i += 4) {
-        data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));     // R
-        data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128)); // G
-        data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128)); // B
+        data[i] = Math.min(255, Math.max(0, factor * (data[i] - 128) + 128));
+        data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] - 128) + 128));
+        data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] - 128) + 128));
       }
       apiCtx.putImageData(imageData, 0, 0);
+
+      const blurScore = getBlurScore(apiCanvas);
+      setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
         apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.75);
@@ -315,12 +369,8 @@ export default function Home() {
         const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
         if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
           try {
-            await errorVideoTrack.applyConstraints({
-              advanced: [{ torch: false } as any],
-            });
-          } catch (e) {
-            // 無視
-          }
+            await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
+          } catch (_) {}
         }
         const raw = (result.error || '') as string;
         const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
@@ -329,70 +379,72 @@ export default function Home() {
             ? '本日のAI利用回数（20回）に達しました。明日またお試しください。'
             : (result.error || `エラー ${res.status}`)
         );
+        setDetectedCorners([[
+          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
+          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
+        ]]);
+        setDetectionFailed(true);
         setIsProcessing(false);
         return;
       }
 
       if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
-        // 複数プレート対応：すべてのプレートのcornersを変換
         const platesCorners: Corners[] = result.plates
           .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
           .map((plate: any) =>
             plate.corners.map((c: { x: number; y: number }) => ({
-              x: c.x / 1000, // 0-1の比率として保持
-              y: c.y / 1000, // 0-1の比率として保持
+              x: c.x / 1000,
+              y: c.y / 1000,
             })) as Corners
           );
-        
         if (platesCorners.length > 0) {
+          setDetectionFailed(false);
           setDetectedCorners(platesCorners);
           setEditLogoOffset({ x: 0, y: 0 });
           setEditLogoScale(1);
           setEditLogoRotation(0);
-          setPreviewImageUrl(URL.createObjectURL(fullResBlob));
-          setScreenMode('preview_edit');
         } else {
-          throw new Error('プレートの座標が不正です');
+          setDetectionFailed(true);
+          setDetectedCorners([[
+            { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
+            { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
+          ]]);
+          setCameraError('プレートの座標が不正でした。手動で調整してください。');
         }
       } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
-        // 後方互換性：単一corners形式にも対応
-        const corners: Corners = result.corners.map((c: { x: number; y: number }) => ({
+        setDetectionFailed(false);
+        setDetectedCorners([result.corners.map((c: { x: number; y: number }) => ({
           x: c.x / 1000,
           y: c.y / 1000,
-        }));
-        setDetectedCorners([corners]);
+        })) as Corners]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setEditLogoRotation(0);
-        setPreviewImageUrl(URL.createObjectURL(fullResBlob));
-        setScreenMode('preview_edit');
       } else {
-        const defaultCorners: Corners = [
+        setDetectionFailed(true);
+        setDetectedCorners([[
           { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-        ];
-        setDetectedCorners([defaultCorners]);
+        ]]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setEditLogoRotation(0);
-        setPreviewImageUrl(URL.createObjectURL(fullResBlob));
-        setScreenMode('preview_edit');
         setCameraError('AIが自動検出できなかったため、手動で調整してください。');
       }
+      setIsProcessing(false);
     } catch (e) {
-      // エラー時もフラッシュを確実にオフにする
       const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
       if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
         try {
-          await errorVideoTrack.applyConstraints({
-            advanced: [{ torch: false } as any],
-          });
-        } catch (flashError) {
-          // 無視
-        }
+          await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
+        } catch (_) {}
       }
       setCameraError(e instanceof Error ? e.message : '解析に失敗しました');
-    } finally {
+      setDetectedCorners([[
+        { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
+        { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
+      ]]);
+      setDetectionFailed(true);
       setIsProcessing(false);
     }
   }, []);
@@ -406,6 +458,8 @@ export default function Home() {
     setEditLogoRotation(0);
     setPreviewImageLoaded(false);
     setCameraError(null);
+    setIsBlurWarning(false);
+    setDetectionFailed(false);
     setScreenMode('camera');
     // ストリーム再設定は screenMode の useEffect で行う（video は再マウント後のため、ここでは ref がまだ更新されていない場合がある）
     // フォールバック: DOM 更新後に再設定を試みる
@@ -555,12 +609,11 @@ export default function Home() {
           }) as Corners;
         }
 
-        // パディングを約2%に拡大
-        const pad = 0.02;
-        const c0: Corner = { x: Math.max(0, shifted[0].x - pad), y: Math.max(0, shifted[0].y - pad) };
-        const c1: Corner = { x: Math.min(1, shifted[1].x + pad), y: Math.max(0, shifted[1].y - pad) };
-        const c2: Corner = { x: Math.min(1, shifted[2].x + pad), y: Math.min(1, shifted[2].y + pad) };
-        const c3: Corner = { x: Math.max(0, shifted[3].x - pad), y: Math.min(1, shifted[3].y + pad) };
+        // パディングなし＝検出した四隅にぴったり同じ大きさで被せる（はみ出しが心配な場合はサイズスライダーで少し大きくできる）
+        const c0: Corner = { x: shifted[0].x, y: shifted[0].y };
+        const c1: Corner = { x: shifted[1].x, y: shifted[1].y };
+        const c2: Corner = { x: shifted[2].x, y: shifted[2].y };
+        const c3: Corner = { x: shifted[3].x, y: shifted[3].y };
         const logoCorners: Corners = [c0, c1, c2, c3];
 
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
@@ -965,6 +1018,30 @@ export default function Home() {
 
       {screenMode === 'preview_edit' && previewImageUrl && (
         <div className="fixed inset-0 z-0 bg-black flex flex-col">
+          {(isBlurWarning || detectionFailed) && (
+            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/70 backdrop-blur-sm border-b border-white/10">
+              {isBlurWarning && (
+                <p className="text-amber-200 text-sm font-light text-center">
+                  写真がぼやけている可能性があります。撮り直すことをお勧めします。
+                </p>
+              )}
+              {detectionFailed && (
+                <>
+                  <p className="text-amber-200 text-sm font-light text-center">
+                    ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retake}
+                    className="mx-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-amber-500 text-gray-900 font-medium text-sm hover:bg-amber-400 active:bg-amber-300 transition-colors"
+                  >
+                    <RotateCcw size={20} strokeWidth={2} />
+                    もう一度撮影
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           <div
             className="flex-1 min-h-0 relative touch-none"
             onTouchStart={onPreviewTouchStart}
@@ -977,6 +1054,12 @@ export default function Home() {
               className="absolute inset-0 w-full h-full object-contain"
               style={{ touchAction: 'none' }}
             />
+            {isProcessing && detectedCorners.length === 0 && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
+                <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
+                <p className="mt-3 text-white/90 text-sm font-light">解析中...</p>
+              </div>
+            )}
           </div>
           <div className="bg-black/40 backdrop-blur-xl border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <div className="flex items-center gap-3 mb-2">
@@ -1029,7 +1112,11 @@ export default function Home() {
             <div className="flex justify-center gap-3">
               <button
                 onClick={retake}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-sm hover:bg-white/30 active:bg-white/40 transition-colors"
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-sm transition-colors ${
+                  detectionFailed
+                    ? 'bg-amber-500 text-gray-900 font-medium hover:bg-amber-400 active:bg-amber-300'
+                    : 'bg-white/20 text-white hover:bg-white/30 active:bg-white/40'
+                }`}
               >
                 <RotateCcw size={18} strokeWidth={2} />
                 撮り直す
