@@ -314,22 +314,12 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // 体感速度短縮：撮影後すぐプレビューを表示し、検出はバックグラウンドで実行
-      // その他の短縮案: (1) API送信画像を小さくする max 1024x576 等 → アップロード・推論が速くなるが小さいプレートで精度低下の可能性
-      // (2) API用JPEG品質を 0.75→0.6 に下げて送信サイズ削減 (3) ブレ検出を fetch と並列化してリクエスト開始を前倒し
-      setPreviewImageUrl(URL.createObjectURL(fullResBlob));
-      setScreenMode('preview_edit');
-      setDetectedCorners([]);
-      setIsProcessing(true);
-      setCameraError(null);
-
-      // API送信用画像は fullRes から生成（動画参照不要）
+      // API送信画像は video の同じフレームから作成（プレビュー画像と完全に同一フレーム・座標一致のため）
       const maxApiWidth = 1600;
       const maxApiHeight = 900;
       const apiScale = Math.min(maxApiWidth / originalW, maxApiHeight / originalH, 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
-      
       const apiCanvas = document.createElement('canvas');
       apiCanvas.width = apiW;
       apiCanvas.height = apiH;
@@ -337,7 +327,7 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'high';
-      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
+      apiCtx.drawImage(video, 0, 0, apiW, apiH);
 
       const imageData = apiCtx.getImageData(0, 0, apiW, apiH);
       const data = imageData.data;
@@ -350,9 +340,6 @@ export default function Home() {
       }
       apiCtx.putImageData(imageData, 0, 0);
 
-      const blurScore = getBlurScore(apiCanvas);
-      setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
-
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
         apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.75);
       });
@@ -361,6 +348,15 @@ export default function Home() {
       formData.append('image', apiBlob, 'photo.jpg');
       formData.append('width', apiW.toString());
       formData.append('height', apiH.toString());
+
+      // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は fetch と並列で実行しリクエストを遅らせない
+      setPreviewImageUrl(URL.createObjectURL(fullResBlob));
+      setScreenMode('preview_edit');
+      setDetectedCorners([]);
+      setIsProcessing(true);
+      setCameraError(null);
+      const blurScore = getBlurScore(apiCanvas);
+      setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
 
       const res = await fetch('/api/detect-plate', { method: 'POST', body: formData });
       const result = await res.json();
