@@ -32,6 +32,7 @@ function normalizeCornersOrder(corners: Corners): Corners {
 }
 
 // 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（角丸黒背景＋白文字、任意で透過）
+// 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
 function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
@@ -43,7 +44,6 @@ function drawCarkusuLogoAtOrigin(
   const halfH = logoHeight / 2;
   const cornerRadius = Math.min(logoHeight * 0.1, halfW, halfH);
 
-  ctx.save();
   ctx.beginPath();
   ctx.moveTo(-halfW + cornerRadius, -halfH);
   ctx.lineTo(halfW - cornerRadius, -halfH);
@@ -71,7 +71,6 @@ function drawCarkusuLogoAtOrigin(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('Carkusu', 0, 0);
-  ctx.restore();
 }
 
 // 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
@@ -1055,28 +1054,6 @@ export default function Home() {
                 value={editLogoScale}
                 onChange={(e) => setEditLogoScale(Number(e.target.value))}
                 className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
-              />
-            </div>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-white/90 text-xs font-light w-12">位置X</span>
-              <input
-                type="range"
-                min="-20"
-                max="20"
-                step="1"
-                value={editLogoOffset.x}
-                onChange={(e) => setEditLogoOffset((p) => ({ ...p, x: Number(e.target.value) }))}
-                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[120px]"
-              />
-              <span className="text-white/90 text-xs font-light w-12">位置Y</span>
-              <input
-                type="range"
-                min="-20"
-                max="20"
-                step="1"
-                value={editLogoOffset.y}
-                onChange={(e) => setEditLogoOffset((p) => ({ ...p, y: Number(e.target.value) }))}
-                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[120px]"
               />
             </div>
             <div className="flex justify-center items-center gap-2 flex-wrap">
