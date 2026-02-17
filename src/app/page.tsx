@@ -550,28 +550,29 @@ export default function Home() {
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // プレートの「上辺」（左上→右上）の角度を算出
-        // normalizeCornersOrder により corners[0]=左上, corners[1]=右上 が保証されている
-        const dx = scaled[1].x - scaled[0].x;
-        const dy = scaled[1].y - scaled[0].y;
-        // Canvas座標系（Y軸下向き）で左上→右上のベクトル角度を計算
-        // 90度回転バグ修正: 横向きプレートで角度がずれる場合の補正
-        // プレートの実際の幅と高さを計算して向きを判定
-        const actualWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
-        const actualHeight = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
-        const isLandscape = actualWidth > actualHeight;
-        let baseAngle = Math.atan2(dy, dx);
-        // 横向きで角度が大きくずれている場合（±45度以上）、90度補正を試す
-        if (isLandscape && Math.abs(baseAngle) > Math.PI / 4 && Math.abs(baseAngle) < 3 * Math.PI / 4) {
-          baseAngle -= Math.PI / 2;
-        }
+        // プレートの「上辺」を正しく検出: Y座標が小さい（上側）の2点を「上辺」として使用
+        // 横向き撮影でも正しく動作するよう、座標順序に依存せずY座標で判定
+        const cornersWithIdx = scaled.map((c, i) => ({ ...c, idx: i }));
+        cornersWithIdx.sort((a, b) => a.y - b.y); // Y座標でソート（小さい順=上側）
+        const topTwo = cornersWithIdx.slice(0, 2); // Y座標が小さい2点
+        topTwo.sort((a, b) => a.x - b.x); // X座標でソート（左→右）
+        const topLeft = topTwo[0];
+        const topRight = topTwo[1];
+        
+        // 上辺の2点から角度を計算（横向き撮影でも正しく動作）
+        const dx = topRight.x - topLeft.x;
+        const dy = topRight.y - topLeft.y;
+        const baseAngle = Math.atan2(dy, dx);
         const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
 
         // プレート幅・高さ（ピクセル）。ロゴは10%大きく
-        const plateWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
-        const plateHeightLeft = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
-        const plateHeightRight = Math.hypot((scaled[2].x - scaled[1].x) * w, (scaled[2].y - scaled[1].y) * h);
-        const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
+        // 上辺の長さを幅、下辺の長さを高さとして使用
+        const plateWidth = Math.hypot(dx * w, dy * h);
+        const bottomTwo = cornersWithIdx.slice(2); // Y座標が大きい2点（下側）
+        bottomTwo.sort((a, b) => a.x - b.x);
+        const bottomLeft = bottomTwo[0];
+        const bottomRight = bottomTwo[1];
+        const plateHeight = Math.hypot((bottomRight.x - bottomLeft.x) * w, (bottomRight.y - bottomLeft.y) * h);
         const logoWidth = plateWidth * 1.1;
         const logoHeight = plateHeight * 1.1;
 
