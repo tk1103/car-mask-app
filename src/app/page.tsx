@@ -14,21 +14,32 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-// 四隅を重心からの角度でソートし、左上（x+y最小）から時計回りに TL→TR→BR→BL で並べる
+// 四隅を左上から時計回りに TL→TR→BR→BL で並べる
+// ナンバープレートの数字の向き（上辺）を基準に角度を調整するため、
+// Y座標が小さい2点を「上辺」として検出し、その中でX座標が小さい方を左上、大きい方を右上とする
 function normalizeCornersOrder(corners: Corners): Corners {
-  const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
-  const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
-  const withAngle = corners.map((p) => ({
-    ...p,
-    angle: Math.atan2(p.y - cy, p.x - cx),
-  }));
-  withAngle.sort((a, b) => a.angle - b.angle);
-  const ordered = withAngle.map(({ x, y }) => ({ x, y }));
-  const topLeftIdx = ordered.reduce((best, _, i) => (
-    ordered[i].x + ordered[i].y < ordered[best].x + ordered[best].y ? i : best
-  ), 0);
-  const ccw = [ordered[topLeftIdx], ordered[(topLeftIdx + 1) % 4], ordered[(topLeftIdx + 2) % 4], ordered[(topLeftIdx + 3) % 4]];
-  return [ccw[0], ccw[3], ccw[2], ccw[1]] as Corners;
+  // Y座標でソートして、上辺の2点を特定
+  const sortedByY = [...corners].map((c, i) => ({ ...c, idx: i })).sort((a, b) => a.y - b.y);
+  const topTwo = sortedByY.slice(0, 2); // Y座標が小さい2点（上辺）
+  const bottomTwo = sortedByY.slice(2);  // Y座標が大きい2点（下辺）
+  
+  // 上辺の2点をX座標でソート（左→右）
+  topTwo.sort((a, b) => a.x - b.x);
+  const tl = topTwo[0]; // 左上（Y座標が小さく、X座標が小さい）
+  const tr = topTwo[1]; // 右上（Y座標が小さく、X座標が大きい）
+  
+  // 下辺の2点をX座標でソート（左→右）
+  bottomTwo.sort((a, b) => a.x - b.x);
+  const bl = bottomTwo[0]; // 左下（Y座標が大きく、X座標が小さい）
+  const br = bottomTwo[1]; // 右下（Y座標が大きく、X座標が大きい）
+  
+  // [左上, 右上, 右下, 左下] の順序で返す
+  return [
+    { x: tl.x, y: tl.y },
+    { x: tr.x, y: tr.y },
+    { x: br.x, y: br.y },
+    { x: bl.x, y: bl.y },
+  ] as Corners;
 }
 
 // 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（角丸黒背景＋白文字、任意で透過）
@@ -553,29 +564,20 @@ export default function Home() {
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // プレートの「上辺」を正しく検出: Y座標が小さい（上側）の2点を「上辺」として使用
-        // 横向き撮影でも正しく動作するよう、座標順序に依存せずY座標で判定
-        const cornersWithIdx = scaled.map((c, i) => ({ ...c, idx: i }));
-        cornersWithIdx.sort((a, b) => a.y - b.y); // Y座標でソート（小さい順=上側）
-        const topTwo = cornersWithIdx.slice(0, 2); // Y座標が小さい2点
-        topTwo.sort((a, b) => a.x - b.x); // X座標でソート（左→右）
-        const topLeft = topTwo[0];
-        const topRight = topTwo[1];
-        
-        // 上辺の2点から角度を計算（横向き撮影でも正しく動作）
-        const dx = topRight.x - topLeft.x;
-        const dy = topRight.y - topLeft.y;
+        // プレートの「上辺」（左上→右上）の角度を算出
+        // normalizeCornersOrder により corners[0]=左上, corners[1]=右上 が保証されている
+        // 縦向き・横向き・斜めのいずれでも正しく動作するよう、この順序を信頼して使用
+        const dx = scaled[1].x - scaled[0].x;
+        const dy = scaled[1].y - scaled[0].y;
+        // Canvas座標系（Y軸下向き）で左上→右上のベクトル角度を計算
         const baseAngle = Math.atan2(dy, dx);
         const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
 
         // プレート幅・高さ（ピクセル）。ロゴは10%大きく
-        // 上辺の長さを幅、下辺の長さを高さとして使用
-        const plateWidth = Math.hypot(dx * w, dy * h);
-        const bottomTwo = cornersWithIdx.slice(2); // Y座標が大きい2点（下側）
-        bottomTwo.sort((a, b) => a.x - b.x);
-        const bottomLeft = bottomTwo[0];
-        const bottomRight = bottomTwo[1];
-        const plateHeight = Math.hypot((bottomRight.x - bottomLeft.x) * w, (bottomRight.y - bottomLeft.y) * h);
+        const plateWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
+        const plateHeightLeft = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
+        const plateHeightRight = Math.hypot((scaled[2].x - scaled[1].x) * w, (scaled[2].y - scaled[1].y) * h);
+        const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
         const logoWidth = plateWidth * 1.1;
         const logoHeight = plateHeight * 1.1;
 
