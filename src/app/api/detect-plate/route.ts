@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
     const mimeType = imageFile.type || 'image/jpeg';
 
     // ナンバープレート四隅検知専用（0-1000）。プロンプトを最小化してレスポンス速度を優先
-    const prompt = `ナンバープレート四隅検出。座標0-1000。左上・右上・右下・左下。${imageWidth}x${imageHeight}。なしならfound=false。`;
+    const prompt = `ナンバープレート四隅0-1000。${imageWidth}x${imageHeight}。`;
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
@@ -187,8 +187,8 @@ export async function POST(request: NextRequest) {
           ],
           generationConfig: {
             temperature: 0,
-            topP: 0.95,
-            topK: 40,
+            topP: 0.8, // 0.95 → 0.8 に下げて処理速度を優先
+            topK: 20, // 40 → 20 に下げて処理速度を優先
             responseMimeType: 'application/json',
             responseSchema: RESPONSE_SCHEMA,
           },

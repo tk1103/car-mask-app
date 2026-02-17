@@ -317,8 +317,8 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は長辺512に制限（超軽量化でタイムアウトを防ぐ）
-      const maxApiLongEdge = 512;
+      // API送信画像は長辺320に制限（超軽量化で解析速度を最大化）
+      const maxApiLongEdge = 320;
       const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
@@ -333,17 +333,20 @@ export default function Home() {
       // コントラスト調整を削除して処理速度を優先
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.3);
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.2);
       });
 
-      // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は fetch と並列で実行しリクエストを遅らせない
+      // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は非同期で実行しAPI呼び出しを遅らせない
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
       setScreenMode('preview_edit');
       setDetectedCorners([]);
       setIsProcessing(true);
       setCameraError(null);
-      const blurScore = getBlurScore(apiCanvas);
-      setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
+      // ブレ検出を非同期化（API呼び出しをブロックしない）
+      setTimeout(() => {
+        const blurScore = getBlurScore(apiCanvas);
+        setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
+      }, 0);
 
       const createFormData = () => {
         const fd = new FormData();
@@ -364,7 +367,7 @@ export default function Home() {
           clearTimeout(timeoutId);
           if (retryCount === 0 && (fetchErr instanceof Error && fetchErr.name === 'AbortError' || fetchErr instanceof TypeError)) {
             setCameraError('画像サイズを小さくして再試行しています...');
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            await new Promise((resolve) => setTimeout(resolve, 100));
             return performFetch(1);
           }
           throw fetchErr;
