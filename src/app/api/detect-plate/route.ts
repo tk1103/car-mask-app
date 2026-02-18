@@ -72,24 +72,24 @@ function isRateLimited(clientId: string): boolean {
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
-    found: { type: 'boolean', description: 'true if plate found' },
+    found: { type: 'boolean', description: 'found' },
     plates: {
       type: 'array',
       description: 'plates',
       items: {
         type: 'object',
         properties: {
-          found: { type: 'boolean', description: 'true if plate found' },
+          found: { type: 'boolean', description: 'found' },
           corners: {
             type: 'array',
-            description: 'corners 0-1000',
+            description: 'corners',
             minItems: 4,
             maxItems: 4,
             items: {
               type: 'object',
               properties: {
-                x: { type: 'number', minimum: 0, maximum: 1000, description: '0-1000 normalized x' },
-                y: { type: 'number', minimum: 0, maximum: 1000, description: '0-1000 normalized y' },
+                x: { type: 'number', minimum: 0, maximum: 1000, description: 'x' },
+                y: { type: 'number', minimum: 0, maximum: 1000, description: 'y' },
               },
               required: ['x', 'y'],
             },
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    const prompt = "Detect license plates. Return JSON only. CRITICAL: Order corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left] based on the plate's text orientation, regardless of image rotation.";
+    const prompt = "Detect all license plates on cars in the image. Return JSON only. CRITICAL: Order corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left] based on the plate's text orientation. If multiple cars exist, detect all plates.";
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
