@@ -69,34 +69,34 @@ function isRateLimited(clientId: string): boolean {
   return false;
 }
 
-// ナンバープレート検知専用レスポンススキーマ: found + plates[]（各要素は found と corners: {x,y}[]）
+// Plate detection response schema (concise English to reduce AI load)
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
     found: {
       type: 'boolean',
-      description: '画像内に1つ以上ナンバープレートが検出された場合true',
+      description: 'True if at least one plate detected',
     },
     plates: {
       type: 'array',
-      description: '検出したナンバープレートの配列。各要素は found と corners を持つ',
+      description: 'List of detected plates',
       items: {
         type: 'object',
         properties: {
           found: {
             type: 'boolean',
-            description: '当該プレートが有効に検出された場合true',
+            description: 'True if this plate is valid',
           },
           corners: {
             type: 'array',
-            description: '四隅の座標。時計回りに 左上・右上・右下・左下。0-1000で正規化',
+            description: 'Four corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left], 0-1000',
             minItems: 4,
             maxItems: 4,
             items: {
               type: 'object',
               properties: {
-                x: { type: 'number', minimum: 0, maximum: 1000, description: '横方向 0=左端 1000=右端' },
-                y: { type: 'number', minimum: 0, maximum: 1000, description: '縦方向 0=上端 1000=下端' },
+                x: { type: 'number', minimum: 0, maximum: 1000, description: 'X 0=left 1000=right' },
+                y: { type: 'number', minimum: 0, maximum: 1000, description: 'Y 0=top 1000=bottom' },
               },
               required: ['x', 'y'],
             },
@@ -162,8 +162,7 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    // ナンバープレート四隅検知専用（0-1000）。プロンプトを最小化してレスポンス速度を優先
-    const prompt = `ナンバープレート四隅0-1000。${imageWidth}x${imageHeight}。`;
+    const prompt = `Detect plates. Return JSON only. CRITICAL: Order corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left] based on the plate's text orientation, regardless of image rotation. Coordinates 0-1000. Image ${imageWidth}x${imageHeight}.`;
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
@@ -187,8 +186,8 @@ export async function POST(request: NextRequest) {
           ],
           generationConfig: {
             temperature: 0,
-            topP: 0.8, // 0.95 → 0.8 に下げて処理速度を優先
-            topK: 20, // 40 → 20 に下げて処理速度を優先
+            topP: 0.1,
+            topK: 1,
             responseMimeType: 'application/json',
             responseSchema: RESPONSE_SCHEMA,
           },
