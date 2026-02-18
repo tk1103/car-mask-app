@@ -155,13 +155,13 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    const prompt = "Detect all license plates on cars in the image. Return JSON only. CRITICAL: Order corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left] based on the plate's text orientation. If multiple cars exist, detect all plates.";
+    const prompt = "Detect license plates. Return JSON only. Order corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left] by text orientation.";
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20_000); // 20秒（Gemini応答待ち。クライアント22sより短く）
+    const timeoutId = setTimeout(() => controller.abort(), 15_000); // 15秒（Gemini応答待ち。クライアント17sより短く）
     let geminiResponse: Response;
     const startTime = Date.now();
     try {
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
           {
             found: false,
             error: '解析がタイムアウトしました',
-            userMessage: '解析に時間がかかりすぎました。もう一度お試しください。',
+            userMessage: '解析サーバが混雑しています。しばらく待ってから再度お試しください。',
             status: 504,
             remainingToday: getDailyRemaining(clientId),
           },
