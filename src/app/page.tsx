@@ -402,7 +402,7 @@ export default function Home() {
 
       const performFetch = async (retryCount: number): Promise<Response> => {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15_000); // 15秒でタイムアウト
+        const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30秒でタイムアウト（API側28sと合わせる）
         try {
           const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
           clearTimeout(timeoutId);

@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 14_000); // 14秒でタイムアウト（クライアント15sより短く）
+    const timeoutId = setTimeout(() => controller.abort(), 28_000); // 28秒（Gemini応答待ち。クライアント30sより短く）
     let geminiResponse: Response;
     try {
       geminiResponse = await fetch(url, {
