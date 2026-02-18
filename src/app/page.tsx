@@ -14,9 +14,9 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-// AI返却の corners[0,1,2,3] をそのまま [左上, 右上, 右下, 左下] として扱う（ソートなし）
+// AI返却の corners[0,1,2,3] をそのまま [左上, 右上, 右下, 左下] として使用（ソート・並び替えなし）
 function normalizeCornersOrder(corners: Corners): Corners {
-  return corners.map((c) => ({ x: c.x, y: c.y })) as Corners;
+  return corners;
 }
 
 // 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（透明感のある角丸黒背景＋白文字）
@@ -317,7 +317,7 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'low';
-      apiCtx.filter = 'grayscale(100%) contrast(1.2)';
+      apiCtx.filter = 'contrast(1.2) brightness(1.1)';
       apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
