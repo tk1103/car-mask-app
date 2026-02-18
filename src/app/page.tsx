@@ -14,68 +14,12 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-// 四隅を [左上, 右上, 右下, 左下] の順に並べる（Y座標ソートは使わない）
-// 重心からの角度でソートして cyclic な順序を得てから、
-// プレートの「上辺」（数字が読める方向）を長い辺の組＋画面上で上にある辺で特定する
+// AI（Gemini）の返却順をそのまま使用: 0=左上, 1=右上, 2=右下, 3=左下（Y座標ソートは行わない）
 function normalizeCornersOrder(corners: Corners): Corners {
-  const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
-  const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
-  const withAngle = corners.map((p) => {
-    let a = Math.atan2(p.y - cy, p.x - cx);
-    if (a < 0) a += 2 * Math.PI;
-    return { ...p, angle: a };
-  });
-  withAngle.sort((a, b) => a.angle - b.angle);
-  const [A, B, C, D] = withAngle;
-
-  const d01 = Math.hypot(B.x - A.x, B.y - A.y);
-  const d12 = Math.hypot(C.x - B.x, C.y - B.y);
-  const d23 = Math.hypot(D.x - C.x, D.y - C.y);
-  const d30 = Math.hypot(A.x - D.x, A.y - D.y);
-  const sumTopBottom1 = d01 + d23;
-  const sumTopBottom2 = d12 + d30;
-
-  let topLeft: { x: number; y: number };
-  let topRight: { x: number; y: number };
-  let bottomRight: { x: number; y: number };
-  let bottomLeft: { x: number; y: number };
-
-  if (sumTopBottom1 >= sumTopBottom2) {
-    const topIsAB = (A.y + B.y) / 2 < (C.y + D.y) / 2;
-    if (topIsAB) {
-      if (A.x < B.x) {
-        topLeft = A; topRight = B; bottomRight = C; bottomLeft = D;
-      } else {
-        topLeft = B; topRight = A; bottomRight = D; bottomLeft = C;
-      }
-    } else {
-      if (C.x < D.x) {
-        topLeft = C; topRight = D; bottomRight = A; bottomLeft = B;
-      } else {
-        topLeft = D; topRight = C; bottomRight = B; bottomLeft = A;
-      }
-    }
-  } else {
-    const topIsBC = (B.y + C.y) / 2 < (D.y + A.y) / 2;
-    if (topIsBC) {
-      if (B.x < C.x) {
-        topLeft = B; topRight = C; bottomRight = D; bottomLeft = A;
-      } else {
-        topLeft = C; topRight = B; bottomRight = A; bottomLeft = D;
-      }
-    } else {
-      if (D.x < A.x) {
-        topLeft = D; topRight = A; bottomRight = B; bottomLeft = C;
-      } else {
-        topLeft = A; topRight = D; bottomRight = C; bottomLeft = B;
-      }
-    }
-  }
-
-  return [topLeft, topRight, bottomRight, bottomLeft] as Corners;
+  return corners.map((c) => ({ x: c.x, y: c.y })) as Corners;
 }
 
-// 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（角丸黒背景＋白文字、任意で透過）
+// 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（透明感のある角丸黒背景＋白文字）
 // 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
 function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
@@ -83,7 +27,7 @@ function drawCarkusuLogoAtOrigin(
   logoHeight: number,
   options?: { backgroundAlpha?: number }
 ) {
-  const alpha = options?.backgroundAlpha ?? 0.95;
+  const alpha = options?.backgroundAlpha ?? 0.92;
   const halfW = logoWidth / 2;
   const halfH = logoHeight / 2;
   const cornerRadius = Math.min(logoHeight * 0.1, halfW, halfH);
@@ -361,8 +305,8 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は長辺320に制限（超軽量化で解析速度を最大化）
-      const maxApiLongEdge = 320;
+      // API送信画像は長辺512に制限（軽量化で解析速度を確保）
+      const maxApiLongEdge = 512;
       const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
@@ -372,9 +316,10 @@ export default function Home() {
       const apiCtx = apiCanvas.getContext('2d');
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'low'; // 速度優先
+      apiCtx.imageSmoothingQuality = 'low';
+      apiCtx.filter = 'grayscale(100%) contrast(1.1)';
       apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
-      // コントラスト調整を削除して処理速度を優先
+      apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
         apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.2);
