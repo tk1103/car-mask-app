@@ -239,7 +239,7 @@ export async function POST(request: NextRequest) {
       const userMessage = isQuota
         ? '本日の検出回数の上限に達しました。明日またお試しください。'
         : isHighDemand
-          ? '解析サービスが混雑しています。しばらく待ってから再度お試しください。'
+          ? '解析サーバが混雑しています。しばらく待ってから再度お試しください。'
           : '解析中にエラーが発生しました。しばらく経ってから再度お試しください。';
 
       return NextResponse.json(
