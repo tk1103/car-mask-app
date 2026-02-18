@@ -234,9 +234,14 @@ export async function POST(request: NextRequest) {
       const isQuota =
         geminiResponse.status === 429 ||
         /quota|rate limit|exceeded/i.test(String(errorMessage));
+      const isHighDemand =
+        geminiResponse.status === 503 ||
+        /high demand|experiencing.*demand|try again later|overloaded|resource exhausted/i.test(String(errorMessage));
       const userMessage = isQuota
         ? '本日の検出回数の上限に達しました。明日またお試しください。'
-        : errorMessage;
+        : isHighDemand
+          ? '解析サービスが混雑しています。しばらく待ってから再度お試しください。'
+          : '解析中にエラーが発生しました。しばらく経ってから再度お試しください。';
 
       return NextResponse.json(
         {
@@ -259,6 +264,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         found: false,
         error: 'Gemini APIの応答を解析できませんでした',
+        userMessage: '解析の応答を読み取れませんでした。しばらく経ってから再度お試しください。',
         rawResponse: text.substring(0, 500),
       }, { status: 500 });
     }
@@ -273,6 +279,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         found: false,
         error: 'Gemini APIから空の応答が返されました',
+        userMessage: '解析結果が空でした。もう一度撮影してお試しください。',
         rawResponse: JSON.stringify(geminiJson).substring(0, 500),
       }, { status: 500 });
     }
@@ -310,6 +317,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         found: false,
         error: '座標の解析に失敗しました',
+        userMessage: '座標の解析に失敗しました。もう一度撮影してお試しください。',
         rawResponse: jsonText.substring(0, 500),
       }, { status: 500 });
     }
@@ -318,6 +326,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: 'ナンバープレートの検出に失敗しました',
+        userMessage: 'ナンバープレートの検出に失敗しました。しばらく経ってから再度お試しください。',
         details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }

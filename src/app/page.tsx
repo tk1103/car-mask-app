@@ -179,7 +179,7 @@ export default function Home() {
       setScreenMode('camera');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setCameraError(msg.includes('Permission') ? 'カメラの許可をオンにしてください。' : `カメラエラー: ${msg}`);
+      setCameraError(msg.includes('Permission') ? 'カメラの許可をオンにしてください。' : 'カメラを起動できませんでした。許可と接続をご確認ください。');
     }
   }, []);
 
@@ -392,7 +392,7 @@ export default function Home() {
         if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
           setCameraError('解析がタイムアウトしました。通信環境を確認してもう一度お試しください。');
         } else {
-          setCameraError(fetchErr instanceof Error ? fetchErr.message : '解析に失敗しました');
+          setCameraError('解析に失敗しました。通信を確認してもう一度お試しください。');
         }
         setDetectedCorners([[
           { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
@@ -414,7 +414,7 @@ export default function Home() {
         const raw = (result.error || '') as string;
         const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
         const message = (result as { userMessage?: string }).userMessage
-          ?? (isQuota ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。` : (result.error || `エラー ${res.status}`));
+          ?? (isQuota ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。` : (result.error || `解析に失敗しました（${res.status}）`));
         setCameraError(message);
         const remaining = (result as { remainingToday?: number }).remainingToday;
         if (remaining !== undefined) setDailyRemaining(remaining);
@@ -473,7 +473,7 @@ export default function Home() {
           await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
         } catch (_) {}
       }
-      setCameraError(e instanceof Error ? e.message : '解析に失敗しました');
+      setCameraError('解析に失敗しました。しばらく経ってから再度お試しください。');
       setDetectedCorners([[
         { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
         { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
@@ -943,7 +943,7 @@ export default function Home() {
               onClick={() => setCameraError(null)}
               className="px-6 py-2.5 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
             >
-              OK
+              閉じる
             </button>
           </div>
         </div>
@@ -969,7 +969,7 @@ export default function Home() {
                 <p className="text-white/80 text-xs font-extralight text-center max-w-xs">ナンバープレートを検出しています</p>
               </div>
               <div className="w-full min-h-[100px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
-                <span className="text-white/40 text-xs">AD SPACE (BETA)</span>
+                <span className="text-white/40 text-xs">広告枠（ベータ）</span>
               </div>
             </div>
           )}
@@ -1072,7 +1072,7 @@ export default function Home() {
                   <p className="text-white/60 text-xs font-extralight">ナンバープレートを検出しています</p>
                 </div>
                 <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
-                  <span className="text-white/40 text-xs">AD SPACE (BETA)</span>
+                  <span className="text-white/40 text-xs">広告枠（ベータ）</span>
                 </div>
               </div>
             )}
@@ -1163,7 +1163,7 @@ export default function Home() {
               </div>
             )}
             <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
-              <span className="text-white/40 text-xs">AD SPACE (BETA)</span>
+              <span className="text-white/40 text-xs">広告枠（ベータ）</span>
             </div>
           </div>
         </div>
