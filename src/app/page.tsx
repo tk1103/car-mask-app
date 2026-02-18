@@ -14,32 +14,65 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-// 四隅を左上から時計回りに TL→TR→BR→BL で並べる
-// ナンバープレートの数字の向き（上辺）を基準に角度を調整するため、
-// Y座標が小さい2点を「上辺」として検出し、その中でX座標が小さい方を左上、大きい方を右上とする
+// 四隅を [左上, 右上, 右下, 左下] の順に並べる（Y座標ソートは使わない）
+// 重心からの角度でソートして cyclic な順序を得てから、
+// プレートの「上辺」（数字が読める方向）を長い辺の組＋画面上で上にある辺で特定する
 function normalizeCornersOrder(corners: Corners): Corners {
-  // Y座標でソートして、上辺の2点を特定
-  const sortedByY = [...corners].map((c, i) => ({ ...c, idx: i })).sort((a, b) => a.y - b.y);
-  const topTwo = sortedByY.slice(0, 2); // Y座標が小さい2点（上辺）
-  const bottomTwo = sortedByY.slice(2);  // Y座標が大きい2点（下辺）
-  
-  // 上辺の2点をX座標でソート（左→右）
-  topTwo.sort((a, b) => a.x - b.x);
-  const tl = topTwo[0]; // 左上（Y座標が小さく、X座標が小さい）
-  const tr = topTwo[1]; // 右上（Y座標が小さく、X座標が大きい）
-  
-  // 下辺の2点をX座標でソート（左→右）
-  bottomTwo.sort((a, b) => a.x - b.x);
-  const bl = bottomTwo[0]; // 左下（Y座標が大きく、X座標が小さい）
-  const br = bottomTwo[1]; // 右下（Y座標が大きく、X座標が大きい）
-  
-  // [左上, 右上, 右下, 左下] の順序で返す
-  return [
-    { x: tl.x, y: tl.y },
-    { x: tr.x, y: tr.y },
-    { x: br.x, y: br.y },
-    { x: bl.x, y: bl.y },
-  ] as Corners;
+  const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+  const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+  const withAngle = corners.map((p) => {
+    let a = Math.atan2(p.y - cy, p.x - cx);
+    if (a < 0) a += 2 * Math.PI;
+    return { ...p, angle: a };
+  });
+  withAngle.sort((a, b) => a.angle - b.angle);
+  const [A, B, C, D] = withAngle;
+
+  const d01 = Math.hypot(B.x - A.x, B.y - A.y);
+  const d12 = Math.hypot(C.x - B.x, C.y - B.y);
+  const d23 = Math.hypot(D.x - C.x, D.y - C.y);
+  const d30 = Math.hypot(A.x - D.x, A.y - D.y);
+  const sumTopBottom1 = d01 + d23;
+  const sumTopBottom2 = d12 + d30;
+
+  let topLeft: { x: number; y: number };
+  let topRight: { x: number; y: number };
+  let bottomRight: { x: number; y: number };
+  let bottomLeft: { x: number; y: number };
+
+  if (sumTopBottom1 >= sumTopBottom2) {
+    const topIsAB = (A.y + B.y) / 2 < (C.y + D.y) / 2;
+    if (topIsAB) {
+      if (A.x < B.x) {
+        topLeft = A; topRight = B; bottomRight = C; bottomLeft = D;
+      } else {
+        topLeft = B; topRight = A; bottomRight = D; bottomLeft = C;
+      }
+    } else {
+      if (C.x < D.x) {
+        topLeft = C; topRight = D; bottomRight = A; bottomLeft = B;
+      } else {
+        topLeft = D; topRight = C; bottomRight = B; bottomLeft = A;
+      }
+    }
+  } else {
+    const topIsBC = (B.y + C.y) / 2 < (D.y + A.y) / 2;
+    if (topIsBC) {
+      if (B.x < C.x) {
+        topLeft = B; topRight = C; bottomRight = D; bottomLeft = A;
+      } else {
+        topLeft = C; topRight = B; bottomRight = A; bottomLeft = D;
+      }
+    } else {
+      if (D.x < A.x) {
+        topLeft = D; topRight = A; bottomRight = B; bottomLeft = C;
+      } else {
+        topLeft = A; topRight = D; bottomRight = C; bottomLeft = B;
+      }
+    }
+  }
+
+  return [topLeft, topRight, bottomRight, bottomLeft] as Corners;
 }
 
 // 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（角丸黒背景＋白文字、任意で透過）
@@ -564,12 +597,10 @@ export default function Home() {
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // プレートの「上辺」（左上→右上）の角度を算出
-        // normalizeCornersOrder により corners[0]=左上, corners[1]=右上 が保証されている
-        // 縦向き・横向き・斜めのいずれでも正しく動作するよう、この順序を信頼して使用
+        // プレートの「上辺」（数字が読める方向）の角度を算出
+        // normalizeCornersOrder で corners[0]=左上・corners[1]=右上（プレートにとっての上辺）に揃えてある
         const dx = scaled[1].x - scaled[0].x;
         const dy = scaled[1].y - scaled[0].y;
-        // Canvas座標系（Y軸下向き）で左上→右上のベクトル角度を計算
         const baseAngle = Math.atan2(dy, dx);
         const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
 
@@ -589,8 +620,7 @@ export default function Home() {
         ctx.translate(centerX, centerY);
         ctx.rotate(finalRotation);
         ctx.translate(offsetX, offsetY);
-
-        // 中心 (0,0) に黒角丸長方形＋白文字 Carkusu をセットで描画（マスクとロゴ角度一致）
+        // 以降は回転済み座標系のみ。drawCarkusuLogoAtOrigin は追加の回転をせず、finalRotation に合わせて描画
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
