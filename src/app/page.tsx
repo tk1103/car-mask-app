@@ -347,13 +347,22 @@ export default function Home() {
 
       const performFetch = async (retryCount: number): Promise<Response> => {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30秒でタイムアウト（API側28sと合わせる）
+        const fetchStart = Date.now();
+        const timeoutId = setTimeout(() => controller.abort(), 22_000); // 22秒でタイムアウト（API側20sと合わせる）
         try {
           const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
           clearTimeout(timeoutId);
+          const elapsed = Date.now() - fetchStart;
+          console.log(`[client] API fetch completed in ${elapsed}ms, status=${res.status}`);
           return res;
         } catch (fetchErr: unknown) {
           clearTimeout(timeoutId);
+          const elapsed = Date.now() - fetchStart;
+          if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+            console.error(`[client] API fetch timeout after ${elapsed}ms`);
+          } else {
+            console.error(`[client] API fetch error after ${elapsed}ms:`, fetchErr);
+          }
           if (retryCount === 0 && (fetchErr instanceof Error && fetchErr.name === 'AbortError' || fetchErr instanceof TypeError)) {
             setCameraError('画像サイズを小さくして再試行しています...');
             await new Promise((resolve) => setTimeout(resolve, 100));

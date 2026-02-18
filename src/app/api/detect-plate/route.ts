@@ -161,8 +161,9 @@ export async function POST(request: NextRequest) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 28_000); // 28秒（Gemini応答待ち。クライアント30sより短く）
+    const timeoutId = setTimeout(() => controller.abort(), 20_000); // 20秒（Gemini応答待ち。クライアント22sより短く）
     let geminiResponse: Response;
+    const startTime = Date.now();
     try {
       geminiResponse = await fetch(url, {
         method: 'POST',
@@ -188,7 +189,9 @@ export async function POST(request: NextRequest) {
       });
     } catch (fetchErr: unknown) {
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
       if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+        console.error(`[detect-plate] Gemini API timeout after ${elapsed}ms`);
         return NextResponse.json(
           {
             found: false,
@@ -200,11 +203,15 @@ export async function POST(request: NextRequest) {
           { status: 504 }
         );
       }
+      console.error(`[detect-plate] Gemini API fetch error after ${elapsed}ms:`, fetchErr);
       throw fetchErr;
     }
     clearTimeout(timeoutId);
+    const fetchElapsed = Date.now() - startTime;
 
     if (!geminiResponse.ok) {
+      const elapsed = Date.now() - startTime;
+      console.error(`[detect-plate] Gemini API error ${geminiResponse.status} after ${elapsed}ms`);
       let errorBody: string;
       let errorJson: any = null;
       try {
@@ -246,10 +253,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const parseStart = Date.now();
     let geminiJson: any;
     try {
       geminiJson = await geminiResponse.json();
     } catch {
+      const elapsed = Date.now() - startTime;
+      console.error(`[detect-plate] Failed to parse JSON after ${elapsed}ms`);
       const text = await geminiResponse.text();
       return NextResponse.json({
         found: false,
@@ -265,6 +275,8 @@ export async function POST(request: NextRequest) {
         .join('') ?? '';
 
     if (!text?.trim()) {
+      const elapsed = Date.now() - startTime;
+      console.error(`[detect-plate] Empty response after ${elapsed}ms`);
       return NextResponse.json({
         found: false,
         error: 'Gemini APIから空の応答が返されました',
@@ -299,8 +311,12 @@ export async function POST(request: NextRequest) {
       }
 
       (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
+      const totalElapsed = Date.now() - startTime;
+      console.log(`[detect-plate] Success: found=${parsed.found}, plates=${parsed.plates?.length || 0}, elapsed=${totalElapsed}ms`);
       return NextResponse.json(parsed);
     } catch {
+      const elapsed = Date.now() - startTime;
+      console.error(`[detect-plate] JSON parse error after ${elapsed}ms`);
       return NextResponse.json({
         found: false,
         error: '座標の解析に失敗しました',
@@ -309,6 +325,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
   } catch (error) {
+    console.error('[detect-plate] Unexpected error:', error);
     return NextResponse.json(
       {
         error: 'ナンバープレートの検出に失敗しました',
