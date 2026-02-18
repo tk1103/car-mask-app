@@ -14,7 +14,7 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-// AI（Gemini）の返却順をそのまま使用: 0=左上, 1=右上, 2=右下, 3=左下（Y座標ソートは行わない）
+// AI返却の corners[0,1,2,3] をそのまま [左上, 右上, 右下, 左下] として扱う（ソートなし）
 function normalizeCornersOrder(corners: Corners): Corners {
   return corners.map((c) => ({ x: c.x, y: c.y })) as Corners;
 }
@@ -317,7 +317,7 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'low';
-      apiCtx.filter = 'grayscale(100%) contrast(1.1)';
+      apiCtx.filter = 'grayscale(100%) contrast(1.2)';
       apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 

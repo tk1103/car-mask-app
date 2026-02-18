@@ -69,34 +69,27 @@ function isRateLimited(clientId: string): boolean {
   return false;
 }
 
-// Plate detection response schema (concise English to reduce AI load)
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
-    found: {
-      type: 'boolean',
-      description: 'True if at least one plate detected',
-    },
+    found: { type: 'boolean', description: 'true if plate found' },
     plates: {
       type: 'array',
-      description: 'List of detected plates',
+      description: 'plates',
       items: {
         type: 'object',
         properties: {
-          found: {
-            type: 'boolean',
-            description: 'True if this plate is valid',
-          },
+          found: { type: 'boolean', description: 'true if plate found' },
           corners: {
             type: 'array',
-            description: 'Four corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left], 0-1000',
+            description: 'corners 0-1000',
             minItems: 4,
             maxItems: 4,
             items: {
               type: 'object',
               properties: {
-                x: { type: 'number', minimum: 0, maximum: 1000, description: 'X 0=left 1000=right' },
-                y: { type: 'number', minimum: 0, maximum: 1000, description: 'Y 0=top 1000=bottom' },
+                x: { type: 'number', minimum: 0, maximum: 1000, description: '0-1000 normalized x' },
+                y: { type: 'number', minimum: 0, maximum: 1000, description: '0-1000 normalized y' },
               },
               required: ['x', 'y'],
             },
@@ -162,7 +155,7 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    const prompt = `Detect plates. Return JSON only. CRITICAL: Order corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left] based on the plate's text orientation, regardless of image rotation. Coordinates 0-1000. Image ${imageWidth}x${imageHeight}.`;
+    const prompt = "Detect license plates. Return JSON only. CRITICAL: Order corners [0:top-left, 1:top-right, 2:bottom-right, 3:bottom-left] based on the plate's text orientation, regardless of image rotation.";
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
@@ -222,9 +215,8 @@ export async function POST(request: NextRequest) {
           // ignore
         }
       } catch (e) {
-        errorBody = `エラーレスポンスの読み取りに失敗: ${e instanceof Error ? e.message : String(e)}`;
+        errorBody = '';
       }
-      console.error('Gemini HTTP error:', geminiResponse.status, errorBody);
 
       let errorMessage = 'Gemini API HTTPエラー';
       if (errorJson?.error?.message) errorMessage = errorJson.error.message;
@@ -257,8 +249,7 @@ export async function POST(request: NextRequest) {
     let geminiJson: any;
     try {
       geminiJson = await geminiResponse.json();
-    } catch (jsonError) {
-      console.error('Failed to parse Gemini response as JSON:', jsonError);
+    } catch {
       const text = await geminiResponse.text();
       return NextResponse.json({
         found: false,
@@ -274,7 +265,6 @@ export async function POST(request: NextRequest) {
         .join('') ?? '';
 
     if (!text?.trim()) {
-      console.error('Empty response from Gemini API:', geminiJson);
       return NextResponse.json({
         found: false,
         error: 'Gemini APIから空の応答が返されました',
@@ -303,7 +293,6 @@ export async function POST(request: NextRequest) {
         } else {
           parsed.plates = validPlates;
         }
-        console.log(`Detect-plate: found=${parsed.found}, plates=${parsed.plates.length}`);
       } else if (parsed.found && !Array.isArray(parsed.plates)) {
         parsed.found = false;
         parsed.plates = [];
@@ -311,8 +300,7 @@ export async function POST(request: NextRequest) {
 
       (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
       return NextResponse.json(parsed);
-    } catch (parseError) {
-      console.error('JSON parse error:', parseError);
+    } catch {
       return NextResponse.json({
         found: false,
         error: '座標の解析に失敗しました',
@@ -321,7 +309,6 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
   } catch (error) {
-    console.error('Gemini API error:', error);
     return NextResponse.json(
       {
         error: 'ナンバープレートの検出に失敗しました',
