@@ -8,19 +8,29 @@ export const runtime = 'nodejs';
 // 一時画像を保存するディレクトリ
 const UPLOAD_DIR = join(process.cwd(), 'public', 'temp');
 
-// ディレクトリが存在しない場合は作成
-if (!existsSync(UPLOAD_DIR)) {
-  mkdirSync(UPLOAD_DIR, { recursive: true });
+function ensureUploadDir(): void {
+  try {
+    if (!existsSync(UPLOAD_DIR)) {
+      mkdirSync(UPLOAD_DIR, { recursive: true });
+    }
+  } catch {
+    // Vercel等の読み取り専用環境では無視
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const imageFile = formData.get('image') as File;
-    
+
     if (!imageFile) {
       return NextResponse.json({ error: '画像が送信されませんでした' }, { status: 400 });
     }
+    if (!imageFile.type || !imageFile.type.startsWith('image/')) {
+      return NextResponse.json({ error: '画像形式が不正です' }, { status: 400 });
+    }
+
+    ensureUploadDir();
 
     // 一時ファイル名を生成（タイムスタンプ + ランダム文字列）
     const timestamp = Date.now();
