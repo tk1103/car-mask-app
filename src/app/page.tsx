@@ -18,8 +18,73 @@ function normalizeCornersOrder(corners: Corners): Corners {
   return corners;
 }
 
-// 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（透明感のある角丸黒背景＋白文字）
-// 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
+// 4点で囲まれた四角形にロゴをピッタリ描画（ホモグラフィ的には2三角形のアフィン変換）
+function drawLogoInQuad(
+  ctx: CanvasRenderingContext2D,
+  quad: { x: number; y: number }[],
+  lw: number,
+  lh: number,
+  maskImage: HTMLImageElement | null,
+  options?: { backgroundAlpha?: number }
+) {
+  const [TL, TR, BR, BL] = quad;
+  const halfW = lw / 2;
+  const halfH = lh / 2;
+
+  const drawTriangle = (
+    s0: { x: number; y: number },
+    s1: { x: number; y: number },
+    s2: { x: number; y: number },
+    d0: { x: number; y: number },
+    d1: { x: number; y: number },
+    d2: { x: number; y: number }
+  ) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(d0.x, d0.y);
+    ctx.lineTo(d1.x, d1.y);
+    ctx.lineTo(d2.x, d2.y);
+    ctx.closePath();
+    ctx.clip();
+    const v1x = s1.x - s0.x;
+    const v1y = s1.y - s0.y;
+    const v2x = s2.x - s0.x;
+    const v2y = s2.y - s0.y;
+    const det = v1x * v2y - v1y * v2x || 1e-6;
+    const a = ((d1.x - d0.x) * v2y - (d2.x - d0.x) * v1y) / det;
+    const b = ((d1.y - d0.y) * v2y - (d2.y - d0.y) * v1y) / det;
+    const c = ((d2.x - d0.x) * v1x - (d1.x - d0.x) * v2x) / det;
+    const d = ((d2.y - d0.y) * v1x - (d1.y - d0.y) * v2x) / det;
+    const tx = d0.x - a * s0.x - c * s0.y;
+    const ty = d0.y - b * s0.x - d * s0.y;
+    ctx.setTransform(a, b, c, d, tx, ty);
+    if (maskImage?.complete && maskImage.naturalWidth) {
+      ctx.drawImage(maskImage, -halfW, -halfH, lw, lh);
+    } else {
+      drawCarkusuLogoAtOrigin(ctx, lw, lh, options);
+    }
+    ctx.restore();
+  };
+
+  drawTriangle(
+    { x: -halfW, y: -halfH },
+    { x: halfW, y: -halfH },
+    { x: halfW, y: halfH },
+    TL,
+    TR,
+    BR
+  );
+  drawTriangle(
+    { x: -halfW, y: -halfH },
+    { x: halfW, y: halfH },
+    { x: -halfW, y: halfH },
+    TL,
+    BR,
+    BL
+  );
+}
+
+// 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（透明感のある角丸黒背景＋白文字）
 function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
@@ -127,8 +192,8 @@ export default function Home() {
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const playAttemptCountRef = useRef(0);
-  const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
-  const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
+  const dragStartRef = useRef<{ canvasX: number; canvasY: number; startOffset: { x: number; y: number } } | null>(null);
+  const scaleStartRef = useRef<{ pinch: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
@@ -548,45 +613,46 @@ export default function Home() {
         const centerX = centerNx * w;
         const centerY = centerNy * h;
 
-        // スケール適用後の四隅（サイズ・角度算出用）
+        // スケール適用後の四隅（正規化座標）
         const scaled: Corners = corners.map((c) => ({
           x: centerNx + (c.x - centerNx) * scale,
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // プレートの「上辺」（数字が読める方向）の角度を算出
-        // normalizeCornersOrder で corners[0]=左上・corners[1]=右上（プレートにとっての上辺）に揃えてある
-        const dx = scaled[1].x - scaled[0].x;
-        const dy = scaled[1].y - scaled[0].y;
-        const baseAngle = Math.atan2(dy, dx);
-        const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
+        // ピクセル座標の4角形 [TL, TR, BR, BL]
+        let quadPx: { x: number; y: number }[] = scaled.map((c) => ({
+          x: c.x * w,
+          y: c.y * h,
+        }));
 
-        // プレート幅・高さ（ピクセル）。ロゴは10%大きく
-        const plateWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
-        const plateHeightLeft = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
-        const plateHeightRight = Math.hypot((scaled[2].x - scaled[1].x) * w, (scaled[2].y - scaled[1].y) * h);
-        const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
-        const logoWidth = plateWidth * 1.1;
-        const logoHeight = plateHeight * 1.1;
+        // プレート幅・高さ（ピクセル）。ロゴは10%大きくして四角形内に収める
+        const topLen = Math.hypot(quadPx[1].x - quadPx[0].x, quadPx[1].y - quadPx[0].y);
+        const bottomLen = Math.hypot(quadPx[2].x - quadPx[3].x, quadPx[2].y - quadPx[3].y);
+        const leftLen = Math.hypot(quadPx[3].x - quadPx[0].x, quadPx[3].y - quadPx[0].y);
+        const rightLen = Math.hypot(quadPx[2].x - quadPx[1].x, quadPx[2].y - quadPx[1].y);
+        const logoWidth = ((topLen + bottomLen) / 2) * 1.1;
+        const logoHeight = ((leftLen + rightLen) / 2) * 1.1;
 
-        // 位置微調整は回転座標系で適用（プレートの横・縦方向にスライド）
-        const offsetX = (editLogoOffset.x / 100) * logoWidth;
-        const offsetY = (editLogoOffset.y / 100) * logoHeight;
+        // 位置微調整: プレートの「横」「縦」方向にオフセット（単位ベクトルでシフト）
+        const ux = (quadPx[1].x - quadPx[0].x) / (topLen || 1);
+        const uy = (quadPx[1].y - quadPx[0].y) / (topLen || 1);
+        const vx = (quadPx[3].x - quadPx[0].x) / (leftLen || 1);
+        const vy = (quadPx[3].y - quadPx[0].y) / (leftLen || 1);
+        const dx = (editLogoOffset.x / 100) * logoWidth * ux + (editLogoOffset.y / 100) * logoHeight * vx;
+        const dy = (editLogoOffset.x / 100) * logoWidth * uy + (editLogoOffset.y / 100) * logoHeight * vy;
+        quadPx = quadPx.map((p) => ({ x: p.x + dx, y: p.y + dy }));
 
-        ctx.save();
-        ctx.translate(centerX, centerY);
-        ctx.rotate(finalRotation);
-        ctx.translate(offsetX, offsetY);
-        // 以降は回転済み座標系のみ。drawCarkusuLogoAtOrigin は追加の回転をせず、finalRotation に合わせて描画
-        if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(maskImage, -logoWidth / 2, -logoHeight / 2, logoWidth, logoHeight);
-        } else {
-          drawCarkusuLogoAtOrigin(ctx, logoWidth, logoHeight, { backgroundAlpha: 0.92 });
-        }
+        const rotDeg = (editLogoRotation * Math.PI) / 180;
+        const cx = (quadPx[0].x + quadPx[1].x + quadPx[2].x + quadPx[3].x) / 4;
+        const cy = (quadPx[0].y + quadPx[1].y + quadPx[2].y + quadPx[3].y) / 4;
+        const cos = Math.cos(rotDeg);
+        const sin = Math.sin(rotDeg);
+        quadPx = quadPx.map((p) => ({
+          x: cx + (p.x - cx) * cos - (p.y - cy) * sin,
+          y: cy + (p.x - cx) * sin + (p.y - cy) * cos,
+        }));
 
-        ctx.restore();
+        drawLogoInQuad(ctx, quadPx, logoWidth, logoHeight, maskImage ?? null, { backgroundAlpha: 0.92 });
       });
     }
   }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale, editLogoRotation]);
@@ -859,38 +925,56 @@ export default function Home() {
     }
   }, []);
 
+  const touchToCanvas = useCallback((clientX: number, clientY: number) => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / (rect.width || 1);
+    const scaleY = canvas.height / (rect.height || 1);
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }, []);
+
   const onPreviewTouchStart = useCallback(
     (e: React.TouchEvent) => {
       if (e.touches.length === 1) {
+        const pos = touchToCanvas(e.touches[0].clientX, e.touches[0].clientY);
         dragStartRef.current = {
-          x: e.touches[0].clientX,
-          y: e.touches[0].clientY,
+          canvasX: pos.x,
+          canvasY: pos.y,
           startOffset: { ...editLogoOffset },
         };
       } else if (e.touches.length === 2) {
-        const dy = Math.abs(e.touches[1].clientY - e.touches[0].clientY);
-        scaleStartRef.current = { y: dy, startScale: editLogoScale };
+        const d0 = touchToCanvas(e.touches[0].clientX, e.touches[0].clientY);
+        const d1 = touchToCanvas(e.touches[1].clientX, e.touches[1].clientY);
+        const pinch = Math.hypot(d1.x - d0.x, d1.y - d0.y) || 0;
+        scaleStartRef.current = { pinch, startScale: editLogoScale };
       }
     },
-    [editLogoOffset, editLogoScale]
+    [editLogoOffset, editLogoScale, touchToCanvas]
   );
 
   const onPreviewTouchMove = useCallback(
     (e: React.TouchEvent) => {
       if (e.touches.length === 1 && dragStartRef.current) {
-        const dx = e.touches[0].clientX - dragStartRef.current.x;
-        const dy = e.touches[0].clientY - dragStartRef.current.y;
+        const pos = touchToCanvas(e.touches[0].clientX, e.touches[0].clientY);
+        const deltaX = pos.x - dragStartRef.current.canvasX;
+        const deltaY = pos.y - dragStartRef.current.canvasY;
         setEditLogoOffset({
-          x: dragStartRef.current.startOffset.x + dx * 0.5,
-          y: dragStartRef.current.startOffset.y + dy * 0.5,
+          x: dragStartRef.current.startOffset.x + deltaX * 0.5,
+          y: dragStartRef.current.startOffset.y + deltaY * 0.5,
         });
       } else if (e.touches.length === 2 && scaleStartRef.current) {
-        const dy = Math.abs(e.touches[1].clientY - e.touches[0].clientY);
-        const delta = (dy - scaleStartRef.current.y) * 0.01;
+        const d0 = touchToCanvas(e.touches[0].clientX, e.touches[0].clientY);
+        const d1 = touchToCanvas(e.touches[1].clientX, e.touches[1].clientY);
+        const pinch = Math.hypot(d1.x - d0.x, d1.y - d0.y) || 0;
+        const delta = (pinch - scaleStartRef.current.pinch) * 0.008;
         setEditLogoScale(Math.max(0.3, Math.min(2, scaleStartRef.current.startScale + delta)));
       }
     },
-    []
+    [touchToCanvas]
   );
 
   const onPreviewTouchEnd = useCallback(() => {
