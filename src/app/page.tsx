@@ -937,13 +937,13 @@ export default function Home() {
       )}
 
       {screenMode === 'camera' && (
-        <div className="fixed inset-0 z-0 bg-black min-h-0 min-w-0 overflow-hidden">
+        <div className="fixed inset-0 z-0 bg-black">
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="absolute inset-0 w-full h-full min-w-0 min-h-0 object-cover"
+            className="absolute inset-0 w-full h-full object-cover"
           />
           {showFlash && (
             <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
@@ -960,35 +960,37 @@ export default function Home() {
               </div>
             </div>
           )}
-          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] bg-white/10 backdrop-blur-md border-b border-white/10">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
-                <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+          <div className="absolute inset-0 z-20 flex flex-col landscape:flex-row landscape:items-stretch landscape:justify-between pointer-events-none [&>*]:pointer-events-auto">
+            <div className="pt-[env(safe-area-inset-top)] pb-4 px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] landscape:pr-2 bg-white/10 backdrop-blur-md border-b border-white/10 landscape:border-b-0 landscape:border-r landscape:rounded-none shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
+                  <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+                </div>
+                <button
+                  onClick={stopCamera}
+                  className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
+                >
+                  終了
+                </button>
               </div>
-              <button
-                onClick={stopCamera}
-                className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
-              >
-                終了
-              </button>
+              {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
+              <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
             </div>
-            {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
-            <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
-          </div>
-          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] bg-black/30 backdrop-blur-md border-t border-white/10 flex flex-col items-center gap-2 flex-shrink-0">
-            <button
-              onClick={captureAndDetect}
-              disabled={isProcessing}
-              className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md border border-white/10 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
-            >
-              {isProcessing ? (
-                <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-white/40" />
-              )}
-            </button>
-            <p className="text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+            <div className="flex-1 flex flex-col items-center justify-end gap-2 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 px-4 landscape:justify-center landscape:flex-row landscape:gap-4 landscape:pr-[max(1rem,env(safe-area-inset-right))] landscape:pl-4 bg-black/30 backdrop-blur-md border-t border-white/10 landscape:border-t-0 landscape:border-l landscape:shrink-0">
+              <button
+                onClick={captureAndDetect}
+                disabled={isProcessing}
+                className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md border border-white/10 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform shrink-0"
+              >
+                {isProcessing ? (
+                  <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-white/40" />
+                )}
+              </button>
+              <p className="text-white/70 text-sm font-light landscape:order-first">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+            </div>
           </div>
         </div>
       )}
@@ -1040,7 +1042,7 @@ export default function Home() {
             </div>
           )}
           <div
-            className="flex-1 min-h-0 relative touch-none"
+            className="absolute inset-0 z-0 flex items-center justify-center min-h-0 min-w-0 bg-black touch-none"
             onTouchStart={onPreviewTouchStart}
             onTouchMove={onPreviewTouchMove}
             onTouchEnd={onPreviewTouchEnd}
@@ -1048,7 +1050,7 @@ export default function Home() {
           >
             <canvas
               ref={previewCanvasRef}
-              className="absolute inset-0 w-full h-full object-contain"
+              className="max-w-full max-h-full w-full h-full object-contain"
               style={{ touchAction: 'none' }}
             />
             {isProcessing && detectedCorners.length === 0 && (
@@ -1064,7 +1066,7 @@ export default function Home() {
               </div>
             )}
           </div>
-          <div className="bg-black/30 backdrop-blur-md border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="relative z-10 shrink-0 bg-black/30 backdrop-blur-md border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <div className="flex items-center gap-3 mb-2">
               <span className="text-white/90 text-xs font-light w-12">角度</span>
               <input
