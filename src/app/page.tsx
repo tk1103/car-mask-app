@@ -1099,9 +1099,37 @@ export default function Home() {
       )}
 
       {screenMode === 'preview_edit' && previewImageUrl && (
-        <div className="fixed inset-0 z-0 bg-black flex flex-col">
+        <div className="fixed inset-0 z-0 bg-black flex flex-col [@media(orientation:landscape)]:flex-row">
+          {/* 縦: 上に伸びる / 横: 右側に表示 */}
+          <div
+            className="relative z-0 flex-1 min-h-0 min-w-0 [@media(orientation:landscape)]:order-2 flex items-center justify-center bg-black touch-none"
+            onTouchStart={onPreviewTouchStart}
+            onTouchMove={onPreviewTouchMove}
+            onTouchEnd={onPreviewTouchEnd}
+            onTouchCancel={onPreviewTouchEnd}
+          >
+            <canvas
+              ref={previewCanvasRef}
+              className="max-w-full max-h-full w-full h-full object-contain"
+              style={{ touchAction: 'none' }}
+            />
+            {isProcessing && detectedCorners.length === 0 && (
+              <div className="absolute inset-0 flex flex-col bg-black/30 backdrop-blur-md">
+                <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                  <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
+                  <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
+                  <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
+                </div>
+                <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
+                  <span className="text-white/40 text-xs">広告枠（ベータ）</span>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* 縦: 下部固定 / 横: 左側固定 */}
+          <div className="relative z-10 shrink-0 [@media(orientation:landscape)]:order-1 [@media(orientation:landscape)]:border-t-0 [@media(orientation:landscape)]:border-r [@media(orientation:landscape)]:max-w-[280px] [@media(orientation:landscape)]:overflow-y-auto bg-black/30 backdrop-blur-md border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] [@media(orientation:landscape)]:py-4 [@media(orientation:landscape)]:pl-[max(1rem,env(safe-area-inset-left))] [@media(orientation:landscape)]:pr-4">
           {(isBlurWarning || detectionFailed) && (
-            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/30 backdrop-blur-md border-b border-white/10">
+            <div className="shrink-0 px-0 py-0 mb-3 flex flex-col gap-2">
               {isBlurWarning && (
                 <p className="text-amber-200 text-sm font-light text-center">
                   写真がぼやけている可能性があります。撮り直すことをお勧めします。
@@ -1127,32 +1155,6 @@ export default function Home() {
               )}
             </div>
           )}
-          <div
-            className="absolute inset-0 z-0 flex items-center justify-center min-h-0 min-w-0 bg-black touch-none"
-            onTouchStart={onPreviewTouchStart}
-            onTouchMove={onPreviewTouchMove}
-            onTouchEnd={onPreviewTouchEnd}
-            onTouchCancel={onPreviewTouchEnd}
-          >
-            <canvas
-              ref={previewCanvasRef}
-              className="max-w-full max-h-full w-full h-full object-contain"
-              style={{ touchAction: 'none' }}
-            />
-            {isProcessing && detectedCorners.length === 0 && (
-              <div className="absolute inset-0 flex flex-col bg-black/30 backdrop-blur-md">
-                <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                  <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
-                  <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
-                  <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
-                </div>
-                <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
-                  <span className="text-white/40 text-xs">広告枠（ベータ）</span>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="relative z-10 shrink-0 bg-black/30 backdrop-blur-md border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <div className="flex items-center gap-3 mb-2">
               <span className="text-white/90 text-xs font-light w-12">角度</span>
               <input
