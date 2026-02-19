@@ -274,22 +274,28 @@ export default function Home() {
     try {
       const originalW = video.videoWidth;
       const originalH = video.videoHeight;
-      
-      // 高解像度画像を保存用にキャプチャ（後で使用）
+      const isLandscape = originalW > originalH;
+
       const fullResCanvas = document.createElement('canvas');
-      fullResCanvas.width = originalW;
-      fullResCanvas.height = originalH;
       const fullResCtx = fullResCanvas.getContext('2d');
       if (!fullResCtx) throw new Error('Canvas error');
-      
-      // フラッシュを有効化した後、少し待ってからキャプチャ（フラッシュが点灯する時間を確保）
+
       if (flashEnabled) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      
-      fullResCtx.drawImage(video, 0, 0, originalW, originalH);
-      
-      // キャプチャ後、フラッシュをオフ
+
+      if (isLandscape) {
+        fullResCanvas.width = originalH;
+        fullResCanvas.height = originalW;
+        fullResCtx.translate(originalH, 0);
+        fullResCtx.rotate(-Math.PI / 2);
+        fullResCtx.drawImage(video, 0, 0, originalW, originalH);
+      } else {
+        fullResCanvas.width = originalW;
+        fullResCanvas.height = originalH;
+        fullResCtx.drawImage(video, 0, 0, originalW, originalH);
+      }
+
       if (flashEnabled && videoTrack && 'applyConstraints' in videoTrack) {
         try {
           await videoTrack.applyConstraints({
@@ -299,16 +305,17 @@ export default function Home() {
           console.log('Failed to disable flash:', e);
         }
       }
-      
+
       const fullResBlob = await new Promise<Blob>((resolve, reject) => {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は長辺512に制限（軽量化で解析速度を確保）
+      const normW = fullResCanvas.width;
+      const normH = fullResCanvas.height;
       const maxApiLongEdge = 512;
-      const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
-      const apiW = Math.round(originalW * apiScale);
-      const apiH = Math.round(originalH * apiScale);
+      const apiScale = Math.min(maxApiLongEdge / Math.max(normW, normH), 1);
+      const apiW = Math.round(normW * apiScale);
+      const apiH = Math.round(normH * apiScale);
       const apiCanvas = document.createElement('canvas');
       apiCanvas.width = apiW;
       apiCanvas.height = apiH;
@@ -316,8 +323,8 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'low';
-      apiCtx.filter = 'contrast(1.4) brightness(1.1)';
-      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
+      apiCtx.filter = 'contrast(1.4) brightness(1.2)';
+      apiCtx.drawImage(fullResCanvas, 0, 0, normW, normH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
