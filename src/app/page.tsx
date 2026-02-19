@@ -1061,7 +1061,9 @@ export default function Home() {
               {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
               <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
             </div>
-            <div className="flex-1 flex flex-col items-center justify-end gap-2 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 px-4 landscape:justify-center landscape:flex-row landscape:gap-4 landscape:pr-[max(1rem,env(safe-area-inset-right))] landscape:pl-4 bg-black/30 backdrop-blur-md border-t border-white/10 landscape:border-t-0 landscape:border-l landscape:shrink-0">
+            {/* 中央は透過のまま（backdrop-blur をかけない）で動画をシャープに表示 */}
+            <div className="flex-1 pointer-events-none" aria-hidden />
+            <div className="flex flex-col items-center justify-end gap-2 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 px-4 landscape:justify-center landscape:flex-row landscape:gap-4 landscape:pr-[max(1rem,env(safe-area-inset-right))] landscape:pl-4 bg-black/30 backdrop-blur-md border-t border-white/10 landscape:border-t-0 landscape:border-l shrink-0">
               <button
                 onClick={captureAndDetect}
                 disabled={isProcessing}
