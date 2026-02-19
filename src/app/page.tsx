@@ -287,8 +287,9 @@ export default function Home() {
       if (isLandscape) {
         fullResCanvas.width = originalH;
         fullResCanvas.height = originalW;
-        fullResCtx.translate(originalH, 0);
+        fullResCtx.translate(originalH / 2, originalW / 2);
         fullResCtx.rotate(-Math.PI / 2);
+        fullResCtx.translate(-originalW / 2, -originalH / 2);
         fullResCtx.drawImage(video, 0, 0, originalW, originalH);
       } else {
         fullResCanvas.width = originalW;
@@ -323,7 +324,7 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'low';
-      apiCtx.filter = 'contrast(1.4) brightness(1.2)';
+      apiCtx.filter = 'contrast(1.4) brightness(1.2) saturate(0)';
       apiCtx.drawImage(fullResCanvas, 0, 0, normW, normH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
@@ -331,7 +332,7 @@ export default function Home() {
         apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.1);
       });
 
-      // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は非同期で実行しAPI呼び出しを遅らせない
+      // プレビューも正規化画像（回転・正立済み）を使用し、API座標と100%一致させる
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
       setScreenMode('preview_edit');
       setDetectedCorners([]);
