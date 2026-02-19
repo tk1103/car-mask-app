@@ -274,9 +274,10 @@ export default function Home() {
     try {
       const originalW = video.videoWidth;
       const originalH = video.videoHeight;
-      const isLandscape = originalW > originalH;
 
       const fullResCanvas = document.createElement('canvas');
+      fullResCanvas.width = originalW;
+      fullResCanvas.height = originalH;
       const fullResCtx = fullResCanvas.getContext('2d');
       if (!fullResCtx) throw new Error('Canvas error');
 
@@ -284,18 +285,7 @@ export default function Home() {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      if (isLandscape) {
-        fullResCanvas.width = originalH;
-        fullResCanvas.height = originalW;
-        fullResCtx.translate(originalH / 2, originalW / 2);
-        fullResCtx.rotate(-Math.PI / 2);
-        fullResCtx.translate(-originalW / 2, -originalH / 2);
-        fullResCtx.drawImage(video, 0, 0, originalW, originalH);
-      } else {
-        fullResCanvas.width = originalW;
-        fullResCanvas.height = originalH;
-        fullResCtx.drawImage(video, 0, 0, originalW, originalH);
-      }
+      fullResCtx.drawImage(video, 0, 0, originalW, originalH);
 
       if (flashEnabled && videoTrack && 'applyConstraints' in videoTrack) {
         try {
@@ -311,8 +301,8 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      const normW = fullResCanvas.width;
-      const normH = fullResCanvas.height;
+      const normW = originalW;
+      const normH = originalH;
       const maxApiLongEdge = 512;
       const apiScale = Math.min(maxApiLongEdge / Math.max(normW, normH), 1);
       const apiW = Math.round(normW * apiScale);
@@ -332,7 +322,6 @@ export default function Home() {
         apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.1);
       });
 
-      // プレビューも正規化画像（回転・正立済み）を使用し、API座標と100%一致させる
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
       setScreenMode('preview_edit');
       setDetectedCorners([]);
@@ -349,6 +338,13 @@ export default function Home() {
         fd.append('image', apiBlob, 'photo.jpg');
         fd.append('width', apiW.toString());
         fd.append('height', apiH.toString());
+        const orientation =
+          typeof window !== 'undefined' && (window as any).orientation != null
+            ? String((window as any).orientation)
+            : typeof screen !== 'undefined' && screen.orientation
+              ? screen.orientation.type
+              : '';
+        if (orientation) fd.append('orientation', orientation);
         return fd;
       };
 
@@ -941,13 +937,13 @@ export default function Home() {
       )}
 
       {screenMode === 'camera' && (
-        <div className="fixed inset-0 z-0 bg-black">
+        <div className="fixed inset-0 z-0 bg-black min-h-0 min-w-0 overflow-hidden">
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="absolute inset-0 w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full min-w-0 min-h-0 object-cover"
           />
           {showFlash && (
             <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
@@ -964,7 +960,7 @@ export default function Home() {
               </div>
             </div>
           )}
-          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
+          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
@@ -980,7 +976,7 @@ export default function Home() {
             {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
             <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/30 backdrop-blur-md border-t border-white/10 flex flex-col items-center gap-2">
+          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] bg-black/30 backdrop-blur-md border-t border-white/10 flex flex-col items-center gap-2 flex-shrink-0">
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}

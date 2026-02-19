@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    const prompt = "Identify license plates. The image is already rotated upright. Output JSON with [TL, TR, BR, BL] coordinates (0-1000). Only detect prominent plates. No prose.";
+    const prompt = "Detect the license plate in this image. The car or camera might be tilted or in landscape mode. Identify the 4 corners [TL, TR, BR, BL] accurately based on the plate's own orientation, regardless of the image angle. Output JSON only (0-1000 range). No prose.";
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
