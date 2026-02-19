@@ -192,6 +192,7 @@ export default function Home() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
   const [carkusuLogoImage, setCarkusuLogoImage] = useState<HTMLImageElement | null>(null);
+  const [lastProcessingTimeMs, setLastProcessingTimeMs] = useState<number | null>(null);
 
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [detectedCorners, setDetectedCorners] = useState<Corners[]>([]); // 複数プレート対応
@@ -324,6 +325,8 @@ export default function Home() {
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
+
+    const processingStart = Date.now();
 
     // フラッシュ効果を表示
     setShowFlash(true);
@@ -479,6 +482,7 @@ export default function Home() {
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
         ]]);
         setDetectionFailed(true);
+        setLastProcessingTimeMs(Date.now() - processingStart);
         setIsProcessing(false);
         return;
       }
@@ -503,6 +507,7 @@ export default function Home() {
           { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
         ]]);
         setDetectionFailed(true);
+        setLastProcessingTimeMs(Date.now() - processingStart);
         setIsProcessing(false);
         return;
       }
@@ -545,6 +550,7 @@ export default function Home() {
       }
       const remaining = (result as { remainingToday?: number }).remainingToday;
       if (remaining !== undefined) setDailyRemaining(remaining);
+      setLastProcessingTimeMs(Date.now() - processingStart);
       setIsProcessing(false);
     } catch (e) {
       const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
@@ -559,6 +565,7 @@ export default function Home() {
         { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
       ]]);
       setDetectionFailed(true);
+      setLastProcessingTimeMs(Date.now() - processingStart);
       setIsProcessing(false);
     }
   }, []);
@@ -1263,6 +1270,11 @@ export default function Home() {
                 <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-xs font-light hover:bg-white/30 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
                 <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-xs font-light hover:bg-white/30 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
               </div>
+            )}
+            {lastProcessingTimeMs != null && (
+              <p className="mt-2 text-white/50 text-xs font-light text-center tabular-nums">
+                解析時間 {(lastProcessingTimeMs / 1000).toFixed(1)}秒
+              </p>
             )}
             <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
               <span className="text-white/40 text-xs">広告枠（ベータ）</span>
