@@ -14,7 +14,6 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-// AI返却の corners[0,1,2,3] をそのまま [左上, 右上, 右下, 左下] として使用（ソート・並び替えなし）
 function normalizeCornersOrder(corners: Corners): Corners {
   return corners;
 }
@@ -317,12 +316,12 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'low';
-      apiCtx.filter = 'contrast(1.2) brightness(1.1)';
+      apiCtx.filter = 'contrast(1.4) brightness(1.1)';
       apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.2);
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.1);
       });
 
       // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は非同期で実行しAPI呼び出しを遅らせない
@@ -949,8 +948,8 @@ export default function Home() {
             <div className="absolute inset-0 bg-black/30 backdrop-blur-md flex flex-col items-center justify-between z-10 px-4 py-8">
               <div className="flex-1 flex flex-col items-center justify-center gap-4">
                 <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
-                <p className="text-white font-light text-sm">解析中...</p>
-                <p className="text-white/80 text-xs font-extralight text-center max-w-xs">ナンバープレートを検出しています</p>
+                <p className="text-white font-light text-sm">AIが愛車をスキャン中...</p>
+                <p className="text-white/80 text-xs font-extralight text-center max-w-xs">少々お待ちください</p>
               </div>
               <div className="w-full min-h-[100px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
                 <span className="text-white/40 text-xs">広告枠（ベータ）</span>
@@ -1052,8 +1051,8 @@ export default function Home() {
               <div className="absolute inset-0 flex flex-col bg-black/30 backdrop-blur-md">
                 <div className="flex-1 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
-                  <p className="text-white/90 text-sm font-light">解析中...</p>
-                  <p className="text-white/60 text-xs font-extralight">ナンバープレートを検出しています</p>
+                  <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
+                  <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
                 </div>
                 <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
                   <span className="text-white/40 text-xs">広告枠（ベータ）</span>
