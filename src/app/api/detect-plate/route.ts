@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
 
-    const prompt = "TASK: Detect all cars and their license plates. Output JSON only. Order corners [0:TL, 1:TR, 2:BR, 3:BL] based on the plate's text orientation. Focus only on the most prominent plates to avoid timeout.";
+    const prompt = "Identify license plates. The image is already rotated upright. Output JSON with [TL, TR, BR, BL] coordinates (0-1000). Only detect prominent plates. No prose.";
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
@@ -182,9 +182,16 @@ export async function POST(request: NextRequest) {
             temperature: 0,
             topP: 0.1,
             topK: 1,
+            maxOutputTokens: 400,
             responseMimeType: 'application/json',
             responseSchema: RESPONSE_SCHEMA,
           },
+          safetySettings: [
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+          ],
         }),
       });
     } catch (fetchErr: unknown) {
