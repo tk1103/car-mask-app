@@ -1044,8 +1044,8 @@ export default function Home() {
               </div>
             </div>
           )}
-          <div className="absolute inset-0 z-20 flex flex-col landscape:flex-row landscape:items-stretch landscape:justify-between pointer-events-none [&>*]:pointer-events-auto">
-            <div className="pt-[env(safe-area-inset-top)] pb-4 px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] landscape:pr-2 bg-white/10 backdrop-blur-md border-b border-white/10 landscape:border-b-0 landscape:border-r landscape:rounded-none shrink-0">
+          <div className="absolute inset-0 z-20 flex flex-col [@media(orientation:landscape)]:flex-row [@media(orientation:landscape)]:items-stretch [@media(orientation:landscape)]:justify-between pointer-events-none [&>*]:pointer-events-auto">
+            <div className="pt-[env(safe-area-inset-top)] pb-4 px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] [@media(orientation:landscape)]:pr-2 bg-white/10 backdrop-blur-md border-b border-white/10 [@media(orientation:landscape)]:border-b-0 [@media(orientation:landscape)]:border-r [@media(orientation:landscape)]:rounded-none shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
@@ -1063,7 +1063,7 @@ export default function Home() {
             </div>
             {/* 中央は透過のまま（backdrop-blur をかけない）で動画をシャープに表示 */}
             <div className="flex-1 pointer-events-none" aria-hidden />
-            <div className="flex flex-col items-center justify-end gap-2 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 px-4 landscape:justify-center landscape:flex-row landscape:gap-4 landscape:pr-[max(1rem,env(safe-area-inset-right))] landscape:pl-4 bg-black/30 backdrop-blur-md border-t border-white/10 landscape:border-t-0 landscape:border-l shrink-0">
+            <div className="flex flex-col items-center justify-end gap-2 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 px-4 [@media(orientation:landscape)]:justify-center [@media(orientation:landscape)]:flex-row [@media(orientation:landscape)]:gap-4 [@media(orientation:landscape)]:pr-[max(1rem,env(safe-area-inset-right))] [@media(orientation:landscape)]:pl-4 bg-black/30 backdrop-blur-md border-t border-white/10 [@media(orientation:landscape)]:border-t-0 [@media(orientation:landscape)]:border-l shrink-0">
               <button
                 onClick={captureAndDetect}
                 disabled={isProcessing}
@@ -1075,7 +1075,7 @@ export default function Home() {
                   <div className="w-12 h-12 rounded-full bg-white/40" />
                 )}
               </button>
-              <p className="text-white/70 text-sm font-light landscape:order-first">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+              <p className="text-white/70 text-sm font-light [@media(orientation:landscape)]:order-first">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
             </div>
           </div>
         </div>
