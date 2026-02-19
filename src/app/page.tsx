@@ -25,7 +25,8 @@ function drawLogoInQuad(
   lw: number,
   lh: number,
   maskImage: HTMLImageElement | null,
-  options?: { backgroundAlpha?: number }
+  options?: { backgroundAlpha?: number },
+  logoImage?: HTMLImageElement | null
 ) {
   const [TL, TR, BR, BL] = quad;
   const halfW = lw / 2;
@@ -61,7 +62,7 @@ function drawLogoInQuad(
     if (maskImage?.complete && maskImage.naturalWidth) {
       ctx.drawImage(maskImage, -halfW, -halfH, lw, lh);
     } else {
-      drawCarkusuLogoAtOrigin(ctx, lw, lh, options);
+      drawCarkusuLogoAtOrigin(ctx, lw, lh, options, logoImage ?? null);
     }
     ctx.restore();
   };
@@ -84,12 +85,13 @@ function drawLogoInQuad(
   );
 }
 
-// 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（透明感のある角丸黒背景＋白文字）
+// 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（角丸黒背景＋SVGロゴまたは白文字）
 function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
   logoHeight: number,
-  options?: { backgroundAlpha?: number }
+  options?: { backgroundAlpha?: number },
+  logoImage?: HTMLImageElement | null
 ) {
   const alpha = options?.backgroundAlpha ?? 0.92;
   const halfW = logoWidth / 2;
@@ -110,19 +112,33 @@ function drawCarkusuLogoAtOrigin(
   ctx.fillStyle = `rgba(0,0,0,${alpha})`;
   ctx.fill();
 
-  const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
-  ctx.fillStyle = '#ffffff';
-  const testFontSize = logoHeight * 0.5;
-  ctx.font = `bold ${testFontSize}px ${gothicFont}`;
-  const textMetrics = ctx.measureText('Carkusu');
-  const maxTextWidth = logoWidth * 0.9;
-  const fontSize = textMetrics.width > maxTextWidth
-    ? (testFontSize * maxTextWidth / textMetrics.width)
-    : testFontSize;
-  ctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('Carkusu', 0, 0);
+  if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
+    const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
+    const boxAspect = logoWidth / logoHeight;
+    let drawW: number, drawH: number;
+    if (svgAspect > boxAspect) {
+      drawW = logoWidth * 0.9;
+      drawH = drawW / svgAspect;
+    } else {
+      drawH = logoHeight * 0.5;
+      drawW = drawH * svgAspect;
+    }
+    ctx.drawImage(logoImage, -drawW / 2, -drawH / 2, drawW, drawH);
+  } else {
+    const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
+    ctx.fillStyle = '#ffffff';
+    const testFontSize = logoHeight * 0.5;
+    ctx.font = `bold ${testFontSize}px ${gothicFont}`;
+    const textMetrics = ctx.measureText('Carkusu');
+    const maxTextWidth = logoWidth * 0.9;
+    const fontSize = textMetrics.width > maxTextWidth
+      ? (testFontSize * maxTextWidth / textMetrics.width)
+      : testFontSize;
+    ctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Carkusu', 0, 0);
+  }
 }
 
 // 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
@@ -175,6 +191,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
+  const [carkusuLogoImage, setCarkusuLogoImage] = useState<HTMLImageElement | null>(null);
 
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [detectedCorners, setDetectedCorners] = useState<Corners[]>([]); // 複数プレート対応
@@ -202,6 +219,14 @@ export default function Home() {
     img.onload = () => setMaskImage(img);
     img.onerror = () => setMaskImage(null);
     img.src = '/mask-logo.png';
+  }, []);
+
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => setCarkusuLogoImage(img);
+    img.onerror = () => setCarkusuLogoImage(null);
+    img.src = '/Carkusu.svg';
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -652,10 +677,10 @@ export default function Home() {
           y: cy + (p.x - cx) * sin + (p.y - cy) * cos,
         }));
 
-        drawLogoInQuad(ctx, quadPx, logoWidth, logoHeight, maskImage ?? null, { backgroundAlpha: 0.92 });
+        drawLogoInQuad(ctx, quadPx, logoWidth, logoHeight, maskImage ?? null, { backgroundAlpha: 0.92 }, carkusuLogoImage);
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale, editLogoRotation]);
+  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, carkusuLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
