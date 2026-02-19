@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* 向きに応じたUI切り替え（Tailwind v4では標準で orientation がないため定義） */
+@custom-variant landscape {
+  @media (orientation: landscape) {
+    @slot;
+  }
+}
+@custom-variant portrait {
+  @media (orientation: portrait) {
+    @slot;
+  }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
