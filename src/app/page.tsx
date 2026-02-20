@@ -422,8 +422,8 @@ export default function Home() {
 
       const normW = originalW;
       const normH = originalH;
-      // API送信画像サイズ: 640px（処理速度と検出精度のバランス。512pxより大きく、768pxより小さい）
-      const maxApiLongEdge = 640;
+      // API送信画像サイズ: 768px（検出精度を優先。640pxより大きく、1024pxより小さい）
+      const maxApiLongEdge = 768;
       const apiScale = Math.min(maxApiLongEdge / Math.max(normW, normH), 1);
       const apiW = Math.round(normW * apiScale);
       const apiH = Math.round(normH * apiScale);
@@ -433,15 +433,15 @@ export default function Home() {
       const apiCtx = apiCanvas.getContext('2d');
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'medium'; // high→medium: 処理速度と品質のバランス
-      // フィルタ: 元の設定に戻す（Geminiの認識が安定していた設定）
-      apiCtx.filter = 'contrast(1.4) brightness(1.2) saturate(0)';
+      apiCtx.imageSmoothingQuality = 'high'; // 検出精度を優先
+      // フィルタ: コントラストと明るさを調整して検出精度を向上
+      apiCtx.filter = 'contrast(1.3) brightness(1.15) saturate(0.1)';
       apiCtx.drawImage(fullResCanvas, 0, 0, normW, normH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        // JPEG品質: 0.3（ファイルサイズを抑えて送信速度向上、検出精度は640pxで補う）
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.3);
+        // JPEG品質: 0.6（検出精度を優先。0.3では品質が低すぎて検出失敗の原因）
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.6);
       });
 
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
