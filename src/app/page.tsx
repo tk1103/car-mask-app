@@ -14,6 +14,9 @@ declare global {
   interface WindowEventMap {
     beforeinstallprompt: BeforeInstallPromptEvent;
   }
+  // OpenCV.js (loaded from CDN in camera mode)
+  // eslint-disable-next-line no-var
+  var cv: unknown;
 }
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
@@ -221,6 +224,116 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
 
+const OPENCV_DETECT_SIZE = 320; // 検出用の短辺（アスペクトで長辺も決める）
+const DETECT_INTERVAL_MS = 150;
+
+/** OpenCVで低解像度グレースケールから四角形候補を検出し、動画ピクセル座標の QuadPx を返す。失敗時は null。 */
+function detectQuadFromCanvas(
+  smallCanvas: HTMLCanvasElement,
+  videoWidth: number,
+  videoHeight: number
+): QuadPx | null {
+  const w = typeof window !== 'undefined' ? window : undefined;
+  const cv = w ? (w as unknown as { cv?: Record<string, unknown> }).cv as Record<string, unknown> | undefined : undefined;
+  if (!cv || typeof cv.imread !== 'function' || typeof cv.Mat !== 'function') return null;
+
+  const sw = smallCanvas.width;
+  const sh = smallCanvas.height;
+  if (!sw || !sh) return null;
+
+  let src: { delete: () => void } | null = null;
+  let gray: { delete: () => void } | null = null;
+  let blurred: { delete: () => void } | null = null;
+  let edges: { delete: () => void } | null = null;
+  try {
+    src = cv.imread(smallCanvas) as { delete: () => void };
+    gray = new (cv.Mat as new () => { delete: () => void })();
+    blurred = new (cv.Mat as new () => { delete: () => void })();
+    edges = new (cv.Mat as new () => { delete: () => void })();
+    (cv.cvtColor as (a: unknown, b: unknown, code: number) => void)(src, gray, cv.COLOR_RGBA2GRAY as number);
+    (cv.GaussianBlur as (a: unknown, b: unknown, k: unknown, s: number) => void)(gray, blurred, new (cv.Size as new (a: number, b: number) => unknown)(5, 5), 0);
+    (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 50, 150);
+
+    const contours = new (cv.MatVector as new () => { get: (i: number) => { rows: number; data32S: Int32Array; delete: () => void }; size: () => number; delete: () => void })();
+    const hierarchy = new (cv.Mat as new () => { delete: () => void })();
+    (cv.findContours as (img: unknown, c: unknown, h: unknown, mode: number, method: number) => void)(edges, contours, hierarchy, cv.RETR_LIST as number, cv.CHAIN_APPROX_SIMPLE as number);
+    hierarchy.delete();
+
+    let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
+    const minArea = (sw * sh) * 0.01;
+    const maxArea = (sw * sh) * 0.6;
+
+    for (let i = 0; i < contours.size(); i++) {
+      const cnt = contours.get(i);
+      if (!cnt) continue;
+      const area = (cv.contourArea as (c: unknown) => number)(cnt);
+      if (area < minArea || area > maxArea) {
+        continue;
+      }
+      const epsilon = 0.02 * (cv.arcLength as (c: unknown, closed: boolean) => number)(cnt, true);
+      const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
+      (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
+      if (approx.rows !== 4) {
+        approx.delete();
+        continue;
+      }
+      const rect = (cv.boundingRect as (c: unknown) => { width: number; height: number })(approx);
+      let rw = rect.width;
+      let rh = rect.height;
+      if (rw < 2 || rh < 2) {
+        approx.delete();
+        continue;
+      }
+      if (rw < rh) [rw, rh] = [rh, rw];
+      const ratio = rw / rh;
+      if (ratio < 1.8 || ratio > 6) {
+        approx.delete();
+        continue;
+      }
+      const data = approx.data32S;
+      const points = [
+        { x: data[0], y: data[1] },
+        { x: data[2], y: data[3] },
+        { x: data[4], y: data[5] },
+        { x: data[6], y: data[7] },
+      ];
+      approx.delete();
+      if (!bestQuad || area > bestQuad.area) bestQuad = { points, area };
+    }
+    contours.delete();
+
+    if (!bestQuad) return null;
+
+    const pts = bestQuad.points;
+    const byY = [...pts].sort((a, b) => a.y - b.y);
+    const top = byY.slice(0, 2).sort((a, b) => a.x - b.x);
+    const bottom = byY.slice(2, 4).sort((a, b) => a.x - b.x);
+    const TL = top[0] ?? pts[0];
+    const TR = top[1] ?? pts[1];
+    const BR = bottom[1] ?? pts[2];
+    const BL = bottom[0] ?? pts[3];
+
+    const scaleX = videoWidth / sw;
+    const scaleY = videoHeight / sh;
+    const quadPx: QuadPx = [
+      { x: TL.x * scaleX, y: TL.y * scaleY },
+      { x: TR.x * scaleX, y: TR.y * scaleY },
+      { x: BR.x * scaleX, y: BR.y * scaleY },
+      { x: BL.x * scaleX, y: BL.y * scaleY },
+    ];
+    return quadPx;
+  } catch {
+    return null;
+  } finally {
+    try {
+      src?.delete?.();
+      gray?.delete?.();
+      blurred?.delete?.();
+      edges?.delete?.();
+    } catch {}
+  }
+}
+
 export default function Home() {
   const [screenMode, setScreenMode] = useState<'idle' | 'camera' | 'preview_edit'>('idle');
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -254,6 +367,13 @@ export default function Home() {
   const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
   const logoCanvasRef = useRef<HTMLCanvasElement | null>(null); // マスク画像が無いときのロゴ用オフスクリーン
+  const opencvReadyRef = useRef(false);
+  const liveQuadRef = useRef<QuadPx | null>(null);
+  const cameraOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const smallCanvasRef = useRef<HTMLCanvasElement | null>(null); // 320x240 for OpenCV
+  const detectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const overlayRafRef = useRef<number | null>(null);
+  const [opencvReady, setOpencvReady] = useState(false);
 
   useEffect(() => {
     const img = new Image();
@@ -302,6 +422,137 @@ export default function Home() {
   useEffect(() => {
     if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
   }, [screenMode, fetchRemainingQuota]);
+
+  // OpenCV.js をカメラモード時のみ CDN から読み込む
+  useEffect(() => {
+    if (screenMode !== 'camera') return;
+    const win = typeof window === 'undefined' ? undefined : (window as unknown as { cv?: { Mat?: unknown; onRuntimeInitialized?: () => void } });
+    if (win?.cv?.Mat) {
+      opencvReadyRef.current = true;
+      setOpencvReady(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://docs.opencv.org/4.8.0/opencv.js';
+    script.onload = () => {
+      const cv = (window as unknown as { cv?: { Mat?: unknown; onRuntimeInitialized?: () => void } }).cv;
+      if (!cv) return;
+      if (cv.Mat) {
+        opencvReadyRef.current = true;
+        setOpencvReady(true);
+        return;
+      }
+      cv.onRuntimeInitialized = () => {
+        opencvReadyRef.current = true;
+        setOpencvReady(true);
+      };
+    };
+    document.head.appendChild(script);
+    return () => {
+      script.remove();
+    };
+  }, [screenMode]);
+
+  // リアルタイム矩形検出（低解像・グレースケール、一定間隔で実行）
+  useEffect(() => {
+    if (screenMode !== 'camera' || !opencvReady || !stream) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (!smallCanvasRef.current) {
+      const c = document.createElement('canvas');
+      c.width = OPENCV_DETECT_SIZE;
+      c.height = Math.round((OPENCV_DETECT_SIZE * (video.videoHeight || 9)) / (video.videoWidth || 16));
+      if (c.height < 1) c.height = Math.round(OPENCV_DETECT_SIZE * 0.75);
+      smallCanvasRef.current = c;
+    }
+    const smallCanvas = smallCanvasRef.current;
+    const ctx = smallCanvas.getContext('2d');
+    if (!ctx) return;
+
+    const tick = () => {
+      const v = videoRef.current;
+      if (!v || !v.videoWidth || !v.videoHeight) return;
+      if (smallCanvas.width !== OPENCV_DETECT_SIZE) {
+        smallCanvas.width = OPENCV_DETECT_SIZE;
+        smallCanvas.height = Math.round((OPENCV_DETECT_SIZE * v.videoHeight) / v.videoWidth) || 240;
+      }
+      ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, smallCanvas.width, smallCanvas.height);
+      const quad = detectQuadFromCanvas(smallCanvas, v.videoWidth, v.videoHeight);
+      liveQuadRef.current = quad;
+    };
+
+    const id = setInterval(tick, DETECT_INTERVAL_MS);
+    detectionIntervalRef.current = id;
+    tick();
+    return () => {
+      clearInterval(id);
+      detectionIntervalRef.current = null;
+      liveQuadRef.current = null;
+    };
+  }, [screenMode, opencvReady, stream]);
+
+  // カメラオーバーレイ描画（検出四角にマスク＋ロゴを三角形2分割アフィンで表示）
+  useEffect(() => {
+    if (screenMode !== 'camera') return;
+    const overlay = cameraOverlayCanvasRef.current;
+    const video = videoRef.current;
+    if (!overlay || !video) return;
+
+    const draw = () => {
+      if (screenMode !== 'camera') return;
+      const v = videoRef.current;
+      const c = cameraOverlayCanvasRef.current;
+      if (!v || !c || !v.videoWidth || !v.videoHeight) {
+        overlayRafRef.current = requestAnimationFrame(draw);
+        return;
+      }
+      if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
+        c.width = v.videoWidth;
+        c.height = v.videoHeight;
+      }
+      const ctx = c.getContext('2d');
+      if (!ctx) {
+        overlayRafRef.current = requestAnimationFrame(draw);
+        return;
+      }
+      ctx.clearRect(0, 0, c.width, c.height);
+      const quad = liveQuadRef.current;
+      if (quad && maskImage !== undefined) {
+        fillQuad(ctx, quad, 'rgba(0,0,0,0.92)');
+        if (maskImage?.complete && maskImage.naturalWidth) {
+          drawImageWarpedToQuad(ctx, maskImage, quad, maskImage.naturalWidth, maskImage.naturalHeight);
+        } else {
+          let logoCanvas = logoCanvasRef.current;
+          if (!logoCanvas) {
+            logoCanvas = document.createElement('canvas');
+            logoCanvas.width = 400;
+            logoCanvas.height = 120;
+            logoCanvasRef.current = logoCanvas;
+            const lctx = logoCanvas.getContext('2d');
+            if (lctx) {
+              lctx.clearRect(0, 0, 400, 120);
+              lctx.save();
+              lctx.translate(200, 60);
+              drawCarkusuLogoAtOrigin(lctx, 400 * 0.95, 120 * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage ?? undefined);
+              lctx.restore();
+            }
+          }
+          if (logoCanvasRef.current) {
+            const lc = logoCanvasRef.current;
+            drawImageWarpedToQuad(ctx, lc, quad, lc.width, lc.height);
+          }
+        }
+      }
+      overlayRafRef.current = requestAnimationFrame(draw);
+    };
+    overlayRafRef.current = requestAnimationFrame(draw);
+    return () => {
+      if (overlayRafRef.current != null) cancelAnimationFrame(overlayRafRef.current);
+      overlayRafRef.current = null;
+    };
+  }, [screenMode, maskImage, carkusuLogoImage]);
 
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
@@ -1160,6 +1411,11 @@ export default function Home() {
             muted
             className="absolute inset-0 w-full h-full object-cover"
           />
+          <canvas
+            ref={cameraOverlayCanvasRef}
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+            style={{ left: 0, top: 0, right: 0, bottom: 0 }}
+          />
           {showFlash && (
             <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
           )}
@@ -1195,12 +1451,12 @@ export default function Home() {
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
-              className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md border border-white/10 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
+              className="min-w-[8rem] px-6 py-3 rounded-full bg-white/20 backdrop-blur-md border border-white/10 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
             >
               {isProcessing ? (
                 <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
               ) : (
-                <div className="w-12 h-12 rounded-full bg-white/40" />
+                <span className="text-white font-light text-sm tracking-wide">本番解析</span>
               )}
             </button>
             <p className="text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
