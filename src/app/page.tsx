@@ -518,19 +518,8 @@ export default function Home() {
         return;
       }
       ctx.clearRect(0, 0, c.width, c.height);
-      const quad = liveQuadRef.current ?? (() => {
-        const w = c.width;
-        const h = c.height;
-        const marginW = w * 0.35;
-        const marginH = h * 0.4;
-        return [
-          { x: marginW, y: marginH },
-          { x: w - marginW, y: marginH },
-          { x: w - marginW, y: h - marginH },
-          { x: marginW, y: h - marginH },
-        ] as QuadPx;
-      })();
-      if (maskImage !== undefined) {
+      const quad = liveQuadRef.current;
+      if (quad && maskImage !== undefined) {
         fillQuad(ctx, quad, 'rgba(0,0,0,0.92)');
         if (maskImage?.complete && maskImage.naturalWidth) {
           drawImageWarpedToQuad(ctx, maskImage, quad, maskImage.naturalWidth, maskImage.naturalHeight);
