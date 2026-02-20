@@ -260,8 +260,8 @@ function detectQuadFromCanvas(
     hierarchy.delete();
 
     let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
-    const minArea = (sw * sh) * 0.01;
-    const maxArea = (sw * sh) * 0.6;
+    const minArea = (sw * sh) * 0.005;
+    const maxArea = (sw * sh) * 0.75;
 
     for (let i = 0; i < contours.size(); i++) {
       const cnt = contours.get(i);
@@ -270,7 +270,7 @@ function detectQuadFromCanvas(
       if (area < minArea || area > maxArea) {
         continue;
       }
-      const epsilon = 0.02 * (cv.arcLength as (c: unknown, closed: boolean) => number)(cnt, true);
+      const epsilon = 0.03 * (cv.arcLength as (c: unknown, closed: boolean) => number)(cnt, true);
       const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
       (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
       if (approx.rows !== 4) {
@@ -286,7 +286,7 @@ function detectQuadFromCanvas(
       }
       if (rw < rh) [rw, rh] = [rh, rw];
       const ratio = rw / rh;
-      if (ratio < 1.8 || ratio > 6) {
+      if (ratio < 1.3 || ratio > 8) {
         approx.delete();
         continue;
       }
@@ -518,8 +518,19 @@ export default function Home() {
         return;
       }
       ctx.clearRect(0, 0, c.width, c.height);
-      const quad = liveQuadRef.current;
-      if (quad && maskImage !== undefined) {
+      const quad = liveQuadRef.current ?? (() => {
+        const w = c.width;
+        const h = c.height;
+        const marginW = w * 0.35;
+        const marginH = h * 0.4;
+        return [
+          { x: marginW, y: marginH },
+          { x: w - marginW, y: marginH },
+          { x: w - marginW, y: h - marginH },
+          { x: marginW, y: h - marginH },
+        ] as QuadPx;
+      })();
+      if (maskImage !== undefined) {
         fillQuad(ctx, quad, 'rgba(0,0,0,0.92)');
         if (maskImage?.complete && maskImage.naturalWidth) {
           drawImageWarpedToQuad(ctx, maskImage, quad, maskImage.naturalWidth, maskImage.naturalHeight);
@@ -1413,7 +1424,7 @@ export default function Home() {
           />
           <canvas
             ref={cameraOverlayCanvasRef}
-            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[5]"
             style={{ left: 0, top: 0, right: 0, bottom: 0 }}
           />
           {showFlash && (
