@@ -326,13 +326,15 @@ export async function POST(request: NextRequest) {
       const totalElapsed = Date.now() - startTime;
       console.log(`[detect-plate] Success: found=${parsed.found}, plates=${parsed.plates?.length || 0}, elapsed=${totalElapsed}ms`);
       return NextResponse.json(parsed);
-    } catch {
+    } catch (parseErr) {
       const elapsed = Date.now() - startTime;
-      console.error(`[detect-plate] JSON parse error after ${elapsed}ms`);
+      const errorMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      console.error(`[detect-plate] JSON parse error after ${elapsed}ms: ${errorMsg}`);
+      console.error(`[detect-plate] Raw JSON text (first 1000 chars):`, jsonText.substring(0, 1000));
       return NextResponse.json({
         found: false,
         error: '座標の解析に失敗しました',
-        userMessage: '座標の解析に失敗しました。もう一度撮影してお試しください。',
+        userMessage: '座標の解析に失敗しました。画像サイズや明るさを確認して、もう一度撮影してお試しください。',
         rawResponse: jsonText.substring(0, 500),
       }, { status: 500 });
     }

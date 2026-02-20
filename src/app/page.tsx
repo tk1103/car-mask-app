@@ -408,8 +408,8 @@ export default function Home() {
 
       const normW = originalW;
       const normH = originalH;
-      // API送信画像サイズを拡大（512→1024）: ナンバープレート検出精度向上のため
-      const maxApiLongEdge = 1024;
+      // API送信画像サイズ: 768px（512と1024の中間。検出精度と処理速度のバランス）
+      const maxApiLongEdge = 768;
       const apiScale = Math.min(maxApiLongEdge / Math.max(normW, normH), 1);
       const apiW = Math.round(normW * apiScale);
       const apiH = Math.round(normH * apiScale);
@@ -419,15 +419,15 @@ export default function Home() {
       const apiCtx = apiCanvas.getContext('2d');
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'high'; // 低品質→高品質に変更（検出精度向上）
-      // フィルタを緩和: 過度な処理で情報が失われないように
-      apiCtx.filter = 'contrast(1.2) brightness(1.1) saturate(0.3)';
+      apiCtx.imageSmoothingQuality = 'high';
+      // フィルタ: コントラストと明るさを適度に調整（元の設定に近いが、saturateは0.1で少し色情報を保持）
+      apiCtx.filter = 'contrast(1.3) brightness(1.15) saturate(0.1)';
       apiCtx.drawImage(fullResCanvas, 0, 0, normW, normH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        // JPEG品質を大幅に向上（0.1→0.75）: 細かい文字やエッジを保持して検出精度向上
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.75);
+        // JPEG品質: 0.6（0.1と0.75の中間。ファイルサイズと品質のバランス）
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.6);
       });
 
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
