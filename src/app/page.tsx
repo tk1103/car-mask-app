@@ -231,6 +231,7 @@ export default function Home() {
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null); // PWAインストールプロンプト
   const [isIOS, setIsIOS] = useState(false); // iOS判定
+  const [isAndroid, setIsAndroid] = useState(false); // Android判定
   const [isStandalone, setIsStandalone] = useState(false); // すでにインストール済みか
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -277,7 +278,16 @@ export default function Home() {
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     setIsIOS(isIOSDevice);
-    console.log('[PWA] iOS detected:', isIOSDevice, 'UserAgent:', navigator.userAgent);
+    
+    // Android判定
+    const isAndroidDevice = /Android/.test(navigator.userAgent);
+    setIsAndroid(isAndroidDevice);
+    
+    console.log('[PWA] Platform detection:', {
+      isIOS: isIOSDevice,
+      isAndroid: isAndroidDevice,
+      userAgent: navigator.userAgent,
+    });
 
     // すでにインストール済みか判定
     const navigatorStandalone = (window.navigator as any).standalone;
@@ -331,8 +341,22 @@ export default function Home() {
         console.error('[PWA] Error prompting install:', error);
       }
     } else if (isIOS) {
-      // iOS Safari: 手動案内を表示
-      alert('ホーム画面に追加するには:\n\n1. 画面下部の共有ボタン（□↑）をタップ\n2. 「ホーム画面に追加」を選択\n3. 「追加」をタップ\n\nこれでホーム画面から直接起動できます。');
+      // iOS Safari: 手動案内を表示（より詳細で分かりやすく）
+      const message = `ホーム画面に追加する方法：
+
+【iPhoneの場合】
+1. 画面下部のツールバーから「共有」ボタン（四角に上矢印のアイコン）を探す
+   - 見つからない場合は、アドレスバーの右側の「共有」ボタンをタップ
+2. 共有メニューが開いたら、下にスクロールして「ホーム画面に追加」を選択
+3. 「追加」をタップ
+
+【iPadの場合】
+1. アドレスバーの右側にある「共有」ボタン（四角に上矢印）をタップ
+2. 共有メニューから「ホーム画面に追加」を選択
+3. 「追加」をタップ
+
+これでホーム画面から直接起動できます。`;
+      alert(message);
     } else {
       // その他のブラウザ: 手動案内
       const isAndroid = /Android/.test(navigator.userAgent);
@@ -1247,17 +1271,29 @@ export default function Home() {
             });
             
             // 一時的に常に表示（デバッグ用）- 後で!isStandaloneに戻す
+            const getButtonText = () => {
+              if (isIOS) {
+                return 'ホーム画面に追加（iOS）';
+              } else if (isAndroid) {
+                if (deferredPrompt) {
+                  return 'ホーム画面に追加（Android Chrome）';
+                } else {
+                  return 'ホーム画面に追加（Android）';
+                }
+              } else if (deferredPrompt) {
+                return 'ホーム画面に追加（Chrome）';
+              } else {
+                return 'アプリをインストール';
+              }
+            };
+            
             return (
               <button
                 onClick={handleInstallClick}
                 className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
               >
                 <DownloadIcon size={16} strokeWidth={1.5} />
-                {isIOS 
-                  ? 'ホーム画面に追加（iOS）' 
-                  : deferredPrompt 
-                    ? 'ホーム画面に追加（Chrome）' 
-                    : 'アプリをインストール'}
+                {getButtonText()}
               </button>
             );
           })()}
