@@ -600,18 +600,41 @@ export default function Home() {
       try {
         res = await performFetch(0);
       } catch (fetchErr: unknown) {
+        const elapsed = Date.now() - processingStart;
+        console.error(`[client] Fetch failed after ${elapsed}ms:`, fetchErr);
         if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
           setCameraError('解析がタイムアウトしました。通信環境を確認してもう一度お試しください。');
         } else {
+          const errorMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+          console.error(`[client] Fetch error details:`, { name: fetchErr instanceof Error ? fetchErr.name : 'Unknown', message: errorMsg });
           setCameraError('解析に失敗しました。通信を確認してもう一度お試しください。');
         }
         setDetectedCorners([FALLBACK_CORNERS]);
         setDetectionFailed(true);
-        setLastProcessingTimeMs(Date.now() - processingStart);
+        setLastProcessingTimeMs(elapsed);
         setIsProcessing(false);
         return;
       }
-      const result = await res.json();
+      
+      let result: any;
+      try {
+        const responseText = await res.text();
+        console.log(`[client] Response status: ${res.status}, text length: ${responseText.length}`);
+        if (!responseText) {
+          throw new Error('Empty response');
+        }
+        result = JSON.parse(responseText);
+      } catch (parseErr: unknown) {
+        const elapsed = Date.now() - processingStart;
+        console.error(`[client] JSON parse error after ${elapsed}ms:`, parseErr);
+        console.error(`[client] Response status: ${res.status}, statusText: ${res.statusText}`);
+        setCameraError('解析結果の処理に失敗しました。もう一度お試しください。');
+        setDetectedCorners([FALLBACK_CORNERS]);
+        setDetectionFailed(true);
+        setLastProcessingTimeMs(elapsed);
+        setIsProcessing(false);
+        return;
+      }
 
       if (!res.ok) {
         const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
