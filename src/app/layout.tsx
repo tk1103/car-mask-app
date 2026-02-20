@@ -13,8 +13,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Carkusu",
+  title: "Carkus",
   description: "ナンバープレートをマスクするアプリ（ベータ）",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }, { url: "/Carkus.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
+  appleWebApp: { capable: true, title: "Carkus" },
 };
 
 export default function RootLayout({
