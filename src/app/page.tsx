@@ -6,12 +6,13 @@ import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Ins
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
-// 検出失敗時のフォールバック用の四角（正規化0-1）。画像中央の 幅60%×高さ30% で、手動調整しやすいサイズに
+// 検出失敗時のフォールバック用の四角（正規化0-1）。座標が取れないため位置は分からないので、
+// 画面の大部分を覆う大きめの四角にし、ユーザーがドラッグ・スケールでプレート位置に合わせやすくする
 const FALLBACK_CORNERS: Corners = [
-  { x: 0.2, y: 0.35 },
-  { x: 0.8, y: 0.35 },
-  { x: 0.8, y: 0.65 },
-  { x: 0.2, y: 0.65 },
+  { x: 0.05, y: 0.25 },
+  { x: 0.95, y: 0.25 },
+  { x: 0.95, y: 0.75 },
+  { x: 0.05, y: 0.75 },
 ];
 
 // API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 座標系に完全一致（Y軸反転なし）
