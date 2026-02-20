@@ -277,12 +277,19 @@ export default function Home() {
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     setIsIOS(isIOSDevice);
-    console.log('[PWA] iOS detected:', isIOSDevice);
+    console.log('[PWA] iOS detected:', isIOSDevice, 'UserAgent:', navigator.userAgent);
 
     // すでにインストール済みか判定
-    const standalone = (window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches;
+    const navigatorStandalone = (window.navigator as any).standalone;
+    const matchMediaStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    const standalone = navigatorStandalone || matchMediaStandalone;
     setIsStandalone(standalone);
-    console.log('[PWA] Standalone mode:', standalone);
+    console.log('[PWA] Standalone check:', {
+      navigatorStandalone,
+      matchMediaStandalone,
+      finalStandalone: standalone,
+      displayMode: window.matchMedia('(display-mode: standalone)').matches,
+    });
 
     // Chrome/Edgeのbeforeinstallpromptイベント
     const handleBeforeInstallPrompt = (e: Event) => {
@@ -294,19 +301,20 @@ export default function Home() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     console.log('[PWA] Event listener added for beforeinstallprompt');
 
-    // デバッグ: 5秒後に状態を確認
-    setTimeout(() => {
-      console.log('[PWA] State check:', {
+    // デバッグ: 定期的に状態を確認
+    const debugInterval = setInterval(() => {
+      console.log('[PWA] Current state:', {
         isIOS: isIOSDevice,
         isStandalone: standalone,
-        hasDeferredPrompt: !!deferredPrompt,
         userAgent: navigator.userAgent,
         platform: navigator.platform,
+        hasServiceWorker: 'serviceWorker' in navigator,
       });
-    }, 5000);
+    }, 3000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      clearInterval(debugInterval);
     };
   }, []);
 
@@ -1229,15 +1237,30 @@ export default function Home() {
             <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
           {/* PWAインストールボタン */}
-          {!isStandalone && (
-            <button
-              onClick={handleInstallClick}
-              className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
-            >
-              <DownloadIcon size={16} strokeWidth={1.5} />
-              {isIOS ? 'ホーム画面に追加' : deferredPrompt ? 'ホーム画面に追加' : 'アプリをインストール'}
-            </button>
-          )}
+          {(() => {
+            // デバッグ情報をコンソールに出力
+            console.log('[PWA] Button render check:', {
+              isStandalone,
+              isIOS,
+              hasDeferredPrompt: !!deferredPrompt,
+              shouldShow: !isStandalone,
+            });
+            
+            // 一時的に常に表示（デバッグ用）- 後で!isStandaloneに戻す
+            return (
+              <button
+                onClick={handleInstallClick}
+                className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+              >
+                <DownloadIcon size={16} strokeWidth={1.5} />
+                {isIOS 
+                  ? 'ホーム画面に追加（iOS）' 
+                  : deferredPrompt 
+                    ? 'ホーム画面に追加（Chrome）' 
+                    : 'アプリをインストール'}
+              </button>
+            );
+          })()}
           <p className="text-white/70 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
         </main>
       )}
