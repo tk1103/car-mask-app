@@ -4,19 +4,18 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, Download as DownloadIcon } from 'lucide-react';
 
 type Corner = { x: number; y: number }; // 0-1
-type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
 // PWAインストールプロンプトの型定義
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
-
 declare global {
   interface WindowEventMap {
     beforeinstallprompt: BeforeInstallPromptEvent;
   }
 }
+type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
 // API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 座標系に完全一致（Y軸反転なし）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
@@ -30,7 +29,7 @@ function normalizeCornersOrder(corners: Corners): Corners {
   return corners;
 }
 
-// 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkus ロゴを描画（角丸黒背景＋SVGロゴまたは白文字）
+// 回転済み座標系の中心(0,0)に Carkus ロゴを描画（角丸黒背景＋SVGロゴ or 白文字「Carkus」）
 // 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
 function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
@@ -150,12 +149,11 @@ export default function Home() {
   const [detectionFailed, setDetectionFailed] = useState(false);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
   const [carkusuLogoImage, setCarkusuLogoImage] = useState<HTMLImageElement | null>(null);
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null); // PWAインストールプロンプト
-  const [isIOS, setIsIOS] = useState(false); // iOS判定
-  const [isAndroid, setIsAndroid] = useState(false); // Android判定
-  const [isStandalone, setIsStandalone] = useState(false); // すでにインストール済みか
-  const [showInstallGuide, setShowInstallGuide] = useState(false); // PWAインストール案内モーダル表示用
-
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -180,70 +178,49 @@ export default function Home() {
     img.src = '/Carkus.svg';
   }, []);
 
-  // Service Worker登録（PWA用）
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .register('/sw.js')
-        .then((registration) => {
-          console.log('Service Worker registered:', registration);
-        })
-        .catch((error) => {
-          console.error('Service Worker registration failed:', error);
-        });
+      navigator.serviceWorker.register('/sw.js').then(() => {}).catch(() => {});
     }
   }, []);
 
-  // PWAインストールプロンプトの処理（Chrome/Edge）
   useEffect(() => {
-    // iOS判定
-    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     setIsIOS(isIOSDevice);
-    
-    // Android判定
-    const isAndroidDevice = /Android/.test(navigator.userAgent);
-    setIsAndroid(isAndroidDevice);
-
-    // すでにインストール済みか判定
-    const navigatorStandalone = (window.navigator as any).standalone;
-    const matchMediaStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    const standalone = navigatorStandalone || matchMediaStandalone;
+    setIsAndroid(/Android/.test(navigator.userAgent));
+    const standalone = (window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches;
     setIsStandalone(standalone);
-
-    // Chrome/Edgeのbeforeinstallpromptイベント
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
+    const onBeforeInstall = (e: Event) => { e.preventDefault(); setDeferredPrompt(e as BeforeInstallPromptEvent); };
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
   }, []);
 
-  // PWAインストール処理
+  /** 画面表示用に残り回数を取得（APIは消費しない） */
+  const fetchRemainingQuota = useCallback(async () => {
+    try {
+      const res = await fetch('/api/detect-plate');
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data.remainingToday === 'number') setDailyRemaining(data.remainingToday);
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
+  }, [screenMode, fetchRemainingQuota]);
+
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
-      // Chrome/Edge/Android Chrome: 自動インストールプロンプトを表示
       try {
         deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-        console.log(`[PWA] User response to the install prompt: ${outcome}`);
+        await deferredPrompt.userChoice;
         setDeferredPrompt(null);
-      } catch (error) {
-        console.error('[PWA] Error prompting install:', error);
-      }
-    } else if (isIOS) {
-      // iOS Safari: 視覚的な案内モーダルを表示
-      setShowInstallGuide(true);
+      } catch (_) {}
     } else {
-      // その他のブラウザ: 手動案内モーダルを表示
       setShowInstallGuide(true);
     }
-  }, [deferredPrompt, isIOS]);
+  }, [deferredPrompt]);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
@@ -341,6 +318,20 @@ export default function Home() {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
 
+    // 撮影前に残数チェック（ローディングを出さずに即エラーにする）
+    try {
+      const quotaRes = await fetch('/api/detect-plate');
+      if (quotaRes.ok) {
+        const quotaData = await quotaRes.json();
+        const remaining = quotaData.remainingToday;
+        if (typeof remaining === 'number') setDailyRemaining(remaining);
+        if (remaining === 0) {
+          setCameraError(`本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。`);
+          return;
+        }
+      }
+    } catch (_) {}
+
     // フラッシュ効果を表示
     setShowFlash(true);
     setTimeout(() => setShowFlash(false), 200);
@@ -380,28 +371,22 @@ export default function Home() {
     try {
       const originalW = video.videoWidth;
       const originalH = video.videoHeight;
-      const isLandscape = originalW > originalH;
-
+      
+      // 高解像度画像を保存用にキャプチャ（後で使用）
       const fullResCanvas = document.createElement('canvas');
+      fullResCanvas.width = originalW;
+      fullResCanvas.height = originalH;
       const fullResCtx = fullResCanvas.getContext('2d');
       if (!fullResCtx) throw new Error('Canvas error');
-
+      
+      // フラッシュを有効化した後、少し待ってからキャプチャ（フラッシュが点灯する時間を確保）
       if (flashEnabled) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-
-      if (isLandscape) {
-        fullResCanvas.width = originalH;
-        fullResCanvas.height = originalW;
-        fullResCtx.translate(originalH, 0);
-        fullResCtx.rotate(-Math.PI / 2);
-        fullResCtx.drawImage(video, 0, 0, originalW, originalH);
-      } else {
-        fullResCanvas.width = originalW;
-        fullResCanvas.height = originalH;
-        fullResCtx.drawImage(video, 0, 0, originalW, originalH);
-      }
-
+      
+      fullResCtx.drawImage(video, 0, 0, originalW, originalH);
+      
+      // キャプチャ後、フラッシュをオフ
       if (flashEnabled && videoTrack && 'applyConstraints' in videoTrack) {
         try {
           await videoTrack.applyConstraints({
@@ -411,17 +396,16 @@ export default function Home() {
           console.log('Failed to disable flash:', e);
         }
       }
-
+      
       const fullResBlob = await new Promise<Blob>((resolve, reject) => {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      const normW = fullResCanvas.width;
-      const normH = fullResCanvas.height;
+      // API送信画像は長辺512に制限（軽量化で解析速度を確保）
       const maxApiLongEdge = 512;
-      const apiScale = Math.min(maxApiLongEdge / Math.max(normW, normH), 1);
-      const apiW = Math.round(normW * apiScale);
-      const apiH = Math.round(normH * apiScale);
+      const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
+      const apiW = Math.round(originalW * apiScale);
+      const apiH = Math.round(originalH * apiScale);
       const apiCanvas = document.createElement('canvas');
       apiCanvas.width = apiW;
       apiCanvas.height = apiH;
@@ -429,8 +413,8 @@ export default function Home() {
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
       apiCtx.imageSmoothingQuality = 'low';
-      apiCtx.filter = 'contrast(1.4) brightness(1.2)';
-      apiCtx.drawImage(fullResCanvas, 0, 0, normW, normH, 0, 0, apiW, apiH);
+      apiCtx.filter = 'contrast(1.4) brightness(1.1)';
+      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
@@ -504,10 +488,10 @@ export default function Home() {
       const result = await res.json();
 
       if (!res.ok) {
-        const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
-        if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
+        const videoTrack = streamRef.current?.getVideoTracks()[0];
+        if (videoTrack && 'applyConstraints' in videoTrack) {
           try {
-            await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
+            await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
           } catch (_) {}
         }
         const raw = (result.error || '') as string;
@@ -566,10 +550,10 @@ export default function Home() {
       if (remaining !== undefined) setDailyRemaining(remaining);
       setIsProcessing(false);
     } catch (e) {
-      const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
-      if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
+      const videoTrack = streamRef.current?.getVideoTracks()[0];
+      if (videoTrack && 'applyConstraints' in videoTrack) {
         try {
-          await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
+          await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
         } catch (_) {}
       }
       setCameraError('解析に失敗しました。しばらく経ってから再度お試しください。');
@@ -1013,9 +997,10 @@ export default function Home() {
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
-          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2">
-            <h1 className="text-lg font-extralight text-white tracking-[0.2em]">Carkusu</h1>
-            <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
+            <span className="text-lg font-extralight text-white tracking-[0.2em] shrink-0">Carkus</span>
+            <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
+            <span className="text-white/90 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
         </header>
       )}
@@ -1071,8 +1056,8 @@ export default function Home() {
           )}
           <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-base font-extralight text-white tracking-widest">Carkus</span>
                 <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
               </div>
               <button
@@ -1115,120 +1100,42 @@ export default function Home() {
           {cameraError && (
             <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
-          {/* PWAインストールボタン */}
           {!isStandalone && (
             <button
               onClick={handleInstallClick}
               className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
             >
               <DownloadIcon size={16} strokeWidth={1.5} />
-              {isIOS 
-                ? 'ホーム画面に追加（iOS）' 
-                : isAndroid
-                  ? deferredPrompt 
-                    ? 'ホーム画面に追加（Android Chrome）' 
-                    : 'ホーム画面に追加（Android）'
-                  : deferredPrompt 
-                    ? 'ホーム画面に追加（Chrome）' 
-                    : 'アプリをインストール'}
+              {isIOS ? 'ホーム画面に追加（iOS）' : isAndroid ? (deferredPrompt ? 'ホーム画面に追加（Android）' : 'ホーム画面に追加') : deferredPrompt ? 'ホーム画面に追加（Chrome）' : 'アプリをインストール'}
             </button>
           )}
           <p className="text-white/70 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
         </main>
       )}
 
-      {/* PWAインストール案内モーダル */}
       {showInstallGuide && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-white font-light text-lg">ホーム画面に追加</h2>
-              <button
-                onClick={() => setShowInstallGuide(false)}
-                className="text-white/60 hover:text-white transition-colors"
-              >
-                ✕
-              </button>
+              <button onClick={() => setShowInstallGuide(false)} className="text-white/60 hover:text-white">✕</button>
             </div>
-            
             {isIOS ? (
-              <div className="flex flex-col gap-4 text-white/90 text-sm">
-                <div className="space-y-3">
-                  <p className="font-medium">【iPhoneの場合】</p>
-                  <div className="space-y-2 pl-4">
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">1.</span>
-                      <span>この画面の<strong className="text-white">アドレスバー</strong>（URLが表示されている部分）の<strong className="text-white">右側</strong>にある<strong className="text-blue-300">「共有」ボタン</strong>（□↑のアイコン）をタップ</span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">2.</span>
-                      <span>共有メニューが開いたら、<strong className="text-white">下にスクロール</strong>して<strong className="text-blue-300">「ホーム画面に追加」</strong>を選択</span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">3.</span>
-                      <span><strong className="text-blue-300">「追加」</strong>をタップ</span>
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="space-y-3 pt-2 border-t border-white/10">
-                  <p className="font-medium">【iPadの場合】</p>
-                  <div className="space-y-2 pl-4">
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">1.</span>
-                      <span>アドレスバーの<strong className="text-white">右側</strong>にある<strong className="text-blue-300">「共有」ボタン</strong>（□↑）をタップ</span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">2.</span>
-                      <span>共有メニューから<strong className="text-blue-300">「ホーム画面に追加」</strong>を選択</span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">3.</span>
-                      <span><strong className="text-blue-300">「追加」</strong>をタップ</span>
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="pt-2 border-t border-white/10">
-                  <p className="text-white/70 text-xs">これでホーム画面から直接起動できます。</p>
-                </div>
+              <div className="text-white/90 text-sm space-y-2">
+                <p className="font-medium">【iPhone / iPad】</p>
+                <p>1. アドレスバー右の「共有」ボタン（□↑）をタップ</p>
+                <p>2. 「ホーム画面に追加」を選択 → 「追加」をタップ</p>
               </div>
             ) : isAndroid ? (
-              <div className="flex flex-col gap-4 text-white/90 text-sm">
-                <div className="space-y-3">
-                  <p className="font-medium">【Android Chromeの場合】</p>
-                  <div className="space-y-2 pl-4">
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">1.</span>
-                      <span>ブラウザの<strong className="text-white">右上</strong>にある<strong className="text-blue-300">メニューボタン</strong>（⋮）をタップ</span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">2.</span>
-                      <span>メニューから<strong className="text-blue-300">「ホーム画面に追加」</strong>または<strong className="text-blue-300">「アプリをインストール」</strong>を選択</span>
-                    </p>
-                    <p className="flex items-start gap-2">
-                      <span className="font-bold text-blue-300">3.</span>
-                      <span><strong className="text-blue-300">「追加」</strong>をタップ</span>
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="pt-2 border-t border-white/10">
-                  <p className="text-white/70 text-xs">これでホーム画面から直接起動できます。</p>
-                </div>
+              <div className="text-white/90 text-sm space-y-2">
+                <p className="font-medium">【Android】</p>
+                <p>1. ブラウザメニュー（⋮）→「ホーム画面に追加」または「アプリをインストール」</p>
+                <p>2. 「追加」をタップ</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-4 text-white/90 text-sm">
-                <p>このブラウザでは、ブラウザのメニューから「ホーム画面に追加」または「アプリをインストール」を選択してください。</p>
-              </div>
+              <p className="text-white/90 text-sm">ブラウザのメニューから「ホーム画面に追加」を選択してください。</p>
             )}
-            
-            <button
-              onClick={() => setShowInstallGuide(false)}
-              className="mt-2 px-6 py-3 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
-            >
-              閉じる
-            </button>
+            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-white/20 text-white text-sm font-light border border-white/10 hover:bg-white/30">閉じる</button>
           </div>
         </div>
       )}
