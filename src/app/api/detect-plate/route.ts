@@ -134,26 +134,35 @@ export async function POST(request: NextRequest) {
 
     incrementDailyCount(clientId);
 
+    const requestStart = Date.now();
     const formData = await request.formData();
     const imageFile = formData.get('image') as File;
     const imageWidth = parseInt(formData.get('width') as string) || 0;
     const imageHeight = parseInt(formData.get('height') as string) || 0;
 
+    console.log(`[detect-plate] Request received: size=${imageFile?.size || 0} bytes, dimensions=${imageWidth}x${imageHeight}`);
+
     if (!imageFile) {
+      console.error(`[detect-plate] No image file received`);
       return NextResponse.json({ error: '画像が送信されませんでした' }, { status: 400 });
     }
     if (!imageWidth || !imageHeight) {
+      console.error(`[detect-plate] Invalid dimensions: ${imageWidth}x${imageHeight}`);
       return NextResponse.json({ error: '画像サイズが送信されませんでした' }, { status: 400 });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
+      console.error(`[detect-plate] GEMINI_API_KEY not set`);
       return NextResponse.json({ error: 'GEMINI_API_KEYが設定されていません' }, { status: 500 });
     }
 
+    const arrayBufferStart = Date.now();
     const arrayBuffer = await imageFile.arrayBuffer();
+    const base64Start = Date.now();
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
+    console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
     const prompt = "Detect the license plate in this image. The car or camera might be tilted or in landscape mode. Identify the 4 corners [TL, TR, BR, BL] accurately based on the plate's own orientation, regardless of the image angle. Output JSON only (0-1000 range). No prose.";
 
@@ -164,6 +173,7 @@ export async function POST(request: NextRequest) {
     const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30秒（Gemini応答待ち。クライアントより短く）
     let geminiResponse: Response;
     const startTime = Date.now();
+    console.log(`[detect-plate] Calling Gemini API (image size: ${base64Image.length} chars, ${Math.round(base64Image.length / 1024)}KB base64)...`);
     try {
       geminiResponse = await fetch(url, {
         method: 'POST',

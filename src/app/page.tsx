@@ -408,8 +408,8 @@ export default function Home() {
 
       const normW = originalW;
       const normH = originalH;
-      // API送信画像サイズ: 768px（512と1024の中間。検出精度と処理速度のバランス）
-      const maxApiLongEdge = 768;
+      // API送信画像サイズ: 640px（処理速度と検出精度のバランス。512pxより大きく、768pxより小さい）
+      const maxApiLongEdge = 640;
       const apiScale = Math.min(maxApiLongEdge / Math.max(normW, normH), 1);
       const apiW = Math.round(normW * apiScale);
       const apiH = Math.round(normH * apiScale);
@@ -419,15 +419,15 @@ export default function Home() {
       const apiCtx = apiCanvas.getContext('2d');
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'high';
-      // フィルタ: コントラストと明るさを適度に調整（元の設定に近いが、saturateは0.1で少し色情報を保持）
-      apiCtx.filter = 'contrast(1.3) brightness(1.15) saturate(0.1)';
+      apiCtx.imageSmoothingQuality = 'medium'; // high→medium: 処理速度と品質のバランス
+      // フィルタ: 元の設定に戻す（Geminiの認識が安定していた設定）
+      apiCtx.filter = 'contrast(1.4) brightness(1.2) saturate(0)';
       apiCtx.drawImage(fullResCanvas, 0, 0, normW, normH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        // JPEG品質: 0.6（0.1と0.75の中間。ファイルサイズと品質のバランス）
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.6);
+        // JPEG品質: 0.3（ファイルサイズを抑えて送信速度向上、検出精度は640pxで補う）
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.3);
       });
 
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
@@ -461,10 +461,15 @@ export default function Home() {
         const fetchStart = Date.now();
         const timeoutId = setTimeout(() => controller.abort(), 35_000); // 35秒でタイムアウト（API側30sより長く）
         try {
+          console.log(`[client] Starting API fetch (retry=${retryCount})...`);
           const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
           clearTimeout(timeoutId);
           const elapsed = Date.now() - fetchStart;
-          console.log(`[client] API fetch completed in ${elapsed}ms, status=${res.status}`);
+          console.log(`[client] API fetch completed in ${elapsed}ms, status=${res.status}, ok=${res.ok}`);
+          if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            console.error(`[client] API returned error ${res.status}, body:`, text.substring(0, 500));
+          }
           return res;
         } catch (fetchErr: unknown) {
           clearTimeout(timeoutId);
@@ -473,6 +478,9 @@ export default function Home() {
             console.error(`[client] API fetch timeout after ${elapsed}ms`);
           } else {
             console.error(`[client] API fetch error after ${elapsed}ms:`, fetchErr);
+            if (fetchErr instanceof Error) {
+              console.error(`[client] Error name: ${fetchErr.name}, message: ${fetchErr.message}`);
+            }
           }
           if (retryCount === 0 && (fetchErr instanceof Error && fetchErr.name === 'AbortError' || fetchErr instanceof TypeError)) {
             setCameraError('画像サイズを小さくして再試行しています...');
