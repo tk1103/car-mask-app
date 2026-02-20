@@ -29,6 +29,98 @@ function normalizeCornersOrder(corners: Corners): Corners {
   return corners;
 }
 
+// 3点対応のアフィン行列を算出（srcTri → dstTri）。setTransform(a,b,c,d,e,f) に渡す配列を返す。
+// Canvas 2D は射影変換を直接サポートしないため、四角を2三角形に分割しそれぞれアフィンで描画してパースを近似する。
+function getAffineFromTri(
+  src: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ],
+  dst: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ]
+): [ number, number, number, number, number, number ] {
+  const [ s0, s1, s2 ] = src;
+  const [ d0, d1, d2 ] = dst;
+  const M = [
+    [ s0.x, s0.y, 1 ],
+    [ s1.x, s1.y, 1 ],
+    [ s2.x, s2.y, 1 ],
+  ];
+  const det = M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) - M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) + M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]);
+  if (Math.abs(det) < 1e-10) return [ 1, 0, 0, 1, 0, 0 ];
+  const inv = [
+    [ (M[1][1]*M[2][2]-M[1][2]*M[2][1])/det, -(M[0][1]*M[2][2]-M[0][2]*M[2][1])/det, (M[0][1]*M[1][2]-M[0][2]*M[1][1])/det ],
+    [ -(M[1][0]*M[2][2]-M[1][2]*M[2][0])/det, (M[0][0]*M[2][2]-M[0][2]*M[2][0])/det, -(M[0][0]*M[1][2]-M[0][2]*M[1][0])/det ],
+    [ (M[1][0]*M[2][1]-M[1][1]*M[2][0])/det, -(M[0][0]*M[2][1]-M[0][1]*M[2][0])/det, (M[0][0]*M[1][1]-M[0][1]*M[1][0])/det ],
+  ];
+  const a = inv[0][0]*d0.x + inv[0][1]*d1.x + inv[0][2]*d2.x;
+  const c = inv[1][0]*d0.x + inv[1][1]*d1.x + inv[1][2]*d2.x;
+  const e = inv[2][0]*d0.x + inv[2][1]*d1.x + inv[2][2]*d2.x;
+  const b = inv[0][0]*d0.y + inv[0][1]*d1.y + inv[0][2]*d2.y;
+  const d = inv[1][0]*d0.y + inv[1][1]*d1.y + inv[1][2]*d2.y;
+  const f = inv[2][0]*d0.y + inv[2][1]*d1.y + inv[2][2]*d2.y;
+  return [ a, b, c, d, e, f ];
+}
+
+type QuadPx = [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ];
+
+// 四角形を黒で塗りつぶし（マスク）
+function fillQuad(ctx: CanvasRenderingContext2D, quad: QuadPx, fillStyle: string) {
+  ctx.save();
+  ctx.fillStyle = fillStyle;
+  ctx.beginPath();
+  ctx.moveTo(quad[0].x, quad[0].y);
+  ctx.lineTo(quad[1].x, quad[1].y);
+  ctx.lineTo(quad[2].x, quad[2].y);
+  ctx.lineTo(quad[3].x, quad[3].y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// 画像を四角形に射影変換（2三角形アフィン近似）でワープして描画
+function drawImageWarpedToQuad(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement | HTMLCanvasElement,
+  quad: QuadPx,
+  logoW: number,
+  logoH: number
+) {
+  const [ TL, TR, BR, BL ] = quad;
+  // 三角形1: TL, TR, BR（画像の (0,0)-(logoW,0)-(logoW,logoH) をマッピング）
+  const srcTri1: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [
+    { x: 0, y: 0 },
+    { x: logoW, y: 0 },
+    { x: logoW, y: logoH },
+  ];
+  const dstTri1: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [ TL, TR, BR ];
+  const t1 = getAffineFromTri(srcTri1, dstTri1);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(TL.x, TL.y);
+  ctx.lineTo(TR.x, TR.y);
+  ctx.lineTo(BR.x, BR.y);
+  ctx.closePath();
+  ctx.clip();
+  ctx.setTransform(t1[0], t1[1], t1[2], t1[3], t1[4], t1[5]);
+  ctx.drawImage(img, 0, 0, logoW, logoH, 0, 0, logoW, logoH);
+  ctx.restore();
+  // 三角形2: TL, BR, BL（画像の (0,0)-(logoW,logoH)-(0,logoH) をマッピング）
+  const srcTri2: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [
+    { x: 0, y: 0 },
+    { x: logoW, y: logoH },
+    { x: 0, y: logoH },
+  ];
+  const dstTri2: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [ TL, BR, BL ];
+  const t2 = getAffineFromTri(srcTri2, dstTri2);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(TL.x, TL.y);
+  ctx.lineTo(BR.x, BR.y);
+  ctx.lineTo(BL.x, BL.y);
+  ctx.closePath();
+  ctx.clip();
+  ctx.setTransform(t2[0], t2[1], t2[2], t2[3], t2[4], t2[5]);
+  ctx.drawImage(img, 0, 0, logoW, logoH, 0, 0, logoW, logoH);
+  ctx.restore();
+}
+
 // 回転済み座標系の中心(0,0)に Carkus ロゴを描画（角丸黒背景＋SVGロゴ or 白文字「Carkus」）
 // 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
 function drawCarkusuLogoAtOrigin(
@@ -161,6 +253,7 @@ export default function Home() {
   const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
   const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
+  const logoCanvasRef = useRef<HTMLCanvasElement | null>(null); // マスク画像が無いときのロゴ用オフスクリーン
 
   useEffect(() => {
     const img = new Image();
@@ -633,53 +726,81 @@ export default function Home() {
 
     if (detectedCorners.length > 0 && (maskImage?.complete || true)) {
       const scale = editLogoScale;
+      const cosR = Math.cos((editLogoRotation * Math.PI) / 180);
+      const sinR = Math.sin((editLogoRotation * Math.PI) / 180);
+
+      // マスク画像が無いとき用のロゴキャンバス（黒背景＋Carkus）を1枚用意
+      if (!maskImage?.complete || !maskImage.naturalWidth) {
+        const Lw = 400;
+        const Lh = 120;
+        let logoCanvas = logoCanvasRef.current;
+        if (!logoCanvas) {
+          logoCanvas = document.createElement('canvas');
+          logoCanvas.width = Lw;
+          logoCanvas.height = Lh;
+          logoCanvasRef.current = logoCanvas;
+        }
+        const lctx = logoCanvas.getContext('2d');
+        if (lctx) {
+          lctx.clearRect(0, 0, Lw, Lh);
+          lctx.save();
+          lctx.translate(Lw / 2, Lh / 2);
+          drawCarkusuLogoAtOrigin(lctx, Lw * 0.95, Lh * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage);
+          lctx.restore();
+        }
+      }
 
       detectedCorners.forEach((corners) => {
-        // 重心（スケールしても不変）
         const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
         const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
         const centerX = centerNx * w;
         const centerY = centerNy * h;
 
-        // スケール適用後の四隅（サイズ・角度算出用）
         const scaled: Corners = corners.map((c) => ({
           x: centerNx + (c.x - centerNx) * scale,
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // プレートの「上辺」（数字が読める方向）の角度を算出
-        // normalizeCornersOrder で corners[0]=左上・corners[1]=右上（プレートにとっての上辺）に揃えてある
         const dx = scaled[1].x - scaled[0].x;
         const dy = scaled[1].y - scaled[0].y;
         const baseAngle = Math.atan2(dy, dx);
         const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
+        const cf = Math.cos(finalRotation);
+        const sf = Math.sin(finalRotation);
 
-        // プレート幅・高さ（ピクセル）。ロゴは10%大きく
         const plateWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
         const plateHeightLeft = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
         const plateHeightRight = Math.hypot((scaled[2].x - scaled[1].x) * w, (scaled[2].y - scaled[1].y) * h);
         const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
         const logoWidth = plateWidth * 1.1;
         const logoHeight = plateHeight * 1.1;
-
-        // 位置微調整は回転座標系で適用（プレートの横・縦方向にスライド）
         const offsetX = (editLogoOffset.x / 100) * logoWidth;
         const offsetY = (editLogoOffset.y / 100) * logoHeight;
+        const offsetPxX = offsetX * cf - offsetY * sf;
+        const offsetPxY = offsetX * sf + offsetY * cf;
 
-        ctx.save();
-        ctx.translate(centerX, centerY);
-        ctx.rotate(finalRotation);
-        ctx.translate(offsetX, offsetY);
-        // 以降は回転済み座標系のみ。drawCarkusuLogoAtOrigin は追加の回転をせず、finalRotation に合わせて描画
+        // 4隅をピクセル座標に（スケール→回転→オフセット）
+        const quadPx: QuadPx = scaled.map((c) => {
+          const px = c.x * w - centerX;
+          const py = c.y * h - centerY;
+          return {
+            x: centerX + px * cf - py * sf + offsetPxX,
+            y: centerY + px * sf + py * cf + offsetPxY,
+          };
+        }) as QuadPx;
+
+        // 1) 黒マスクを四角で塗りつぶし（パースに合わせた四角形）
+        fillQuad(ctx, quadPx, 'rgba(0,0,0,0.92)');
+
+        // 2) ロゴ／マスク画像を同じ四角に射影変換（2三角形アフィン）でワープして合成
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(maskImage, -logoWidth / 2, -logoHeight / 2, logoWidth, logoHeight);
-        } else {
-          drawCarkusuLogoAtOrigin(ctx, logoWidth, logoHeight, { backgroundAlpha: 0.92 }, carkusuLogoImage);
+          drawImageWarpedToQuad(ctx, maskImage, quadPx, maskImage.naturalWidth, maskImage.naturalHeight);
+        } else if (logoCanvasRef.current) {
+          const c = logoCanvasRef.current;
+          drawImageWarpedToQuad(ctx, c, quadPx, c.width, c.height);
         }
-
-        ctx.restore();
       });
     }
   }, [screenMode, previewImageLoaded, detectedCorners, maskImage, carkusuLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
