@@ -242,6 +242,20 @@ export default function Home() {
     img.src = '/Carkus.svg';
   }, []);
 
+  // Service Worker登録（PWA用）
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((registration) => {
+          console.log('Service Worker registered:', registration);
+        })
+        .catch((error) => {
+          console.error('Service Worker registration failed:', error);
+        });
+    }
+  }, []);
+
   const startCamera = useCallback(async () => {
     setCameraError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
