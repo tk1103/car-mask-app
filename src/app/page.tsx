@@ -154,8 +154,6 @@ export default function Home() {
   const [isAndroid, setIsAndroid] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
-  const [headerLogoFailed, setHeaderLogoFailed] = useState(false); // Carkus.svg が無いときテキスト表示
-
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -1000,17 +998,9 @@ export default function Home() {
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2">
-            {headerLogoFailed ? (
-              <span className="text-lg font-extralight text-white tracking-[0.2em]">Carkus</span>
-            ) : (
-              <img
-                src="/Carkus.svg"
-                alt="Carkus"
-                className="h-6 w-auto object-contain min-w-[80px]"
-                onLoad={() => setHeaderLogoFailed(false)}
-                onError={() => setHeaderLogoFailed(true)}
-              />
-            )}
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" className="h-6 w-auto min-w-[90px]" aria-label="Carkus">
+              <text x="0" y="22" fontFamily="system-ui, -apple-system, sans-serif" fontSize="18" fontWeight="300" fill="white" letterSpacing="0.2em">Carkus</text>
+            </svg>
             <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
           </div>
         </header>
@@ -1068,17 +1058,9 @@ export default function Home() {
           <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {headerLogoFailed ? (
-                  <span className="text-base font-extralight text-white tracking-widest">Carkus</span>
-                ) : (
-                  <img
-                    src="/Carkus.svg"
-                    alt="Carkus"
-                    className="h-5 w-auto object-contain min-w-[70px]"
-                    onLoad={() => setHeaderLogoFailed(false)}
-                    onError={() => setHeaderLogoFailed(true)}
-                  />
-                )}
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" className="h-5 w-auto min-w-[80px]" aria-label="Carkus">
+                  <text x="0" y="22" fontFamily="system-ui, -apple-system, sans-serif" fontSize="16" fontWeight="300" fill="white" letterSpacing="0.15em">Carkus</text>
+                </svg>
                 <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
               </div>
               <button
