@@ -233,6 +233,7 @@ export default function Home() {
   const [isIOS, setIsIOS] = useState(false); // iOS判定
   const [isAndroid, setIsAndroid] = useState(false); // Android判定
   const [isStandalone, setIsStandalone] = useState(false); // すでにインストール済みか
+  const [showInstallGuide, setShowInstallGuide] = useState(false); // PWAインストール案内モーダル表示用
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -331,7 +332,7 @@ export default function Home() {
   // PWAインストール処理
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
-      // Chrome/Edge
+      // Chrome/Edge/Android Chrome: 自動インストールプロンプトを表示
       try {
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
@@ -341,30 +342,11 @@ export default function Home() {
         console.error('[PWA] Error prompting install:', error);
       }
     } else if (isIOS) {
-      // iOS Safari: 手動案内を表示（より詳細で分かりやすく）
-      const message = `ホーム画面に追加する方法：
-
-【iPhoneの場合】
-1. 画面下部のツールバーから「共有」ボタン（四角に上矢印のアイコン）を探す
-   - 見つからない場合は、アドレスバーの右側の「共有」ボタンをタップ
-2. 共有メニューが開いたら、下にスクロールして「ホーム画面に追加」を選択
-3. 「追加」をタップ
-
-【iPadの場合】
-1. アドレスバーの右側にある「共有」ボタン（四角に上矢印）をタップ
-2. 共有メニューから「ホーム画面に追加」を選択
-3. 「追加」をタップ
-
-これでホーム画面から直接起動できます。`;
-      alert(message);
+      // iOS Safari: 視覚的な案内モーダルを表示
+      setShowInstallGuide(true);
     } else {
-      // その他のブラウザ: 手動案内
-      const isAndroid = /Android/.test(navigator.userAgent);
-      if (isAndroid) {
-        alert('ホーム画面に追加するには:\n\n1. ブラウザのメニュー（⋮）をタップ\n2. 「ホーム画面に追加」または「アプリをインストール」を選択\n3. 「追加」をタップ');
-      } else {
-        alert('このブラウザでは、ブラウザのメニューから「ホーム画面に追加」または「アプリをインストール」を選択してください。');
-      }
+      // その他のブラウザ: 手動案内モーダルを表示
+      setShowInstallGuide(true);
     }
   }, [deferredPrompt, isIOS]);
 
@@ -1167,6 +1149,102 @@ export default function Home() {
             <CheckCircle className="text-emerald-300" size={40} strokeWidth={2} />
             <p className="text-white font-light">保存しました</p>
             <p className="text-white/80 text-xs font-extralight">ご利用ありがとうございます</p>
+          </div>
+        </div>
+      )}
+
+      {/* PWAインストール案内モーダル */}
+      {showInstallGuide && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h2 className="text-white font-light text-lg">ホーム画面に追加</h2>
+              <button
+                onClick={() => setShowInstallGuide(false)}
+                className="text-white/60 hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            
+            {isIOS ? (
+              <div className="flex flex-col gap-4 text-white/90 text-sm">
+                <div className="space-y-3">
+                  <p className="font-medium">【iPhoneの場合】</p>
+                  <div className="space-y-2 pl-4">
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">1.</span>
+                      <span>この画面の<strong className="text-white">アドレスバー</strong>（URLが表示されている部分）の<strong className="text-white">右側</strong>にある<strong className="text-blue-300">「共有」ボタン</strong>（□↑のアイコン）をタップ</span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">2.</span>
+                      <span>共有メニューが開いたら、<strong className="text-white">下にスクロール</strong>して<strong className="text-blue-300">「ホーム画面に追加」</strong>を選択</span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">3.</span>
+                      <span><strong className="text-blue-300">「追加」</strong>をタップ</span>
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="space-y-3 pt-2 border-t border-white/10">
+                  <p className="font-medium">【iPadの場合】</p>
+                  <div className="space-y-2 pl-4">
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">1.</span>
+                      <span>アドレスバーの<strong className="text-white">右側</strong>にある<strong className="text-blue-300">「共有」ボタン</strong>（□↑）をタップ</span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">2.</span>
+                      <span>共有メニューから<strong className="text-blue-300">「ホーム画面に追加」</strong>を選択</span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">3.</span>
+                      <span><strong className="text-blue-300">「追加」</strong>をタップ</span>
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="pt-2 border-t border-white/10">
+                  <p className="text-white/70 text-xs">これでホーム画面から直接起動できます。</p>
+                </div>
+              </div>
+            ) : isAndroid ? (
+              <div className="flex flex-col gap-4 text-white/90 text-sm">
+                <div className="space-y-3">
+                  <p className="font-medium">【Android Chromeの場合】</p>
+                  <div className="space-y-2 pl-4">
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">1.</span>
+                      <span>ブラウザの<strong className="text-white">右上</strong>にある<strong className="text-blue-300">メニューボタン</strong>（⋮）をタップ</span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">2.</span>
+                      <span>メニューから<strong className="text-blue-300">「ホーム画面に追加」</strong>または<strong className="text-blue-300">「アプリをインストール」</strong>を選択</span>
+                    </p>
+                    <p className="flex items-start gap-2">
+                      <span className="font-bold text-blue-300">3.</span>
+                      <span><strong className="text-blue-300">「追加」</strong>をタップ</span>
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="pt-2 border-t border-white/10">
+                  <p className="text-white/70 text-xs">これでホーム画面から直接起動できます。</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4 text-white/90 text-sm">
+                <p>このブラウザでは、ブラウザのメニューから「ホーム画面に追加」または「アプリをインストール」を選択してください。</p>
+              </div>
+            )}
+            
+            <button
+              onClick={() => setShowInstallGuide(false)}
+              className="mt-2 px-6 py-3 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
+            >
+              閉じる
+            </button>
           </div>
         </div>
       )}
