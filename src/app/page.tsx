@@ -15,6 +15,9 @@ const FALLBACK_CORNERS: Corners = [
   { x: 0.05, y: 0.75 },
 ];
 
+// 検出不能になりやすい条件の案内（APIに公表値はないため目安として表示）
+const DETECTION_SIZE_HINT = 'ナンバーが画面に小さく写りすぎていると検出できません。プレートに近づき、画面の2割以上を占めるようにして撮影し直してください。';
+
 // API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 座標系に完全一致（Y軸反転なし）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
   return plate.corners.map((c) => ({
@@ -1165,6 +1168,9 @@ export default function Home() {
                   <>
                     <p className="text-amber-200 text-sm font-light text-center">
                       ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
+                    </p>
+                    <p className="text-white/70 text-sm font-light text-center text-xs mt-1">
+                      {DETECTION_SIZE_HINT}
                     </p>
                     <p className="text-white/70 text-sm font-light text-center">
                       本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}。制限に達した場合は明日お試しください。
