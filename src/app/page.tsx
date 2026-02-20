@@ -1002,6 +1002,7 @@ export default function Home() {
               <text x="0" y="22" fontFamily="system-ui, -apple-system, sans-serif" fontSize="18" fontWeight="300" fill="white" letterSpacing="0.2em">Carkus</text>
             </svg>
             <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+            <span className="text-white/60 text-[10px] font-extralight tracking-wider">ver0.8</span>
           </div>
         </header>
       )}
