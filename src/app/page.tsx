@@ -997,12 +997,10 @@ export default function Home() {
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
-          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" className="h-6 w-auto min-w-[90px]" aria-label="Carkus">
-              <text x="0" y="22" fontFamily="system-ui, -apple-system, sans-serif" fontSize="18" fontWeight="300" fill="white" letterSpacing="0.2em">Carkus</text>
-            </svg>
-            <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
-            <span className="text-white/60 text-[10px] font-extralight tracking-wider">ver0.8</span>
+          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
+            <span className="text-lg font-extralight text-white tracking-[0.2em] shrink-0">Carkus</span>
+            <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
+            <span className="text-white/90 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
         </header>
       )}
@@ -1058,10 +1056,8 @@ export default function Home() {
           )}
           <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" className="h-5 w-auto min-w-[80px]" aria-label="Carkus">
-                  <text x="0" y="22" fontFamily="system-ui, -apple-system, sans-serif" fontSize="16" fontWeight="300" fill="white" letterSpacing="0.15em">Carkus</text>
-                </svg>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-base font-extralight text-white tracking-widest">Carkus</span>
                 <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
               </div>
               <button
