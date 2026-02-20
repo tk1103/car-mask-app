@@ -227,6 +227,69 @@ const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
 const OPENCV_DETECT_SIZE = 320; // 検出用の短辺（アスペクトで長辺も決める）
 const DETECT_INTERVAL_MS = 150;
 
+/** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最大面積の4点を返す。 */
+function findBestQuadFromBinary(
+  cv: Record<string, unknown>,
+  binary: { delete: () => void },
+  sw: number,
+  sh: number
+): { points: { x: number; y: number }[]; area: number } | null {
+  const contours = new (cv.MatVector as new () => { get: (i: number) => unknown; size: () => number; delete: () => void })();
+  const hierarchy = new (cv.Mat as new () => { delete: () => void })();
+  (cv.findContours as (img: unknown, c: unknown, h: unknown, mode: number, method: number) => void)(
+    binary, contours, hierarchy, cv.RETR_LIST as number, cv.CHAIN_APPROX_SIMPLE as number
+  );
+  hierarchy.delete();
+
+  let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
+  const minArea = (sw * sh) * 0.003;
+  const maxArea = (sw * sh) * 0.85;
+
+  for (let i = 0; i < contours.size(); i++) {
+    const cnt = contours.get(i) as { rows?: number; data32S?: Int32Array; delete?: () => void } | undefined;
+    if (!cnt) continue;
+    const area = (cv.contourArea as (c: unknown) => number)(cnt);
+    if (area < minArea || area > maxArea) continue;
+    const epsilon = 0.04 * (cv.arcLength as (c: unknown, closed: boolean) => number)(cnt, true);
+    const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
+    (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
+    if (approx.rows !== 4) {
+      approx.delete();
+      continue;
+    }
+    const rect = (cv.boundingRect as (c: unknown) => { width: number; height: number })(approx);
+    let rw = rect.width;
+    let rh = rect.height;
+    if (rw < 3 || rh < 3) {
+      approx.delete();
+      continue;
+    }
+    if (rw < rh) [rw, rh] = [rh, rw];
+    const ratio = rw / rh;
+    if (ratio < 1.2 || ratio > 9) {
+      approx.delete();
+      continue;
+    }
+    const data = approx.data32S;
+    if (!data || data.length < 8) {
+      approx.delete();
+      continue;
+    }
+    const points = [
+      { x: data[0], y: data[1] },
+      { x: data[2], y: data[3] },
+      { x: data[4], y: data[5] },
+      { x: data[6], y: data[7] },
+    ];
+    const inRange = points.every((p) => p.x >= 0 && p.x <= sw && p.y >= 0 && p.y <= sh);
+    approx.delete();
+    if (!inRange) continue;
+    if (!bestQuad || area > bestQuad.area) bestQuad = { points, area };
+  }
+  contours.delete();
+  return bestQuad;
+}
+
 /** OpenCVで低解像度グレースケールから四角形候補を検出し、動画ピクセル座標の QuadPx を返す。失敗時は null。 */
 function detectQuadFromCanvas(
   smallCanvas: HTMLCanvasElement,
@@ -244,63 +307,40 @@ function detectQuadFromCanvas(
   let src: { delete: () => void } | null = null;
   let gray: { delete: () => void } | null = null;
   let blurred: { delete: () => void } | null = null;
+  let binary: { delete: () => void } | null = null;
   let edges: { delete: () => void } | null = null;
   try {
     src = cv.imread(smallCanvas) as { delete: () => void };
     gray = new (cv.Mat as new () => { delete: () => void })();
     blurred = new (cv.Mat as new () => { delete: () => void })();
+    binary = new (cv.Mat as new () => { delete: () => void })();
     edges = new (cv.Mat as new () => { delete: () => void })();
     (cv.cvtColor as (a: unknown, b: unknown, code: number) => void)(src, gray, cv.COLOR_RGBA2GRAY as number);
     (cv.GaussianBlur as (a: unknown, b: unknown, k: unknown, s: number) => void)(gray, blurred, new (cv.Size as new (a: number, b: number) => unknown)(5, 5), 0);
-    (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 50, 150);
-
-    const contours = new (cv.MatVector as new () => { get: (i: number) => { rows: number; data32S: Int32Array; delete: () => void }; size: () => number; delete: () => void })();
-    const hierarchy = new (cv.Mat as new () => { delete: () => void })();
-    (cv.findContours as (img: unknown, c: unknown, h: unknown, mode: number, method: number) => void)(edges, contours, hierarchy, cv.RETR_LIST as number, cv.CHAIN_APPROX_SIMPLE as number);
-    hierarchy.delete();
 
     let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
-    const minArea = (sw * sh) * 0.005;
-    const maxArea = (sw * sh) * 0.75;
 
-    for (let i = 0; i < contours.size(); i++) {
-      const cnt = contours.get(i);
-      if (!cnt) continue;
-      const area = (cv.contourArea as (c: unknown) => number)(cnt);
-      if (area < minArea || area > maxArea) {
-        continue;
-      }
-      const epsilon = 0.03 * (cv.arcLength as (c: unknown, closed: boolean) => number)(cnt, true);
-      const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
-      (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
-      if (approx.rows !== 4) {
-        approx.delete();
-        continue;
-      }
-      const rect = (cv.boundingRect as (c: unknown) => { width: number; height: number })(approx);
-      let rw = rect.width;
-      let rh = rect.height;
-      if (rw < 2 || rh < 2) {
-        approx.delete();
-        continue;
-      }
-      if (rw < rh) [rw, rh] = [rh, rw];
-      const ratio = rw / rh;
-      if (ratio < 1.3 || ratio > 8) {
-        approx.delete();
-        continue;
-      }
-      const data = approx.data32S;
-      const points = [
-        { x: data[0], y: data[1] },
-        { x: data[2], y: data[3] },
-        { x: data[4], y: data[5] },
-        { x: data[6], y: data[7] },
-      ];
-      approx.delete();
-      if (!bestQuad || area > bestQuad.area) bestQuad = { points, area };
+    // 1) Canny エッジから検出
+    (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 25, 120);
+    type QuadCandidate = { points: { x: number; y: number }[]; area: number };
+    const fromCanny = findBestQuadFromBinary(cv, edges, sw, sh);
+    if (fromCanny) {
+      const better = bestQuad === null || fromCanny.area > (bestQuad as QuadCandidate).area;
+      if (better) bestQuad = fromCanny;
     }
-    contours.delete();
+    // 2) 適応的閾値から検出（照明むらに強い）
+    const ADAPTIVE_THRESH_GAUSSIAN_C = 1;
+    const THRESH_BINARY = 0;
+    if (typeof (cv as Record<string, unknown>).adaptiveThreshold === 'function') {
+      (cv.adaptiveThreshold as (src: unknown, dst: unknown, maxVal: number, adaptiveMethod: number, thresholdType: number, blockSize: number, C: number) => void)(
+        blurred, binary, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 11, 2
+      );
+      const fromAdaptive = findBestQuadFromBinary(cv, binary, sw, sh);
+      if (fromAdaptive) {
+        const better = bestQuad === null || fromAdaptive.area > (bestQuad as QuadCandidate).area;
+        if (better) bestQuad = fromAdaptive;
+      }
+    }
 
     if (!bestQuad) return null;
 
@@ -329,6 +369,7 @@ function detectQuadFromCanvas(
       src?.delete?.();
       gray?.delete?.();
       blurred?.delete?.();
+      binary?.delete?.();
       edges?.delete?.();
     } catch {}
   }
@@ -423,14 +464,28 @@ export default function Home() {
     if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
   }, [screenMode, fetchRemainingQuota]);
 
-  // OpenCV.js をカメラモード時のみ CDN から読み込む
+  // OpenCV.js をカメラモード時のみ CDN から読み込む（非同期初期化も考慮）
   useEffect(() => {
     if (screenMode !== 'camera') return;
-    const win = typeof window === 'undefined' ? undefined : (window as unknown as { cv?: { Mat?: unknown; onRuntimeInitialized?: () => void } });
-    if (win?.cv?.Mat) {
-      opencvReadyRef.current = true;
-      setOpencvReady(true);
-      return;
+    const trySetReady = () => {
+      try {
+        const cv = (window as unknown as { cv?: { Mat?: new () => { delete?: () => void } } }).cv;
+        if (!cv?.Mat) return false;
+        const m = new cv.Mat();
+        if (m && typeof (m as { delete?: () => void }).delete === 'function') {
+          (m as { delete: () => void }).delete();
+        }
+        opencvReadyRef.current = true;
+        setOpencvReady(true);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (trySetReady()) return;
+    if (document.querySelector('script[src*="opencv"]')) {
+      const poll = setInterval(() => { if (trySetReady()) clearInterval(poll); }, 300);
+      return () => clearInterval(poll);
     }
     const script = document.createElement('script');
     script.async = true;
@@ -438,15 +493,16 @@ export default function Home() {
     script.onload = () => {
       const cv = (window as unknown as { cv?: { Mat?: unknown; onRuntimeInitialized?: () => void } }).cv;
       if (!cv) return;
-      if (cv.Mat) {
-        opencvReadyRef.current = true;
-        setOpencvReady(true);
-        return;
-      }
-      cv.onRuntimeInitialized = () => {
+      if (trySetReady()) return;
+      (cv as Record<string, unknown>).onRuntimeInitialized = () => {
         opencvReadyRef.current = true;
         setOpencvReady(true);
       };
+      const poll = setInterval(() => { if (trySetReady()) clearInterval(poll); }, 200);
+      setTimeout(() => clearInterval(poll), 15000);
+    };
+    script.onerror = () => {
+      setCameraError('OpenCV の読み込みに失敗しました。ネットワークを確認してください。');
     };
     document.head.appendChild(script);
     return () => {
@@ -454,9 +510,9 @@ export default function Home() {
     };
   }, [screenMode]);
 
-  // リアルタイム矩形検出（低解像・グレースケール、一定間隔で実行）
+  // リアルタイム矩形検出（低解像・グレースケール）。OpenCV 未読み込みでも interval は動かし、読み込み後に検出開始。
   useEffect(() => {
-    if (screenMode !== 'camera' || !opencvReady || !stream) return;
+    if (screenMode !== 'camera' || !stream) return;
     const video = videoRef.current;
     if (!video) return;
 
@@ -491,7 +547,7 @@ export default function Home() {
       detectionIntervalRef.current = null;
       liveQuadRef.current = null;
     };
-  }, [screenMode, opencvReady, stream]);
+  }, [screenMode, stream]);
 
   // カメラオーバーレイ描画（検出四角にマスク＋ロゴを三角形2分割アフィンで表示）
   useEffect(() => {
