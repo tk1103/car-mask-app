@@ -6,6 +6,14 @@ import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Ins
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
+// 検出失敗時のフォールバック用の四角（正規化0-1）。画像中央の 幅60%×高さ30% で、手動調整しやすいサイズに
+const FALLBACK_CORNERS: Corners = [
+  { x: 0.2, y: 0.35 },
+  { x: 0.8, y: 0.35 },
+  { x: 0.8, y: 0.65 },
+  { x: 0.2, y: 0.65 },
+];
+
 // API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 座標系に完全一致（Y軸反転なし）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
   return plate.corners.map((c) => ({
@@ -272,7 +280,7 @@ export default function Home() {
     const video = videoRef.current;
     const t = setTimeout(() => {
       video.srcObject = stream;
-      video.play().catch(() => {});
+      video.play().catch(() => { });
     }, 100);
     return () => clearTimeout(t);
   }, [stream]);
@@ -289,7 +297,7 @@ export default function Home() {
     const tryPlay = () => {
       if (playAttemptCountRef.current < 5) {
         playAttemptCountRef.current++;
-        v.play().catch(() => {});
+        v.play().catch(() => { });
       }
     };
     const t = setTimeout(() => {
@@ -304,11 +312,11 @@ export default function Home() {
   const detectBrightness = useCallback((canvas: HTMLCanvasElement): number => {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return 128; // デフォルト値（中間の明るさ）
-    
+
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
     let sum = 0;
-    
+
     // RGB値から輝度を計算（サンプリング：10ピクセルごと）
     for (let i = 0; i < data.length; i += 40) {
       const r = data[i];
@@ -318,7 +326,7 @@ export default function Home() {
       const brightness = r * 0.299 + g * 0.587 + b * 0.114;
       sum += brightness;
     }
-    
+
     return sum / (data.length / 40);
   }, []);
 
@@ -477,10 +485,7 @@ export default function Home() {
         } else {
           setCameraError('解析に失敗しました。通信を確認してもう一度お試しください。');
         }
-        setDetectedCorners([[
-          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-        ]]);
+        setDetectedCorners([FALLBACK_CORNERS]);
         setDetectionFailed(true);
         setLastProcessingTimeMs(Date.now() - processingStart);
         setIsProcessing(false);
@@ -493,7 +498,7 @@ export default function Home() {
         if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
           try {
             await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
-          } catch (_) {}
+          } catch (_) { }
         }
         const raw = (result.error || '') as string;
         const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
@@ -502,10 +507,7 @@ export default function Home() {
         setCameraError(message);
         const remaining = (result as { remainingToday?: number }).remainingToday;
         if (remaining !== undefined) setDailyRemaining(remaining);
-        setDetectedCorners([[
-          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-        ]]);
+        setDetectedCorners([FALLBACK_CORNERS]);
         setDetectionFailed(true);
         setLastProcessingTimeMs(Date.now() - processingStart);
         setIsProcessing(false);
@@ -524,10 +526,7 @@ export default function Home() {
           setEditLogoRotation(0);
         } else {
           setDetectionFailed(true);
-          setDetectedCorners([[
-            { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-            { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-          ]]);
+          setDetectedCorners([FALLBACK_CORNERS]);
           setCameraError('プレートの座標が不正でした。手動で調整してください。');
         }
       } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
@@ -539,10 +538,7 @@ export default function Home() {
         setEditLogoRotation(0);
       } else {
         setDetectionFailed(true);
-        setDetectedCorners([[
-          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-        ]]);
+        setDetectedCorners([FALLBACK_CORNERS]);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setEditLogoRotation(0);
@@ -557,13 +553,10 @@ export default function Home() {
       if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
         try {
           await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
-        } catch (_) {}
+        } catch (_) { }
       }
       setCameraError('解析に失敗しました。しばらく経ってから再度お試しください。');
-      setDetectedCorners([[
-        { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-        { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-      ]]);
+      setDetectedCorners([FALLBACK_CORNERS]);
       setDetectionFailed(true);
       setLastProcessingTimeMs(Date.now() - processingStart);
       setIsProcessing(false);
@@ -590,7 +583,7 @@ export default function Home() {
         const video = videoRef.current;
         if (video && stream.active) {
           video.srcObject = stream;
-          video.play().catch(() => {});
+          video.play().catch(() => { });
         }
       };
       setTimeout(applyStream, 250);
@@ -752,7 +745,7 @@ export default function Home() {
                 title: 'Carkus',
                 text: shareTexts[platform] || 'Carkusでナンバープレートをマスクしました',
               });
-              
+
               setShowShareMenu(false);
               setShowSaveSuccess(true);
               setTimeout(() => setShowSaveSuccess(false), 2500);
@@ -790,7 +783,7 @@ export default function Home() {
 
               // SNSの共有URLを開く
               window.open(shareUrls[platform], '_blank');
-              
+
               setShowShareMenu(false);
               setShowSaveSuccess(true);
               setTimeout(() => setShowSaveSuccess(false), 2500);
@@ -1149,7 +1142,7 @@ export default function Home() {
               <div className="absolute inset-0 flex flex-col bg-black/30 backdrop-blur-md">
                 <div className="flex-1 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
-                  <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
+                  <p className="text-white/90 text-sm font-light">AIがスキャン中...</p>
                   <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
                 </div>
                 <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
@@ -1160,33 +1153,33 @@ export default function Home() {
           </div>
           {/* 縦: 下部固定 / 横: 左側固定 */}
           <div className="relative z-10 shrink-0 [@media(orientation:landscape)]:order-1 [@media(orientation:landscape)]:border-t-0 [@media(orientation:landscape)]:border-r [@media(orientation:landscape)]:max-w-[280px] [@media(orientation:landscape)]:overflow-y-auto bg-black/30 backdrop-blur-md border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] [@media(orientation:landscape)]:py-4 [@media(orientation:landscape)]:pl-[max(1rem,env(safe-area-inset-left))] [@media(orientation:landscape)]:pr-4">
-          {(isBlurWarning || detectionFailed) && (
-            <div className="shrink-0 px-0 py-0 mb-3 flex flex-col gap-2">
-              {isBlurWarning && (
-                <p className="text-amber-200 text-sm font-light text-center">
-                  写真がぼやけている可能性があります。撮り直すことをお勧めします。
-                </p>
-              )}
-              {detectionFailed && (
-                <>
+            {(isBlurWarning || detectionFailed) && (
+              <div className="shrink-0 px-0 py-0 mb-3 flex flex-col gap-2">
+                {isBlurWarning && (
                   <p className="text-amber-200 text-sm font-light text-center">
-                    ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
+                    写真がぼやけている可能性があります。撮り直すことをお勧めします。
                   </p>
-                  <p className="text-white/70 text-sm font-light text-center">
-                    本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}。制限に達した場合は明日お試しください。
-                  </p>
-                  <button
-                    type="button"
-                    onClick={retake}
-                    className="mx-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-amber-500 text-gray-900 font-medium text-sm hover:bg-amber-400 active:bg-amber-300 transition-colors"
-                  >
-                    <RotateCcw size={20} strokeWidth={2} />
-                    もう一度撮影
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+                )}
+                {detectionFailed && (
+                  <>
+                    <p className="text-amber-200 text-sm font-light text-center">
+                      ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
+                    </p>
+                    <p className="text-white/70 text-sm font-light text-center">
+                      本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}。制限に達した場合は明日お試しください。
+                    </p>
+                    <button
+                      type="button"
+                      onClick={retake}
+                      className="mx-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-amber-500 text-gray-900 font-medium text-sm hover:bg-amber-400 active:bg-amber-300 transition-colors"
+                    >
+                      <RotateCcw size={20} strokeWidth={2} />
+                      もう一度撮影
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-3 mb-2">
               <span className="text-white/90 text-xs font-light w-12">角度</span>
               <input
@@ -1215,11 +1208,10 @@ export default function Home() {
             <div className="flex justify-center items-center gap-2 flex-wrap">
               <button
                 onClick={retake}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-md border border-white/10 transition-colors ${
-                  detectionFailed
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-md border border-white/10 transition-colors ${detectionFailed
                     ? 'bg-amber-500/90 text-gray-900 font-medium hover:bg-amber-400 active:bg-amber-300'
                     : 'bg-white/20 text-white hover:bg-white/30 active:bg-white/40'
-                }`}
+                  }`}
               >
                 <RotateCcw size={18} strokeWidth={2} />
                 撮り直す
