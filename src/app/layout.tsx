@@ -15,12 +15,19 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Carkus",
   description: "ナンバープレートをマスクするアプリ（ベータ）",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Carkus",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({

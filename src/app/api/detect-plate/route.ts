@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15_000); // 15秒（Gemini応答待ち。クライアント17sより短く）
+    const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30秒（Gemini応答待ち。クライアントより短く）
     let geminiResponse: Response;
     const startTime = Date.now();
     try {
@@ -203,7 +203,7 @@ export async function POST(request: NextRequest) {
           {
             found: false,
             error: '解析がタイムアウトしました',
-            userMessage: '解析サーバが混雑しています。しばらく待ってから再度お試しください。',
+            userMessage: '解析に時間がかかりすぎました。通信環境を確認するか、しばらく待ってから再度お試しください。',
             status: 504,
             remainingToday: getDailyRemaining(clientId),
           },
@@ -242,10 +242,15 @@ export async function POST(request: NextRequest) {
       const isHighDemand =
         geminiResponse.status === 503 ||
         /high demand|experiencing.*demand|try again later|overloaded|resource exhausted/i.test(String(errorMessage));
+
+      if (isHighDemand) {
+        console.error(`[detect-plate] Gemini returned ${geminiResponse.status} after ${elapsed}ms (quick reject) - busy or rate limit`);
+      }
+
       const userMessage = isQuota
         ? '本日の検出回数の上限に達しました。明日またお試しください。'
         : isHighDemand
-          ? '解析サーバが混雑しています。しばらく待ってから再度お試しください。'
+          ? '解析サービスが混雑しているか、一時的に利用できません。数秒でこの表示になる場合は接続制限の可能性があります。しばらく待ってから再度お試しください。'
           : '解析中にエラーが発生しました。しばらく経ってから再度お試しください。';
 
       return NextResponse.json(
