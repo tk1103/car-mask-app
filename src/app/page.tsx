@@ -277,18 +277,33 @@ export default function Home() {
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     setIsIOS(isIOSDevice);
+    console.log('[PWA] iOS detected:', isIOSDevice);
 
     // すでにインストール済みか判定
     const standalone = (window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches;
     setIsStandalone(standalone);
+    console.log('[PWA] Standalone mode:', standalone);
 
     // Chrome/Edgeのbeforeinstallpromptイベント
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
+      console.log('[PWA] beforeinstallprompt event received');
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    console.log('[PWA] Event listener added for beforeinstallprompt');
+
+    // デバッグ: 5秒後に状態を確認
+    setTimeout(() => {
+      console.log('[PWA] State check:', {
+        isIOS: isIOSDevice,
+        isStandalone: standalone,
+        hasDeferredPrompt: !!deferredPrompt,
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+      });
+    }, 5000);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -299,13 +314,25 @@ export default function Home() {
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
       // Chrome/Edge
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      console.log(`User response to the install prompt: ${outcome}`);
-      setDeferredPrompt(null);
+      try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`[PWA] User response to the install prompt: ${outcome}`);
+        setDeferredPrompt(null);
+      } catch (error) {
+        console.error('[PWA] Error prompting install:', error);
+      }
     } else if (isIOS) {
       // iOS Safari: 手動案内を表示
-      alert('ホーム画面に追加するには:\n1. 共有ボタン（□↑）をタップ\n2. 「ホーム画面に追加」を選択\n3. 「追加」をタップ');
+      alert('ホーム画面に追加するには:\n\n1. 画面下部の共有ボタン（□↑）をタップ\n2. 「ホーム画面に追加」を選択\n3. 「追加」をタップ\n\nこれでホーム画面から直接起動できます。');
+    } else {
+      // その他のブラウザ: 手動案内
+      const isAndroid = /Android/.test(navigator.userAgent);
+      if (isAndroid) {
+        alert('ホーム画面に追加するには:\n\n1. ブラウザのメニュー（⋮）をタップ\n2. 「ホーム画面に追加」または「アプリをインストール」を選択\n3. 「追加」をタップ');
+      } else {
+        alert('このブラウザでは、ブラウザのメニューから「ホーム画面に追加」または「アプリをインストール」を選択してください。');
+      }
     }
   }, [deferredPrompt, isIOS]);
 
@@ -1202,13 +1229,13 @@ export default function Home() {
             <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
           {/* PWAインストールボタン */}
-          {!isStandalone && (deferredPrompt || isIOS) && (
+          {!isStandalone && (
             <button
               onClick={handleInstallClick}
               className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
             >
               <DownloadIcon size={16} strokeWidth={1.5} />
-              ホーム画面に追加
+              {isIOS ? 'ホーム画面に追加' : deferredPrompt ? 'ホーム画面に追加' : 'アプリをインストール'}
             </button>
           )}
           <p className="text-white/70 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
