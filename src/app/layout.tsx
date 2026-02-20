@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Carkusu",
+  title: "Carkus",
   description: "ナンバープレートをマスクするアプリ（ベータ）",
 };
 

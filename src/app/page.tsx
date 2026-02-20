@@ -85,7 +85,7 @@ function drawLogoInQuad(
   );
 }
 
-// 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（角丸黒背景＋SVGロゴまたは白文字）
+// 回転済み座標系の中心(0,0)に Carkus ロゴを描画（角丸黒背景＋SVGロゴまたは白文字）
 function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
@@ -129,7 +129,7 @@ function drawCarkusuLogoAtOrigin(
     ctx.fillStyle = '#ffffff';
     const testFontSize = logoHeight * 0.5;
     ctx.font = `bold ${testFontSize}px ${gothicFont}`;
-    const textMetrics = ctx.measureText('Carkusu');
+    const textMetrics = ctx.measureText('Carkus');
     const maxTextWidth = logoWidth * 0.9;
     const fontSize = textMetrics.width > maxTextWidth
       ? (testFontSize * maxTextWidth / textMetrics.width)
@@ -137,7 +137,7 @@ function drawCarkusuLogoAtOrigin(
     ctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Carkusu', 0, 0);
+    ctx.fillText('Carkus', 0, 0);
   }
 }
 
@@ -227,7 +227,7 @@ export default function Home() {
     img.crossOrigin = 'anonymous';
     img.onload = () => setCarkusuLogoImage(img);
     img.onerror = () => setCarkusuLogoImage(null);
-    img.src = '/Carkusu.svg';
+    img.src = '/Carkus.svg';
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -701,7 +701,7 @@ export default function Home() {
           }
           const file = new File([blob], `number-mask-${Date.now()}.jpg`, { type: 'image/jpeg' });
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
-            await navigator.share({ files: [file], title: 'Carkusu' });
+            await navigator.share({ files: [file], title: 'Carkus' });
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
           } else {
@@ -742,15 +742,15 @@ export default function Home() {
             try {
               // プラットフォームに応じたテキストを設定
               const shareTexts: Record<string, string> = {
-                facebook: 'Carkusuでナンバープレートをマスクしました',
-                twitter: 'Carkusuでナンバープレートをマスクしました',
-                instagram: 'Carkusuでナンバープレートをマスクしました',
+                facebook: 'Carkusでナンバープレートをマスクしました',
+                twitter: 'Carkusでナンバープレートをマスクしました',
+                instagram: 'Carkusでナンバープレートをマスクしました',
               };
 
               await navigator.share({
                 files: [file],
-                title: 'Carkusu',
-                text: shareTexts[platform] || 'Carkusuでナンバープレートをマスクしました',
+                title: 'Carkus',
+                text: shareTexts[platform] || 'Carkusでナンバープレートをマスクしました',
               });
               
               setShowShareMenu(false);
@@ -784,7 +784,7 @@ export default function Home() {
               // 各SNSの共有URLを構築
               const shareUrls: Record<string, string> = {
                 facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(imageUrl)}`,
-                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Carkusuでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
+                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Carkusでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
                 instagram: `https://www.instagram.com/create/select/`,
               };
 
@@ -851,7 +851,7 @@ export default function Home() {
             try {
               await navigator.share({
                 files: [file],
-                title: 'Carkusu',
+                title: 'Carkus',
                 text: '画像を端末に保存する場合は「画像を保存」などを選んでください。',
               });
               setShowShareMenu(false);
@@ -905,7 +905,7 @@ export default function Home() {
             try {
               await navigator.share({
                 files: [file],
-                title: 'Carkusu',
+                title: 'Carkus',
                 text: '近くのPCやデバイスを選択して共有できます。',
               });
               setShowShareMenu(false);
@@ -1021,7 +1021,7 @@ export default function Home() {
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2">
-            <h1 className="text-lg font-extralight text-white tracking-[0.2em]">Carkusu</h1>
+            <h1 className="text-lg font-extralight text-white tracking-[0.2em]">Carkus</h1>
             <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
           </div>
         </header>
@@ -1080,7 +1080,7 @@ export default function Home() {
             <div className="pt-[env(safe-area-inset-top)] pb-4 px-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] [@media(orientation:landscape)]:pr-2 bg-white/10 backdrop-blur-md border-b border-white/10 [@media(orientation:landscape)]:border-b-0 [@media(orientation:landscape)]:border-r [@media(orientation:landscape)]:rounded-none shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
+                  <h1 className="text-base font-extralight text-white tracking-widest">Carkus</h1>
                   <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
                 </div>
                 <button

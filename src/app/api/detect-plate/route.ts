@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
         {
           found: false,
           error: '1日の利用制限に達しました',
-          userMessage: 'Carkusuベータ版の1日あたりの利用制限（20回）に達しました。また明日お試しください',
+          userMessage: 'Carkusベータ版の1日あたりの利用制限（20回）に達しました。また明日お試しください',
           status: 429,
           remainingToday: 0,
         },
