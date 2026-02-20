@@ -1,10 +1,22 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor } from 'lucide-react';
+import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, Download as DownloadIcon } from 'lucide-react';
 
 type Corner = { x: number; y: number }; // 0-1
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
+
+// PWAインストールプロンプトの型定義
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+declare global {
+  interface WindowEventMap {
+    beforeinstallprompt: BeforeInstallPromptEvent;
+  }
+}
 
 // 検出失敗時のフォールバック用の四角（正規化0-1）。座標が取れないため位置は分からないので、
 // 画面の大部分を覆う大きめの四角にし、ユーザーがドラッグ・スケールでプレート位置に合わせやすくする
@@ -217,6 +229,9 @@ export default function Home() {
   const [isBlurWarning, setIsBlurWarning] = useState(false);
   const [detectionFailed, setDetectionFailed] = useState(false);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null); // PWAインストールプロンプト
+  const [isIOS, setIsIOS] = useState(false); // iOS判定
+  const [isStandalone, setIsStandalone] = useState(false); // すでにインストール済みか
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -255,6 +270,44 @@ export default function Home() {
         });
     }
   }, []);
+
+  // PWAインストールプロンプトの処理（Chrome/Edge）
+  useEffect(() => {
+    // iOS判定
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    setIsIOS(isIOSDevice);
+
+    // すでにインストール済みか判定
+    const standalone = (window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches;
+    setIsStandalone(standalone);
+
+    // Chrome/Edgeのbeforeinstallpromptイベント
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  // PWAインストール処理
+  const handleInstallClick = useCallback(async () => {
+    if (deferredPrompt) {
+      // Chrome/Edge
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`User response to the install prompt: ${outcome}`);
+      setDeferredPrompt(null);
+    } else if (isIOS) {
+      // iOS Safari: 手動案内を表示
+      alert('ホーム画面に追加するには:\n1. 共有ボタン（□↑）をタップ\n2. 「ホーム画面に追加」を選択\n3. 「追加」をタップ');
+    }
+  }, [deferredPrompt, isIOS]);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
@@ -1147,6 +1200,16 @@ export default function Home() {
           </button>
           {cameraError && (
             <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
+          )}
+          {/* PWAインストールボタン */}
+          {!isStandalone && (deferredPrompt || isIOS) && (
+            <button
+              onClick={handleInstallClick}
+              className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+            >
+              <DownloadIcon size={16} strokeWidth={1.5} />
+              ホーム画面に追加
+            </button>
           )}
           <p className="text-white/70 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
         </main>
