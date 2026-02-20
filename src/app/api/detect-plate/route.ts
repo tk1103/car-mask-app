@@ -102,6 +102,12 @@ const RESPONSE_SCHEMA = {
   required: ['found', 'plates'],
 } as const;
 
+/** 残り回数だけ取得（消費しない）。撮影前にクライアントが確認する用 */
+export async function GET(request: NextRequest) {
+  const clientId = getClientId(request);
+  return NextResponse.json({ remainingToday: getDailyRemaining(clientId) });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const clientId = getClientId(request);

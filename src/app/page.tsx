@@ -196,6 +196,21 @@ export default function Home() {
     return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
   }, []);
 
+  /** 画面表示用に残り回数を取得（APIは消費しない） */
+  const fetchRemainingQuota = useCallback(async () => {
+    try {
+      const res = await fetch('/api/detect-plate');
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data.remainingToday === 'number') setDailyRemaining(data.remainingToday);
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
+  }, [screenMode, fetchRemainingQuota]);
+
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
       try {
@@ -303,6 +318,20 @@ export default function Home() {
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
+
+    // 撮影前に残数チェック（ローディングを出さずに即エラーにする）
+    try {
+      const quotaRes = await fetch('/api/detect-plate');
+      if (quotaRes.ok) {
+        const quotaData = await quotaRes.json();
+        const remaining = quotaData.remainingToday;
+        if (typeof remaining === 'number') setDailyRemaining(remaining);
+        if (remaining === 0) {
+          setCameraError(`本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。`);
+          return;
+        }
+      }
+    } catch (_) {}
 
     // フラッシュ効果を表示
     setShowFlash(true);
