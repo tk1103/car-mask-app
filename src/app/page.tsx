@@ -1,9 +1,20 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor } from 'lucide-react';
+import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, Download as DownloadIcon } from 'lucide-react';
 
 type Corner = { x: number; y: number }; // 0-1
+
+// PWAインストールプロンプトの型定義
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+declare global {
+  interface WindowEventMap {
+    beforeinstallprompt: BeforeInstallPromptEvent;
+  }
+}
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
 // API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 座標系に完全一致（Y軸反転なし）
@@ -18,13 +29,14 @@ function normalizeCornersOrder(corners: Corners): Corners {
   return corners;
 }
 
-// 360度プレート角度同期: 回転済み座標系の中心(0,0)に Carkusu ロゴを描画（透明感のある角丸黒背景＋白文字）
+// 回転済み座標系の中心(0,0)に Carkus ロゴを描画（角丸黒背景＋SVGロゴ or 白文字「Carkus」）
 // 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
 function drawCarkusuLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
   logoHeight: number,
-  options?: { backgroundAlpha?: number }
+  options?: { backgroundAlpha?: number },
+  logoImage?: HTMLImageElement | null
 ) {
   const alpha = options?.backgroundAlpha ?? 0.92;
   const halfW = logoWidth / 2;
@@ -45,19 +57,33 @@ function drawCarkusuLogoAtOrigin(
   ctx.fillStyle = `rgba(0,0,0,${alpha})`;
   ctx.fill();
 
-  const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
-  ctx.fillStyle = '#ffffff';
-  const testFontSize = logoHeight * 0.5;
-  ctx.font = `bold ${testFontSize}px ${gothicFont}`;
-  const textMetrics = ctx.measureText('Carkusu');
-  const maxTextWidth = logoWidth * 0.9;
-  const fontSize = textMetrics.width > maxTextWidth
-    ? (testFontSize * maxTextWidth / textMetrics.width)
-    : testFontSize;
-  ctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('Carkusu', 0, 0);
+  if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
+    const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
+    const boxAspect = logoWidth / logoHeight;
+    let drawW: number, drawH: number;
+    if (svgAspect > boxAspect) {
+      drawW = logoWidth * 0.9;
+      drawH = drawW / svgAspect;
+    } else {
+      drawH = logoHeight * 0.5;
+      drawW = drawH * svgAspect;
+    }
+    ctx.drawImage(logoImage, -drawW / 2, -drawH / 2, drawW, drawH);
+  } else {
+    const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
+    ctx.fillStyle = '#ffffff';
+    const testFontSize = logoHeight * 0.5;
+    ctx.font = `bold ${testFontSize}px ${gothicFont}`;
+    const textMetrics = ctx.measureText('Carkus');
+    const maxTextWidth = logoWidth * 0.9;
+    const fontSize = textMetrics.width > maxTextWidth
+      ? (testFontSize * maxTextWidth / textMetrics.width)
+      : testFontSize;
+    ctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Carkus', 0, 0);
+  }
 }
 
 // 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
@@ -122,6 +148,12 @@ export default function Home() {
   const [isBlurWarning, setIsBlurWarning] = useState(false);
   const [detectionFailed, setDetectionFailed] = useState(false);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
+  const [carkusuLogoImage, setCarkusuLogoImage] = useState<HTMLImageElement | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -138,6 +170,43 @@ export default function Home() {
     img.onerror = () => setMaskImage(null);
     img.src = '/mask-logo.png';
   }, []);
+
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => setCarkusuLogoImage(img);
+    img.onerror = () => setCarkusuLogoImage(null);
+    img.src = '/Carkus.svg';
+  }, []);
+
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(() => {}).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    setIsIOS(isIOSDevice);
+    setIsAndroid(/Android/.test(navigator.userAgent));
+    const standalone = (window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches;
+    setIsStandalone(standalone);
+    const onBeforeInstall = (e: Event) => { e.preventDefault(); setDeferredPrompt(e as BeforeInstallPromptEvent); };
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+  }, []);
+
+  const handleInstallClick = useCallback(async () => {
+    if (deferredPrompt) {
+      try {
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        setDeferredPrompt(null);
+      } catch (_) {}
+    } else {
+      setShowInstallGuide(true);
+    }
+  }, [deferredPrompt]);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
@@ -391,10 +460,10 @@ export default function Home() {
       const result = await res.json();
 
       if (!res.ok) {
-        const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
-        if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
+        const videoTrack = streamRef.current?.getVideoTracks()[0];
+        if (videoTrack && 'applyConstraints' in videoTrack) {
           try {
-            await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
+            await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
           } catch (_) {}
         }
         const raw = (result.error || '') as string;
@@ -453,10 +522,10 @@ export default function Home() {
       if (remaining !== undefined) setDailyRemaining(remaining);
       setIsProcessing(false);
     } catch (e) {
-      const errorVideoTrack = streamRef.current?.getVideoTracks()[0];
-      if (errorVideoTrack && 'applyConstraints' in errorVideoTrack) {
+      const videoTrack = streamRef.current?.getVideoTracks()[0];
+      if (videoTrack && 'applyConstraints' in videoTrack) {
         try {
-          await errorVideoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
+          await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
         } catch (_) {}
       }
       setCameraError('解析に失敗しました。しばらく経ってから再度お試しください。');
@@ -579,13 +648,13 @@ export default function Home() {
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(maskImage, -logoWidth / 2, -logoHeight / 2, logoWidth, logoHeight);
         } else {
-          drawCarkusuLogoAtOrigin(ctx, logoWidth, logoHeight, { backgroundAlpha: 0.92 });
+          drawCarkusuLogoAtOrigin(ctx, logoWidth, logoHeight, { backgroundAlpha: 0.92 }, carkusuLogoImage);
         }
 
         ctx.restore();
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, editLogoOffset, editLogoScale, editLogoRotation]);
+  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, carkusuLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
@@ -901,7 +970,7 @@ export default function Home() {
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2">
-            <h1 className="text-lg font-extralight text-white tracking-[0.2em]">Carkusu</h1>
+            <img src="/Carkus.svg" alt="Carkus" className="h-6 w-auto object-contain" />
             <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
           </div>
         </header>
@@ -959,7 +1028,7 @@ export default function Home() {
           <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <h1 className="text-base font-extralight text-white tracking-widest">Carkusu</h1>
+                <img src="/Carkus.svg" alt="Carkus" className="h-5 w-auto object-contain" />
                 <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
               </div>
               <button
@@ -1002,8 +1071,44 @@ export default function Home() {
           {cameraError && (
             <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
+          {!isStandalone && (
+            <button
+              onClick={handleInstallClick}
+              className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+            >
+              <DownloadIcon size={16} strokeWidth={1.5} />
+              {isIOS ? 'ホーム画面に追加（iOS）' : isAndroid ? (deferredPrompt ? 'ホーム画面に追加（Android）' : 'ホーム画面に追加') : deferredPrompt ? 'ホーム画面に追加（Chrome）' : 'アプリをインストール'}
+            </button>
+          )}
           <p className="text-white/70 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
         </main>
+      )}
+
+      {showInstallGuide && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h2 className="text-white font-light text-lg">ホーム画面に追加</h2>
+              <button onClick={() => setShowInstallGuide(false)} className="text-white/60 hover:text-white">✕</button>
+            </div>
+            {isIOS ? (
+              <div className="text-white/90 text-sm space-y-2">
+                <p className="font-medium">【iPhone / iPad】</p>
+                <p>1. アドレスバー右の「共有」ボタン（□↑）をタップ</p>
+                <p>2. 「ホーム画面に追加」を選択 → 「追加」をタップ</p>
+              </div>
+            ) : isAndroid ? (
+              <div className="text-white/90 text-sm space-y-2">
+                <p className="font-medium">【Android】</p>
+                <p>1. ブラウザメニュー（⋮）→「ホーム画面に追加」または「アプリをインストール」</p>
+                <p>2. 「追加」をタップ</p>
+              </div>
+            ) : (
+              <p className="text-white/90 text-sm">ブラウザのメニューから「ホーム画面に追加」を選択してください。</p>
+            )}
+            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-white/20 text-white text-sm font-light border border-white/10 hover:bg-white/30">閉じる</button>
+          </div>
+        </div>
       )}
 
       {screenMode === 'preview_edit' && previewImageUrl && (
