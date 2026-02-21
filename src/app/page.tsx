@@ -3,6 +3,34 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, Download as DownloadIcon } from 'lucide-react';
 
+/** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
+function CarkusLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 120 32"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      className={className}
+      aria-label="Carkus"
+    >
+      <text
+        x={4}
+        y={24}
+        fontFamily="system-ui, sans-serif"
+        fontSize={20}
+        fontWeight={300}
+        fill="currentColor"
+        letterSpacing="0.15em"
+      >
+        Carkus
+      </text>
+    </svg>
+  );
+}
+
 type Corner = { x: number; y: number }; // 0-1
 
 // PWAインストールプロンプトの型定義
@@ -1473,7 +1501,9 @@ export default function Home() {
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
-            <img src="/Carkus.svg" alt="Carkus" className="h-6 w-auto shrink-0" />
+            <span className="h-6 flex items-center shrink-0 text-white">
+              <CarkusLogo className="h-full w-auto" />
+            </span>
             <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
             <span className="text-white/90 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
@@ -1537,7 +1567,9 @@ export default function Home() {
           <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 shrink-0">
-                <img src="/Carkus.svg" alt="Carkus" className="h-5 w-auto shrink-0" />
+                <span className="h-5 flex items-center shrink-0 text-white">
+                  <CarkusLogo className="h-full w-auto" />
+                </span>
                 <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
               </div>
               <button
