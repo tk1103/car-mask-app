@@ -258,7 +258,7 @@ const DETECT_INTERVAL_MS = 150;
 const DETECT_MIN_AREA_RATIO = 0.0015;
 // ロゴキャンバスのアスペクト（ナンバープレートに合わせる＝横長）。ワープ時に伸びないようにプレート比に近づける
 const LOGO_CANVAS_WIDTH = 400;
-const LOGO_CANVAS_HEIGHT = 88; // 約4.55:1（プレートに近い）
+// 高さは各 quad のアスペクトに合わせて Lw * (quadHeight/quadWidth) で算出（横縮み防止）
 
 /** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最大面積の4点を返す。 */
 function findBestQuadFromBinary(
@@ -664,25 +664,26 @@ export default function Home() {
         if (maskImage?.complete && maskImage.naturalWidth) {
           drawImageWarpedToQuad(ctx, maskImage, quad, maskImage.naturalWidth, maskImage.naturalHeight);
         } else {
+          const qw = (Math.hypot(quad[1].x - quad[0].x, quad[1].y - quad[0].y) + Math.hypot(quad[2].x - quad[3].x, quad[2].y - quad[3].y)) / 2;
+          const qh = (Math.hypot(quad[3].x - quad[0].x, quad[3].y - quad[0].y) + Math.hypot(quad[2].x - quad[1].x, quad[2].y - quad[1].y)) / 2;
+          const Lw = LOGO_CANVAS_WIDTH;
+          const Lh = Math.max(40, Math.round(Lw * (qh / (qw || 1))));
           let logoCanvas = logoCanvasRef.current;
           if (!logoCanvas) {
             logoCanvas = document.createElement('canvas');
-            logoCanvas.width = LOGO_CANVAS_WIDTH;
-            logoCanvas.height = LOGO_CANVAS_HEIGHT;
             logoCanvasRef.current = logoCanvas;
-            const lctx = logoCanvas.getContext('2d');
-            if (lctx) {
-              lctx.clearRect(0, 0, LOGO_CANVAS_WIDTH, LOGO_CANVAS_HEIGHT);
-              lctx.save();
-              lctx.translate(LOGO_CANVAS_WIDTH / 2, LOGO_CANVAS_HEIGHT / 2);
-              drawCarkusuLogoAtOrigin(lctx, LOGO_CANVAS_WIDTH * 0.95, LOGO_CANVAS_HEIGHT * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage ?? undefined);
-              lctx.restore();
-            }
           }
-          if (logoCanvasRef.current) {
-            const lc = logoCanvasRef.current;
-            drawImageWarpedToQuad(ctx, lc, quad, lc.width, lc.height);
+          logoCanvas.width = Lw;
+          logoCanvas.height = Lh;
+          const lctx = logoCanvas.getContext('2d');
+          if (lctx) {
+            lctx.clearRect(0, 0, Lw, Lh);
+            lctx.save();
+            lctx.translate(Lw / 2, Lh / 2);
+            drawCarkusuLogoAtOrigin(lctx, Lw * 0.95, Lh * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage ?? undefined);
+            lctx.restore();
           }
+          drawImageWarpedToQuad(ctx, logoCanvas, quad, Lw, Lh);
         }
       } else {
         const msg = vw > 0 ? 'プレビュー: 検出中' : '読み込み中...';
@@ -1133,27 +1134,6 @@ export default function Home() {
       const cosR = Math.cos((editLogoRotation * Math.PI) / 180);
       const sinR = Math.sin((editLogoRotation * Math.PI) / 180);
 
-      // マスク画像が無いとき用のロゴキャンバス（黒背景＋Carkus）。アスペクトをプレートに合わせて横伸びしないように
-      if (!maskImage?.complete || !maskImage.naturalWidth) {
-        const Lw = LOGO_CANVAS_WIDTH;
-        const Lh = LOGO_CANVAS_HEIGHT;
-        let logoCanvas = logoCanvasRef.current;
-        if (!logoCanvas) {
-          logoCanvas = document.createElement('canvas');
-          logoCanvas.width = Lw;
-          logoCanvas.height = Lh;
-          logoCanvasRef.current = logoCanvas;
-        }
-        const lctx = logoCanvas.getContext('2d');
-        if (lctx) {
-          lctx.clearRect(0, 0, Lw, Lh);
-          lctx.save();
-          lctx.translate(Lw / 2, Lh / 2);
-          drawCarkusuLogoAtOrigin(lctx, Lw * 0.95, Lh * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage);
-          lctx.restore();
-        }
-      }
-
       detectedCorners.forEach((corners) => {
         const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
         const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
@@ -1196,14 +1176,30 @@ export default function Home() {
         // 1) 黒マスクを四角で塗りつぶし（パースに合わせた四角形）
         fillQuad(ctx, quadPx, 'rgba(0,0,0,0.92)');
 
-        // 2) ロゴ／マスク画像を同じ四角に射影変換（2三角形アフィン）でワープして合成
+        // 2) ロゴ／マスク画像を同じ四角に射影変換。ロゴは「この四角のアスペクト」でキャンバスを作りワープすると伸び縮みしない
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
           drawImageWarpedToQuad(ctx, maskImage, quadPx, maskImage.naturalWidth, maskImage.naturalHeight);
-        } else if (logoCanvasRef.current) {
-          const c = logoCanvasRef.current;
-          drawImageWarpedToQuad(ctx, c, quadPx, c.width, c.height);
+        } else {
+          const Lw = LOGO_CANVAS_WIDTH;
+          const Lh = Math.max(40, Math.round(Lw * (plateHeight / plateWidth)));
+          let logoCanvas = logoCanvasRef.current;
+          if (!logoCanvas) {
+            logoCanvas = document.createElement('canvas');
+            logoCanvasRef.current = logoCanvas;
+          }
+          logoCanvas.width = Lw;
+          logoCanvas.height = Lh;
+          const lctx = logoCanvas.getContext('2d');
+          if (lctx) {
+            lctx.clearRect(0, 0, Lw, Lh);
+            lctx.save();
+            lctx.translate(Lw / 2, Lh / 2);
+            drawCarkusuLogoAtOrigin(lctx, Lw * 0.95, Lh * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage);
+            lctx.restore();
+          }
+          drawImageWarpedToQuad(ctx, logoCanvas, quadPx, Lw, Lh);
         }
       });
     }
