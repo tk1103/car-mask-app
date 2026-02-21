@@ -348,6 +348,20 @@ function findBestQuadFromBinary(
   return bestQuad;
 }
 
+/** 検出できなかったときに使う目安の四角（画面下部中央・ナンバーがよく映る位置）。遅延表示用。 */
+function getDefaultQuadPx(vw: number, vh: number): QuadPx {
+  const cx = vw * 0.5;
+  const cy = vh * 0.65;
+  const halfW = vw * 0.2;
+  const halfH = vh * 0.06;
+  return [
+    { x: cx - halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy + halfH },
+    { x: cx - halfW, y: cy + halfH },
+  ];
+}
+
 /** キャンバスの画像から明るい四角領域（白プレート候補）を簡易検出。getImageData が使える場合のみ。 */
 function detectBrightRectFallback(
   canvas: HTMLCanvasElement,
@@ -540,6 +554,7 @@ export default function Home() {
   const [overlayCanvasReady, setOverlayCanvasReady] = useState(false); // オーバーレイ用キャンバスがマウントされたら true（描画ループ開始のトリガー）
   const smallCanvasRef = useRef<HTMLCanvasElement | null>(null); // 320x240 for OpenCV
   const detectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const detectionStartTimeRef = useRef<number>(0);
   const overlayRafRef = useRef<number | null>(null);
   const [opencvReady, setOpencvReady] = useState(false);
 
@@ -677,6 +692,9 @@ export default function Home() {
     const ctx = smallCanvas.getContext('2d');
     if (!ctx) return;
 
+    detectionStartTimeRef.current = Date.now();
+    const FALLBACK_DELAY_MS = 2500;
+
     const tick = () => {
       const v = videoRef.current;
       if (!v || !v.videoWidth || !v.videoHeight) return;
@@ -685,8 +703,11 @@ export default function Home() {
         smallCanvas.height = Math.round((OPENCV_DETECT_SIZE * v.videoHeight) / v.videoWidth) || 240;
       }
       ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, smallCanvas.width, smallCanvas.height);
-      const quad = detectQuadFromCanvas(smallCanvas, v.videoWidth, v.videoHeight)
+      let quad = detectQuadFromCanvas(smallCanvas, v.videoWidth, v.videoHeight)
         ?? detectBrightRectFallback(smallCanvas, v.videoWidth, v.videoHeight);
+      if (!quad && Date.now() - detectionStartTimeRef.current > FALLBACK_DELAY_MS) {
+        quad = getDefaultQuadPx(v.videoWidth, v.videoHeight);
+      }
       liveQuadRef.current = quad;
     };
 
