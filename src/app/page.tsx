@@ -1533,7 +1533,7 @@ export default function Home() {
               {isProcessing ? (
                 <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
               ) : (
-                <span className="text-white font-light text-sm tracking-wide">普通に撮影する</span>
+                <span className="text-white font-light text-sm tracking-wide">撮影する</span>
               )}
             </button>
             <p className="text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
