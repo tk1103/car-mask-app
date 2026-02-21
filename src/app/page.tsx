@@ -348,6 +348,59 @@ function findBestQuadFromBinary(
   return bestQuad;
 }
 
+/** キャンバスの画像から明るい四角領域（白プレート候補）を簡易検出。getImageData が使える場合のみ。 */
+function detectBrightRectFallback(
+  canvas: HTMLCanvasElement,
+  videoWidth: number,
+  videoHeight: number
+): QuadPx | null {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const sw = canvas.width;
+  const sh = canvas.height;
+  if (sw < 32 || sh < 32) return null;
+  let data: ImageData;
+  try {
+    data = ctx.getImageData(0, 0, sw, sh);
+  } catch {
+    return null;
+  }
+  const d = data.data;
+  const row = sw * 4;
+  const centerX = sw / 2;
+  const centerY = sh * 0.65;
+  const boxW = sw * 0.4;
+  const boxH = sh * 0.2;
+  const x0 = Math.max(0, Math.floor(centerX - boxW / 2));
+  const x1 = Math.min(sw, Math.ceil(centerX + boxW / 2));
+  const y0 = Math.max(0, Math.floor(centerY - boxH / 2));
+  const y1 = Math.min(sh, Math.ceil(centerY + boxH / 2));
+  let sum = 0;
+  let count = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * sw + x) * 4;
+      const g = (d[i]! + d[i + 1]! + d[i + 2]!) / 3;
+      sum += g;
+      count++;
+    }
+  }
+  const avg = count > 0 ? sum / count : 0;
+  if (avg < 120) return null;
+  const scaleX = videoWidth / sw;
+  const scaleY = videoHeight / sh;
+  const cx = centerX * scaleX;
+  const cy = centerY * scaleY;
+  const hw = (boxW / 2) * scaleX;
+  const hh = (boxH / 2) * scaleY;
+  return [
+    { x: cx - hw, y: cy - hh },
+    { x: cx + hw, y: cy - hh },
+    { x: cx + hw, y: cy + hh },
+    { x: cx - hw, y: cy + hh },
+  ];
+}
+
 /** OpenCVで低解像度グレースケールから四角形候補を検出し、動画ピクセル座標の QuadPx を返す。失敗時は null。 */
 function detectQuadFromCanvas(
   smallCanvas: HTMLCanvasElement,
@@ -605,9 +658,9 @@ export default function Home() {
     };
   }, [screenMode]);
 
-  // リアルタイム矩形検出（低解像・グレースケール）。OpenCV 読み込み完了後に開始。
+  // リアルタイム矩形検出。OpenCV が使えればそれで、無ければ明るい四角の簡易検出でマスクを表示。
   useEffect(() => {
-    if (screenMode !== 'camera' || !stream || !opencvReady) return;
+    if (screenMode !== 'camera' || !stream) return;
     const video = videoRef.current;
     if (!video) return;
 
@@ -632,7 +685,8 @@ export default function Home() {
         smallCanvas.height = Math.round((OPENCV_DETECT_SIZE * v.videoHeight) / v.videoWidth) || 240;
       }
       ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, smallCanvas.width, smallCanvas.height);
-      const quad = detectQuadFromCanvas(smallCanvas, v.videoWidth, v.videoHeight);
+      const quad = detectQuadFromCanvas(smallCanvas, v.videoWidth, v.videoHeight)
+        ?? detectBrightRectFallback(smallCanvas, v.videoWidth, v.videoHeight);
       liveQuadRef.current = quad;
     };
 
@@ -648,7 +702,7 @@ export default function Home() {
       }
       smallCanvasRef.current = null;
     };
-  }, [screenMode, stream, opencvReady]);
+  }, [screenMode, stream]);
 
   // カメラオーバーレイ描画。useLayoutEffect で ref 確定直後にループ開始し、検出時はマスク＋ロゴ、未検出時は「プレビュー: 検出中」を表示。
   useLayoutEffect(() => {
