@@ -210,7 +210,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 日次回数は「解析成功時のみ」消費（503などで失敗した場合は消費しない）
+    incrementDailyCount(clientId);
+
     const requestStart = Date.now();
     const formData = await request.formData();
     const imageFile = formData.get('image') as File;
@@ -245,92 +246,88 @@ export async function POST(request: NextRequest) {
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
+    const body = JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            { inlineData: { data: base64Image, mimeType } },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0,
+        topP: 0.1,
+        topK: 1,
+        maxOutputTokens: 400,
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
+      },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+      ],
+    });
 
-    const MAX_GEMINI_RETRIES = 3; // 503/混雑時は最大3回までリトライ
-    const RETRY_DELAY_MS = 2000;
-    let geminiResponse: Response | null = null;
+    const RETRY_DELAYS_MS = [2000, 5000]; // 503/混雑時は 2秒後・5秒後に自動リトライ（最大3回まで）
     const startTime = Date.now();
-    let lastAttemptErr: unknown = null;
+    let geminiResponse: Response | null = null;
+    let lastErrorBody = '';
+    let lastStatus = 0;
 
-    for (let attempt = 1; attempt <= MAX_GEMINI_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      if (attempt > 0) {
+        const waitMs = RETRY_DELAYS_MS[attempt - 1];
+        console.log(`[detect-plate] Retry ${attempt} after ${waitMs}ms (503/混雑のため)`);
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30_000);
-      console.log(`[detect-plate] Gemini API attempt ${attempt}/${MAX_GEMINI_RETRIES} (image ${Math.round(base64Image.length / 1024)}KB)...`);
       try {
         geminiResponse = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: prompt },
-                  { inlineData: { data: base64Image, mimeType } },
-                ],
-              },
-            ],
-            generationConfig: {
-              temperature: 0,
-              topP: 0.1,
-              topK: 1,
-              maxOutputTokens: 400,
-              responseMimeType: 'application/json',
-              responseSchema: RESPONSE_SCHEMA,
-            },
-            safetySettings: [
-              { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-              { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-              { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-              { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-            ],
-          }),
+          body,
         });
-        clearTimeout(timeoutId);
-        const status = geminiResponse.status;
-        const isRetryable = status === 503 || status === 429 || status === 500;
-        if (geminiResponse.ok || !isRetryable || attempt === MAX_GEMINI_RETRIES) break;
-        const delay = RETRY_DELAY_MS * attempt;
-        console.log(`[detect-plate] Gemini ${status}, retrying in ${delay}ms (attempt ${attempt})`);
-        await new Promise((r) => setTimeout(r, delay));
       } catch (fetchErr: unknown) {
         clearTimeout(timeoutId);
-        lastAttemptErr = fetchErr;
+        const elapsed = Date.now() - startTime;
         if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-          console.error(`[detect-plate] Gemini API timeout on attempt ${attempt}`);
-        } else {
-          console.error(`[detect-plate] Gemini API fetch error on attempt ${attempt}:`, fetchErr);
+          console.error(`[detect-plate] Gemini API timeout after ${elapsed}ms`);
+          return NextResponse.json(
+            {
+              found: false,
+              error: '解析がタイムアウトしました',
+              userMessage: '解析に時間がかかりすぎました。通信環境を確認するか、しばらく待ってから再度お試しください。',
+              status: 504,
+              remainingToday: getDailyRemaining(clientId),
+            },
+            { status: 504 }
+          );
         }
-        if (attempt === MAX_GEMINI_RETRIES) throw fetchErr;
-        const delay = RETRY_DELAY_MS * attempt;
-        await new Promise((r) => setTimeout(r, delay));
+        console.error(`[detect-plate] Gemini API fetch error after ${elapsed}ms:`, fetchErr);
+        throw fetchErr;
       }
-    }
+      clearTimeout(timeoutId);
 
-    if (!geminiResponse) {
-      throw lastAttemptErr ?? new Error('No response');
-    }
+      if (geminiResponse.ok) break;
 
-    if (!geminiResponse.ok) {
-      const elapsed = Date.now() - startTime;
-      console.error(`[detect-plate] Gemini API error ${geminiResponse.status} after ${elapsed}ms`);
-      let errorBody: string;
+      lastStatus = geminiResponse.status;
+      try {
+        lastErrorBody = await geminiResponse.text();
+      } catch {
+        lastErrorBody = '';
+      }
       let errorJson: any = null;
       try {
-        errorBody = await geminiResponse.text();
-        try {
-          errorJson = JSON.parse(errorBody);
-        } catch {
-          // ignore
-        }
-      } catch (e) {
-        errorBody = '';
+        errorJson = JSON.parse(lastErrorBody);
+      } catch {
+        // ignore
       }
-
-      let errorMessage = 'Gemini API HTTPエラー';
-      if (errorJson?.error?.message) errorMessage = errorJson.error.message;
-      else if (errorJson?.error) errorMessage = String(errorJson.error);
-
+      const errorMessage = errorJson?.error?.message ?? errorJson?.error ?? lastErrorBody;
       const isQuota =
         geminiResponse.status === 429 ||
         /quota|rate limit|exceeded/i.test(String(errorMessage));
@@ -338,42 +335,65 @@ export async function POST(request: NextRequest) {
         geminiResponse.status === 503 ||
         /high demand|experiencing.*demand|try again later|overloaded|resource exhausted/i.test(String(errorMessage));
 
-      if (isHighDemand) {
-        console.error(`[detect-plate] Gemini returned ${geminiResponse.status} after ${elapsed}ms (quick reject) - busy or rate limit`);
+      if (isQuota) {
+        const userMessage = '本日の検出回数の上限に達しました。明日またお試しください。';
+        return NextResponse.json(
+          { found: false, error: userMessage, userMessage, status: 429, remainingToday: getDailyRemaining(clientId) },
+          { status: 429 }
+        );
       }
-
-      const userMessage = isQuota
-        ? '本日の検出回数の上限に達しました。明日またお試しください。'
-        : isHighDemand
-          ? '解析サービスが混雑しています。しばらく（1〜2分）待ってから「撮影する」を再度お試しください。回数は消費されていません。'
+      if (!isHighDemand || attempt >= RETRY_DELAYS_MS.length) {
+        const userMessage = isHighDemand
+          ? '解析サービスが混雑しています。しばらく（1〜2分）待ってから「撮影する」を押し直してください。'
           : '解析中にエラーが発生しました。しばらく経ってから再度お試しください。';
+        console.error(`[detect-plate] Gemini API error ${geminiResponse.status} after ${Date.now() - startTime}ms (attempt ${attempt + 1})`);
+        return NextResponse.json(
+          {
+            found: false,
+            error: userMessage,
+            userMessage,
+            status: geminiResponse.status,
+            rawResponse: lastErrorBody?.substring?.(0, 1000),
+          },
+          { status: geminiResponse.status === 429 ? 429 : 500 }
+        );
+      }
+      console.warn(`[detect-plate] Gemini ${geminiResponse.status} (attempt ${attempt + 1}), will retry`);
+    }
 
+    const geminiResponseFinal = geminiResponse!;
+    if (!geminiResponseFinal.ok) {
+      const userMessage = '解析サービスが混雑しています。しばらく（1〜2分）待ってから「撮影する」を押し直してください。';
       return NextResponse.json(
         {
           found: false,
           error: userMessage,
           userMessage,
-          status: geminiResponse.status,
-          remainingToday: getDailyRemaining(clientId),
-          rawResponse: errorBody?.substring?.(0, 1000),
+          status: lastStatus || 503,
+          rawResponse: lastErrorBody?.substring?.(0, 1000),
         },
-        { status: geminiResponse.status === 429 ? 429 : 500 }
+        { status: 500 }
       );
     }
 
     const parseStart = Date.now();
     let geminiJson: any;
     try {
-      geminiJson = await geminiResponse.json();
+      geminiJson = await geminiResponseFinal.json();
     } catch {
       const elapsed = Date.now() - startTime;
       console.error(`[detect-plate] Failed to parse JSON after ${elapsed}ms`);
-      const text = await geminiResponse.text();
+      let rawText = '';
+      try {
+        rawText = await geminiResponseFinal.text();
+      } catch {
+        // body already consumed
+      }
       return NextResponse.json({
         found: false,
         error: 'Gemini APIの応答を解析できませんでした',
         userMessage: '解析の応答を読み取れませんでした。しばらく経ってから再度お試しください。',
-        rawResponse: text.substring(0, 500),
+        rawResponse: rawText.substring(0, 500),
       }, { status: 500 });
     }
 
@@ -414,7 +434,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (parsed) {
-      incrementDailyCount(clientId);
       (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
       const totalElapsed = Date.now() - startTime;
       console.log(`[detect-plate] Success: found=${parsed.found}, plates=${(parsed.plates as unknown[])?.length || 0}, elapsed=${totalElapsed}ms`);
