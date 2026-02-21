@@ -300,7 +300,7 @@ export async function POST(request: NextRequest) {
         await new Promise((r) => setTimeout(r, waitMs));
       }
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30_000);
+      const timeoutId = setTimeout(() => controller.abort(), 45_000); // 45秒（重い画像・混雑時でも完了しやすく）
       try {
         geminiResponse = await fetch(url, {
           method: 'POST',

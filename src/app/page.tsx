@@ -899,8 +899,8 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は長辺1280まで（解像度を確保して座標検出精度を上げる）
-      const maxApiLongEdge = 1280;
+      // API送信: 1回目は長辺1024（品質とタイムアウトのバランス）、再試行時は512で軽量送信
+      const maxApiLongEdge = 1024;
       const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
@@ -919,6 +919,25 @@ export default function Home() {
         apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.88);
       });
 
+      const maxApiLongEdgeSmall = 512;
+      const apiScaleSmall = Math.min(maxApiLongEdgeSmall / Math.max(originalW, originalH), 1);
+      const apiWSmall = Math.round(originalW * apiScaleSmall);
+      const apiHSmall = Math.round(originalH * apiScaleSmall);
+      const apiCanvasSmall = document.createElement('canvas');
+      apiCanvasSmall.width = apiWSmall;
+      apiCanvasSmall.height = apiHSmall;
+      const apiCtxSmall = apiCanvasSmall.getContext('2d');
+      if (apiCtxSmall) {
+        apiCtxSmall.imageSmoothingEnabled = true;
+        apiCtxSmall.imageSmoothingQuality = 'high';
+        apiCtxSmall.filter = 'contrast(1.4) brightness(1.1)';
+        apiCtxSmall.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiWSmall, apiHSmall);
+        apiCtxSmall.filter = 'none';
+      }
+      const apiBlobSmall = await new Promise<Blob>((resolve, reject) => {
+        apiCanvasSmall.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.85);
+      });
+
       // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は非同期で実行しAPI呼び出しを遅らせない
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
       setScreenMode('preview_edit');
@@ -931,23 +950,34 @@ export default function Home() {
         setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
       }, 0);
 
-      const createFormData = () => {
+      const createFormData = (useSmallImage: boolean) => {
         const fd = new FormData();
-        fd.append('image', apiBlob, 'photo.jpg');
-        fd.append('width', apiW.toString());
-        fd.append('height', apiH.toString());
+        if (useSmallImage) {
+          fd.append('image', apiBlobSmall, 'photo.jpg');
+          fd.append('width', apiWSmall.toString());
+          fd.append('height', apiHSmall.toString());
+        } else {
+          fd.append('image', apiBlob, 'photo.jpg');
+          fd.append('width', apiW.toString());
+          fd.append('height', apiH.toString());
+        }
         return fd;
       };
 
+      const API_TIMEOUT_MS_FIRST = 48_000;  // サーバー45sより長め
+      const API_TIMEOUT_MS_RETRY = 35_000;  // 小さい画像で再試行時
+
       const performFetch = async (retryCount: number): Promise<Response> => {
+        const useSmall = retryCount > 0;
+        const timeoutMs = useSmall ? API_TIMEOUT_MS_RETRY : API_TIMEOUT_MS_FIRST;
         const controller = new AbortController();
         const fetchStart = Date.now();
-        const timeoutId = setTimeout(() => controller.abort(), 17_000); // 17秒でタイムアウト（API側15sと合わせる）
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
+          const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(useSmall), signal: controller.signal });
           clearTimeout(timeoutId);
           const elapsed = Date.now() - fetchStart;
-          console.log(`[client] API fetch completed in ${elapsed}ms, status=${res.status}`);
+          console.log(`[client] API fetch completed in ${elapsed}ms, status=${res.status}, small=${useSmall}`);
           return res;
         } catch (fetchErr: unknown) {
           clearTimeout(timeoutId);
@@ -958,8 +988,8 @@ export default function Home() {
             console.error(`[client] API fetch error after ${elapsed}ms:`, fetchErr);
           }
           if (retryCount === 0 && (fetchErr instanceof Error && fetchErr.name === 'AbortError' || fetchErr instanceof TypeError)) {
-            setCameraError('画像サイズを小さくして再試行しています...');
-            await new Promise((resolve) => setTimeout(resolve, 100));
+            setCameraError('画像を小さくして再試行しています...');
+            await new Promise((resolve) => setTimeout(resolve, 300));
             return performFetch(1);
           }
           throw fetchErr;
