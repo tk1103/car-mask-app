@@ -370,22 +370,20 @@ function detectQuadFromCanvas(
     (cv.cvtColor as (a: unknown, b: unknown, code: number) => void)(src, gray, cv.COLOR_RGBA2GRAY as number);
     (cv.GaussianBlur as (a: unknown, b: unknown, k: unknown, s: number) => void)(gray, blurred, new (cv.Size as new (a: number, b: number) => unknown)(5, 5), 0);
 
-    let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
-
     type QuadCandidate = { points: { x: number; y: number }[]; area: number; ratio: number };
-    const consider = (candidate: QuadCandidate | null) => {
-      if (!candidate) return;
-      const plateLike = candidate.ratio >= 2.2 && candidate.ratio <= 6;
-      const score = plateLike ? candidate.area * 2 : candidate.area;
-      const curScore = bestQuad ? ((bestQuad as QuadCandidate).ratio >= 2.2 && (bestQuad as QuadCandidate).ratio <= 6 ? (bestQuad as QuadCandidate).area * 2 : (bestQuad as QuadCandidate).area) : 0;
-      if (!bestQuad || score > curScore) bestQuad = candidate;
+    const scoreOf = (q: QuadCandidate) => (q.ratio >= 2.2 && q.ratio <= 6 ? q.area * 2 : q.area);
+    const better = (a: QuadCandidate | null, b: QuadCandidate | null): QuadCandidate | null => {
+      if (!a) return b;
+      if (!b) return a;
+      return scoreOf(b) > scoreOf(a) ? b : a;
     };
+    let bestQuad: QuadCandidate | null = null;
     // 1) Canny エッジ（標準）
     (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 25, 120);
-    consider(findBestQuadFromBinary(cv, edges, sw, sh));
+    bestQuad = better(bestQuad, findBestQuadFromBinary(cv, edges, sw, sh));
     // 2) Canny 低閾値（白ナンバーなどエッジが弱い場合）
     (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 15, 80);
-    consider(findBestQuadFromBinary(cv, edges, sw, sh));
+    bestQuad = better(bestQuad, findBestQuadFromBinary(cv, edges, sw, sh));
     // 3) 適応的閾値（照明むらに強い）
     const ADAPTIVE_THRESH_GAUSSIAN_C = 1;
     const THRESH_BINARY = 0;
@@ -393,7 +391,7 @@ function detectQuadFromCanvas(
       (cv.adaptiveThreshold as (src: unknown, dst: unknown, maxVal: number, adaptiveMethod: number, thresholdType: number, blockSize: number, C: number) => void)(
         blurred, binary, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 11, 2
       );
-      consider(findBestQuadFromBinary(cv, binary, sw, sh));
+      bestQuad = better(bestQuad, findBestQuadFromBinary(cv, binary, sw, sh));
     }
 
     if (!bestQuad) return null;
