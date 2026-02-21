@@ -307,7 +307,7 @@ function findBestQuadFromBinary(
     const area = (cv.contourArea as (c: unknown) => number)(cnt);
     if (area < minArea || area > maxArea) continue;
     // 複数イプシロンで試して四角を拾う（ナンバーが写っていれば必ず出るように）
-    for (const epsFactor of [0.03, 0.06, 0.10, 0.15]) {
+    for (const epsFactor of [0.03, 0.06, 0.10, 0.15, 0.20]) {
       const epsilon = epsFactor * perim(cnt);
       const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
       (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
@@ -330,7 +330,10 @@ function findBestQuadFromBinary(
       approx2.delete();
       if (!points) continue;
       const plateLike = ratio >= 2.2 && ratio <= 6;
-      const score = plateLike ? area * 2 : area;
+      const cy = (points[0].y + points[1].y + points[2].y + points[3].y) / 4;
+      const inLowerHalf = cy > sh * 0.4;
+      let score = plateLike ? area * 2 : area;
+      if (inLowerHalf) score *= 1.5;
       if (!bestQuad || score > bestScore) {
         bestQuad = { points, area, ratio };
         bestScore = score;
@@ -392,6 +395,16 @@ function detectQuadFromCanvas(
         blurred, binary, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 11, 2
       );
       bestQuad = better(bestQuad, findBestQuadFromBinary(cv, binary, sw, sh));
+    }
+    // 4) 固定閾値で二値化して検出（白黒はっきりしたプレート用）
+    try {
+      if (typeof (cv as Record<string, unknown>).threshold === 'function') {
+        const threshType = (cv as Record<string, unknown>).THRESH_BINARY ?? 0;
+        (cv.threshold as (src: unknown, dst: unknown, thresh: number, maxval: number, type: number) => void)(blurred, binary, 127, 255, threshType as number);
+        bestQuad = better(bestQuad, findBestQuadFromBinary(cv, binary, sw, sh));
+      }
+    } catch {
+      // threshold のシグネチャが環境で違う場合はスキップ
     }
 
     if (!bestQuad) return null;
@@ -584,9 +597,9 @@ export default function Home() {
     };
   }, [screenMode]);
 
-  // リアルタイム矩形検出（低解像・グレースケール）。OpenCV 用の小さいキャンバスは DOM に置く（imread が動く環境があるため）。
+  // リアルタイム矩形検出（低解像・グレースケール）。OpenCV 読み込み完了後に開始。
   useEffect(() => {
-    if (screenMode !== 'camera' || !stream) return;
+    if (screenMode !== 'camera' || !stream || !opencvReady) return;
     const video = videoRef.current;
     if (!video) return;
 
@@ -627,7 +640,7 @@ export default function Home() {
       }
       smallCanvasRef.current = null;
     };
-  }, [screenMode, stream]);
+  }, [screenMode, stream, opencvReady]);
 
   // カメラオーバーレイ描画。useLayoutEffect で ref 確定直後にループ開始し、検出時はマスク＋ロゴ、未検出時は「プレビュー: 検出中」を表示。
   useLayoutEffect(() => {
