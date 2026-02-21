@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
     const mimeType = imageFile.type || 'image/jpeg';
     console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
-    const prompt = "Detect the license plate in this image. The car or camera might be tilted or in landscape mode. Identify the 4 corners [TL, TR, BR, BL] accurately based on the plate's own orientation, regardless of the image angle. Output JSON only (0-1000 range). No prose.";
+    const prompt = "Detect the license plate in this image. Include all types: standard (black on white), kei (yellow/green), and design/pattern plates (地域柄ナンバー). The car or camera might be tilted or in landscape mode. Identify the 4 corners [TL, TR, BR, BL] accurately based on the plate's own orientation, regardless of the image angle. Output JSON only (0-1000 range). No prose.";
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
