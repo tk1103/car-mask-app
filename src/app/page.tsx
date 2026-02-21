@@ -899,8 +899,8 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信画像は長辺512に制限（軽量化で解析速度を確保）
-      const maxApiLongEdge = 512;
+      // API送信画像は長辺1280まで（解像度を確保して座標検出精度を上げる）
+      const maxApiLongEdge = 1280;
       const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
       const apiH = Math.round(originalH * apiScale);
@@ -910,13 +910,13 @@ export default function Home() {
       const apiCtx = apiCanvas.getContext('2d');
       if (!apiCtx) throw new Error('Canvas error');
       apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'low';
+      apiCtx.imageSmoothingQuality = 'high';
       apiCtx.filter = 'contrast(1.4) brightness(1.1)';
       apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
       const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.1);
+        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.88);
       });
 
       // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は非同期で実行しAPI呼び出しを遅らせない
