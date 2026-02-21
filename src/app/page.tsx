@@ -228,6 +228,9 @@ const OPENCV_DETECT_SIZE = 320; // 検出用の短辺（アスペクトで長辺
 const DETECT_INTERVAL_MS = 150;
 // 検出する四角の最小面積（画面に対する比率）。0.0015 = 約0.15%（320x240で約115px²）。これより小さいと検出されない。
 const DETECT_MIN_AREA_RATIO = 0.0015;
+// ロゴキャンバスのアスペクト（ナンバープレートに合わせる＝横長）。ワープ時に伸びないようにプレート比に近づける
+const LOGO_CANVAS_WIDTH = 400;
+const LOGO_CANVAS_HEIGHT = 88; // 約4.55:1（プレートに近い）
 
 /** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最大面積の4点を返す。 */
 function findBestQuadFromBinary(
@@ -616,15 +619,15 @@ export default function Home() {
           let logoCanvas = logoCanvasRef.current;
           if (!logoCanvas) {
             logoCanvas = document.createElement('canvas');
-            logoCanvas.width = 400;
-            logoCanvas.height = 120;
+            logoCanvas.width = LOGO_CANVAS_WIDTH;
+            logoCanvas.height = LOGO_CANVAS_HEIGHT;
             logoCanvasRef.current = logoCanvas;
             const lctx = logoCanvas.getContext('2d');
             if (lctx) {
-              lctx.clearRect(0, 0, 400, 120);
+              lctx.clearRect(0, 0, LOGO_CANVAS_WIDTH, LOGO_CANVAS_HEIGHT);
               lctx.save();
-              lctx.translate(200, 60);
-              drawCarkusuLogoAtOrigin(lctx, 400 * 0.95, 120 * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage ?? undefined);
+              lctx.translate(LOGO_CANVAS_WIDTH / 2, LOGO_CANVAS_HEIGHT / 2);
+              drawCarkusuLogoAtOrigin(lctx, LOGO_CANVAS_WIDTH * 0.95, LOGO_CANVAS_HEIGHT * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage ?? undefined);
               lctx.restore();
             }
           }
@@ -1076,10 +1079,10 @@ export default function Home() {
       const cosR = Math.cos((editLogoRotation * Math.PI) / 180);
       const sinR = Math.sin((editLogoRotation * Math.PI) / 180);
 
-      // マスク画像が無いとき用のロゴキャンバス（黒背景＋Carkus）を1枚用意
+      // マスク画像が無いとき用のロゴキャンバス（黒背景＋Carkus）。アスペクトをプレートに合わせて横伸びしないように
       if (!maskImage?.complete || !maskImage.naturalWidth) {
-        const Lw = 400;
-        const Lh = 120;
+        const Lw = LOGO_CANVAS_WIDTH;
+        const Lh = LOGO_CANVAS_HEIGHT;
         let logoCanvas = logoCanvasRef.current;
         if (!logoCanvas) {
           logoCanvas = document.createElement('canvas');
@@ -1466,7 +1469,7 @@ export default function Home() {
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
-            <span className="text-lg font-extralight text-white tracking-[0.2em] shrink-0">Carkus</span>
+            <img src="/Carkus.svg" alt="Carkus" className="h-6 w-auto shrink-0" />
             <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
             <span className="text-white/90 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
@@ -1530,7 +1533,7 @@ export default function Home() {
           <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-base font-extralight text-white tracking-widest">Carkus</span>
+                <img src="/Carkus.svg" alt="Carkus" className="h-5 w-auto shrink-0" />
                 <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
               </div>
               <button
