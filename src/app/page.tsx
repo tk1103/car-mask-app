@@ -454,6 +454,7 @@ export default function Home() {
   const opencvReadyRef = useRef(false);
   const liveQuadRef = useRef<QuadPx | null>(null);
   const cameraOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [overlayCanvasReady, setOverlayCanvasReady] = useState(false); // オーバーレイ用キャンバスがマウントされたら true（描画ループ開始のトリガー）
   const smallCanvasRef = useRef<HTMLCanvasElement | null>(null); // 320x240 for OpenCV
   const detectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const overlayRafRef = useRef<number | null>(null);
@@ -574,20 +575,22 @@ export default function Home() {
     };
   }, [screenMode]);
 
-  // リアルタイム矩形検出（低解像・グレースケール）。OpenCV 未読み込みでも interval は動かし、読み込み後に検出開始。
+  // リアルタイム矩形検出（低解像・グレースケール）。OpenCV 用の小さいキャンバスは DOM に置く（imread が動く環境があるため）。
   useEffect(() => {
     if (screenMode !== 'camera' || !stream) return;
     const video = videoRef.current;
     if (!video) return;
 
-    if (!smallCanvasRef.current) {
-      const c = document.createElement('canvas');
-      c.width = OPENCV_DETECT_SIZE;
-      c.height = Math.round((OPENCV_DETECT_SIZE * (video.videoHeight || 9)) / (video.videoWidth || 16));
-      if (c.height < 1) c.height = Math.round(OPENCV_DETECT_SIZE * 0.75);
-      smallCanvasRef.current = c;
+    let smallCanvas = smallCanvasRef.current;
+    if (!smallCanvas) {
+      smallCanvas = document.createElement('canvas');
+      smallCanvas.width = OPENCV_DETECT_SIZE;
+      smallCanvas.height = Math.round((OPENCV_DETECT_SIZE * (video.videoHeight || 9)) / (video.videoWidth || 16)) || 240;
+      smallCanvas.setAttribute('data-opencv-input', '1');
+      smallCanvasRef.current = smallCanvas;
+      smallCanvas.style.cssText = 'position:absolute;left:-9999px;width:320px;height:240px;pointer-events:none;';
+      document.body.appendChild(smallCanvas);
     }
-    const smallCanvas = smallCanvasRef.current;
     const ctx = smallCanvas.getContext('2d');
     if (!ctx) return;
 
@@ -610,10 +613,14 @@ export default function Home() {
       clearInterval(id);
       detectionIntervalRef.current = null;
       liveQuadRef.current = null;
+      if (smallCanvasRef.current?.parentNode) {
+        smallCanvasRef.current.parentNode.removeChild(smallCanvasRef.current);
+      }
+      smallCanvasRef.current = null;
     };
   }, [screenMode, stream]);
 
-  // カメラオーバーレイ描画（OpenCV で検出した四角にマスク＋ロゴを表示）。ref は描画ループ内で毎フレーム参照するので、初回 null でもループだけ開始する。
+  // カメラオーバーレイ描画（OpenCV で検出した四角にマスク＋ロゴを表示）。キャンバスがマウントされたら描画ループ開始。
   useEffect(() => {
     if (screenMode !== 'camera') return;
 
@@ -621,20 +628,36 @@ export default function Home() {
       if (screenMode !== 'camera') return;
       const v = videoRef.current;
       const c = cameraOverlayCanvasRef.current;
-      if (!v || !c || !v.videoWidth || !v.videoHeight) {
+      if (!c) {
         overlayRafRef.current = requestAnimationFrame(draw);
         return;
-      }
-      if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
-        c.width = v.videoWidth;
-        c.height = v.videoHeight;
       }
       const ctx = c.getContext('2d');
       if (!ctx) {
         overlayRafRef.current = requestAnimationFrame(draw);
         return;
       }
-      ctx.clearRect(0, 0, c.width, c.height);
+      const vw = v?.videoWidth ?? 0;
+      const vh = v?.videoHeight ?? 0;
+      if (vw > 0 && vh > 0) {
+        if (c.width !== vw || c.height !== vh) {
+          c.width = vw;
+          c.height = vh;
+        }
+      } else {
+        const rect = c.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && (c.width !== rect.width || c.height !== rect.height)) {
+          c.width = rect.width;
+          c.height = rect.height;
+        }
+      }
+      const w = c.width;
+      const h = c.height;
+      if (w < 1 || h < 1) {
+        overlayRafRef.current = requestAnimationFrame(draw);
+        return;
+      }
+      ctx.clearRect(0, 0, w, h);
       const quad = liveQuadRef.current;
       if (quad && maskImage !== undefined) {
         fillQuad(ctx, quad, 'rgba(0,0,0,0.92)');
@@ -662,16 +685,15 @@ export default function Home() {
           }
         }
       } else {
-        // 四角が検出されていないときもオーバーレイが動いていることを示す（右下に「プレビュー: 検出中」）
+        const msg = vw > 0 ? 'プレビュー: 検出中' : '読み込み中...';
         ctx.save();
-        const msg = 'プレビュー: 検出中';
-        ctx.font = '14px sans-serif';
+        ctx.font = '16px sans-serif';
         const metrics = ctx.measureText(msg);
-        const pad = 8;
-        const x = c.width - metrics.width - pad - 8;
-        const y = c.height - 22;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(x - pad, y - 14, metrics.width + pad * 2, 20);
+        const pad = 10;
+        const x = w - metrics.width - pad - 10;
+        const y = h - 26;
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.fillRect(x - pad, y - 16, metrics.width + pad * 2, 24);
         ctx.fillStyle = 'rgba(255,255,255,0.95)';
         ctx.fillText(msg, x, y);
         ctx.restore();
@@ -683,7 +705,7 @@ export default function Home() {
       if (overlayRafRef.current != null) cancelAnimationFrame(overlayRafRef.current);
       overlayRafRef.current = null;
     };
-  }, [screenMode, maskImage, carkusuLogoImage]);
+  }, [screenMode, maskImage, carkusuLogoImage, overlayCanvasReady]);
 
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
@@ -1545,7 +1567,10 @@ export default function Home() {
             className="absolute inset-0 w-full h-full object-cover"
           />
           <canvas
-            ref={cameraOverlayCanvasRef}
+            ref={(el) => {
+              (cameraOverlayCanvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = el;
+              setOverlayCanvasReady(!!el);
+            }}
             className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[5]"
             style={{ left: 0, top: 0, right: 0, bottom: 0 }}
           />
