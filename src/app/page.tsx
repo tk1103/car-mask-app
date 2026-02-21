@@ -585,12 +585,9 @@ export default function Home() {
     };
   }, [screenMode, stream]);
 
-  // カメラオーバーレイ描画（検出四角にマスク＋ロゴを三角形2分割アフィンで表示）
+  // カメラオーバーレイ描画（OpenCV で検出した四角にマスク＋ロゴを表示）。ref は描画ループ内で毎フレーム参照するので、初回 null でもループだけ開始する。
   useEffect(() => {
     if (screenMode !== 'camera') return;
-    const overlay = cameraOverlayCanvasRef.current;
-    const video = videoRef.current;
-    if (!overlay || !video) return;
 
     const draw = () => {
       if (screenMode !== 'camera') return;
@@ -637,11 +634,18 @@ export default function Home() {
           }
         }
       } else {
-        // 四角が検出されていないときもオーバーレイが動いていることを示す（右下に小さく「検出中」）
+        // 四角が検出されていないときもオーバーレイが動いていることを示す（右下に「プレビュー: 検出中」）
         ctx.save();
-        ctx.fillStyle = 'rgba(0,0,0,0.4)';
-        ctx.font = '12px sans-serif';
-        ctx.fillText('検出中', c.width - 52, c.height - 12);
+        const msg = 'プレビュー: 検出中';
+        ctx.font = '14px sans-serif';
+        const metrics = ctx.measureText(msg);
+        const pad = 8;
+        const x = c.width - metrics.width - pad - 8;
+        const y = c.height - 22;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x - pad, y - 14, metrics.width + pad * 2, 20);
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.fillText(msg, x, y);
         ctx.restore();
       }
       overlayRafRef.current = requestAnimationFrame(draw);
