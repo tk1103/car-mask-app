@@ -629,12 +629,11 @@ export default function Home() {
     };
   }, [screenMode, stream]);
 
-  // カメラオーバーレイ描画（OpenCV で検出した四角にマスク＋ロゴを表示）。camera モードに入ったらすぐ描画ループ開始（ref はループ内で取得）。
+  // カメラオーバーレイ描画。キャンバスがマウントされたあと（overlayCanvasReady）に描画ループを開始し、検出時はマスク＋ロゴ、未検出時は「プレビュー: 検出中」を表示。
   useEffect(() => {
-    if (screenMode !== 'camera') return;
+    if (screenMode !== 'camera' || !overlayCanvasReady) return;
 
     const draw = () => {
-      if (screenMode !== 'camera') return;
       const v = videoRef.current;
       const c = cameraOverlayCanvasRef.current;
       if (!c) {
@@ -655,19 +654,15 @@ export default function Home() {
         }
       } else {
         const rect = c.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0 && (c.width !== rect.width || c.height !== rect.height)) {
-          c.width = Math.max(1, Math.round(rect.width));
-          c.height = Math.max(1, Math.round(rect.height));
+        const rw = rect.width > 0 ? Math.round(rect.width) : (typeof window !== 'undefined' ? window.innerWidth : 320);
+        const rh = rect.height > 0 ? Math.round(rect.height) : (typeof window !== 'undefined' ? window.innerHeight : 240);
+        if (c.width !== rw || c.height !== rh) {
+          c.width = Math.max(1, rw);
+          c.height = Math.max(1, rh);
         }
       }
-      let w = c.width;
-      let h = c.height;
-      if (w < 1 || h < 1) {
-        w = w < 1 ? 320 : w;
-        h = h < 1 ? 240 : h;
-        c.width = w;
-        c.height = h;
-      }
+      const w = Math.max(1, c.width);
+      const h = Math.max(1, c.height);
       ctx.clearRect(0, 0, w, h);
       const quad = liveQuadRef.current;
       if (quad && maskImage !== undefined) {
@@ -717,7 +712,7 @@ export default function Home() {
       if (overlayRafRef.current != null) cancelAnimationFrame(overlayRafRef.current);
       overlayRafRef.current = null;
     };
-  }, [screenMode, maskImage, carkusuLogoImage]);
+  }, [screenMode, maskImage, carkusuLogoImage, overlayCanvasReady]);
 
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
