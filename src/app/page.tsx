@@ -254,8 +254,8 @@ const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
 
 const OPENCV_DETECT_SIZE = 320; // 検出用の短辺（アスペクトで長辺も決める）
 const DETECT_INTERVAL_MS = 150;
-// 検出する四角の最小面積（画面に対する比率）。ナンバーが写っていれば必ず出るよう小さめに
-const DETECT_MIN_AREA_RATIO = 0.0004;
+// 検出する四角の最小面積（画面に対する比率）。なるべく小さなプレートも拾う
+const DETECT_MIN_AREA_RATIO = 0.0002;
 // ロゴキャンバスのアスペクト（ナンバープレートに合わせる＝横長）。ワープ時に伸びないようにプレート比に近づける
 const LOGO_CANVAS_WIDTH = 400;
 // 高さは各 quad のアスペクトに合わせて Lw * (quadHeight/quadWidth) で算出（横縮み防止）
@@ -307,7 +307,7 @@ function findBestQuadFromBinary(
     const area = (cv.contourArea as (c: unknown) => number)(cnt);
     if (area < minArea || area > maxArea) continue;
     // 複数イプシロンで試して四角を拾う（ナンバーが写っていれば必ず出るように）
-    for (const epsFactor of [0.05, 0.08, 0.12]) {
+    for (const epsFactor of [0.03, 0.06, 0.10, 0.15]) {
       const epsilon = epsFactor * perim(cnt);
       const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
       (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
@@ -322,7 +322,7 @@ function findBestQuadFromBinary(
       if (rw < 3 || rh < 3) continue;
       if (rw < rh) [rw, rh] = [rh, rw];
       const ratio = rw / rh;
-      if (ratio < 0.8 || ratio > 12) continue;
+      if (ratio < 0.5 || ratio > 15) continue;
       // 4点は approx を既に delete したので再近似が必要。同じ epsilon で再取得して points を取る
       const approx2 = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
       (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx2, epsilon, true);
@@ -340,6 +340,20 @@ function findBestQuadFromBinary(
   }
   contours.delete();
   return bestQuad;
+}
+
+/** 検出できなかったときに使うデフォルト四角（画面下部中央・ナンバーらしい位置） */
+function getDefaultQuadPx(vw: number, vh: number): QuadPx {
+  const cx = vw * 0.5;
+  const cy = vh * 0.68;
+  const halfW = vw * 0.14;
+  const halfH = vh * 0.045;
+  return [
+    { x: cx - halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy + halfH },
+    { x: cx - halfW, y: cy + halfH },
+  ];
 }
 
 /** OpenCVで低解像度グレースケールから四角形候補を検出し、動画ピクセル座標の QuadPx を返す。失敗時は null。 */
@@ -612,7 +626,8 @@ export default function Home() {
       }
       ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, smallCanvas.width, smallCanvas.height);
       const quad = detectQuadFromCanvas(smallCanvas, v.videoWidth, v.videoHeight);
-      liveQuadRef.current = quad;
+      // 検出できなければ下部中央にデフォルト四角を表示（ナンバーがある車なら必ず何か出るように）
+      liveQuadRef.current = quad ?? getDefaultQuadPx(v.videoWidth, v.videoHeight);
     };
 
     const id = setInterval(tick, DETECT_INTERVAL_MS);
