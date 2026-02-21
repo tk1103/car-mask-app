@@ -697,8 +697,9 @@ export default function Home() {
         ctx.font = '16px sans-serif';
         const metrics = ctx.measureText(msg);
         const pad = 10;
-        const x = w - metrics.width - pad - 10;
-        const y = h - 26;
+        // 下部バー(z-20)に隠れないよう、画面右上付近に表示
+        const x = w - metrics.width - pad - 16;
+        const y = 72;
         ctx.fillStyle = 'rgba(0,0,0,0.65)';
         ctx.fillRect(x - pad, y - 16, metrics.width + pad * 2, 24);
         ctx.fillStyle = 'rgba(255,255,255,0.95)';
@@ -1606,6 +1607,12 @@ export default function Home() {
             className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[5]"
             style={{ left: 0, top: 0, right: 0, bottom: 0 }}
           />
+          {/* キャンバス描画が効かない環境でも「検出中」が必ず見えるフォールバック */}
+          {!isProcessing && (
+            <div className="absolute top-14 right-4 z-[6] pointer-events-none px-3 py-1.5 rounded-md bg-black/60 text-white/95 text-sm font-light">
+              プレビュー: 検出中
+            </div>
+          )}
           {showFlash && (
             <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
           )}
