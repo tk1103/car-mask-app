@@ -1,5 +1,15 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+### OpenCV.js（カメラの矩形検出用）
+
+「OpenCV の読み込みに失敗しました」と出る場合は、同一オリジン用の `opencv.js` を配置してください。
+
+```bash
+node scripts/download-opencv.js
+```
+
+で `public/opencv.js` がダウンロードされます。再起動後、カメラを開き直してください。
+
 ## Getting Started
 
 First, run the development server:

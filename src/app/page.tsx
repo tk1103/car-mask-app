@@ -464,7 +464,7 @@ export default function Home() {
     if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
   }, [screenMode, fetchRemainingQuota]);
 
-  // OpenCV.js をカメラモード時のみ CDN から読み込む（非同期初期化も考慮）
+  // OpenCV.js をカメラモード時のみ読み込む（同一オリジン優先 → CDN フォールバック）
   useEffect(() => {
     if (screenMode !== 'camera') return;
     const trySetReady = () => {
@@ -487,26 +487,47 @@ export default function Home() {
       const poll = setInterval(() => { if (trySetReady()) clearInterval(poll); }, 300);
       return () => clearInterval(poll);
     }
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = 'https://docs.opencv.org/4.8.0/opencv.js';
-    script.onload = () => {
-      const cv = (window as unknown as { cv?: { Mat?: unknown; onRuntimeInitialized?: () => void } }).cv;
-      if (!cv) return;
-      if (trySetReady()) return;
-      (cv as Record<string, unknown>).onRuntimeInitialized = () => {
-        opencvReadyRef.current = true;
-        setOpencvReady(true);
+
+    const sources = [
+      '/opencv.js', // 同一オリジン（public/opencv.js を配置すると確実）
+      'https://unpkg.com/@techstark/opencv-js@4.11.0-release.1/dist/opencv.js', // npm 経由の CDN
+      'https://docs.opencv.org/4.8.0/opencv.js',
+    ];
+    let index = 0;
+    const tryNext = () => {
+      if (index >= sources.length) {
+        setCameraError('OpenCV の読み込みに失敗しました。public フォルダに opencv.js を配置するか、ネットワークを確認してください。');
+        return;
+      }
+      const script = document.createElement('script');
+      script.async = true;
+      script.src = sources[index];
+      script.onload = () => {
+        const cv = (window as unknown as { cv?: { Mat?: unknown; onRuntimeInitialized?: () => void } }).cv;
+        if (!cv) {
+          index++;
+          tryNext();
+          return;
+        }
+        if (trySetReady()) return;
+        (cv as Record<string, unknown>).onRuntimeInitialized = () => {
+          opencvReadyRef.current = true;
+          setOpencvReady(true);
+        };
+        const poll = setInterval(() => { if (trySetReady()) clearInterval(poll); }, 200);
+        setTimeout(() => clearInterval(poll), 15000);
       };
-      const poll = setInterval(() => { if (trySetReady()) clearInterval(poll); }, 200);
-      setTimeout(() => clearInterval(poll), 15000);
+      script.onerror = () => {
+        script.remove();
+        index++;
+        tryNext();
+      };
+      document.head.appendChild(script);
     };
-    script.onerror = () => {
-      setCameraError('OpenCV の読み込みに失敗しました。ネットワークを確認してください。');
-    };
-    document.head.appendChild(script);
+    tryNext();
+
     return () => {
-      script.remove();
+      document.querySelectorAll('script[src*="opencv"]').forEach((s) => s.remove());
     };
   }, [screenMode]);
 
@@ -1512,7 +1533,7 @@ export default function Home() {
               {isProcessing ? (
                 <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
               ) : (
-                <span className="text-white font-light text-sm tracking-wide">本番解析</span>
+                <span className="text-white font-light text-sm tracking-wide">普通に撮影する</span>
               )}
             </button>
             <p className="text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
