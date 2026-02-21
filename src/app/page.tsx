@@ -254,19 +254,19 @@ const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
 
 const OPENCV_DETECT_SIZE = 320; // 検出用の短辺（アスペクトで長辺も決める）
 const DETECT_INTERVAL_MS = 150;
-// 検出する四角の最小面積（画面に対する比率）。0.0015 = 約0.15%（320x240で約115px²）。これより小さいと検出されない。
-const DETECT_MIN_AREA_RATIO = 0.0015;
+// 検出する四角の最小面積（画面に対する比率）。ナンバーが写っていれば必ず出るよう小さめに
+const DETECT_MIN_AREA_RATIO = 0.0004;
 // ロゴキャンバスのアスペクト（ナンバープレートに合わせる＝横長）。ワープ時に伸びないようにプレート比に近づける
 const LOGO_CANVAS_WIDTH = 400;
 // 高さは各 quad のアスペクトに合わせて Lw * (quadHeight/quadWidth) で算出（横縮み防止）
 
-/** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最大面積の4点を返す。 */
+/** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最良の4点を返す（ナンバーらしいアスペクトを優先）。 */
 function findBestQuadFromBinary(
   cv: Record<string, unknown>,
   binary: { delete: () => void },
   sw: number,
   sh: number
-): { points: { x: number; y: number }[]; area: number } | null {
+): { points: { x: number; y: number }[]; area: number; ratio: number } | null {
   const contours = new (cv.MatVector as new () => { get: (i: number) => unknown; size: () => number; delete: () => void })();
   const hierarchy = new (cv.Mat as new () => { delete: () => void })();
   (cv.findContours as (img: unknown, c: unknown, h: unknown, mode: number, method: number) => void)(
@@ -274,7 +274,8 @@ function findBestQuadFromBinary(
   );
   hierarchy.delete();
 
-  let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
+  let bestQuad: { points: { x: number; y: number }[]; area: number; ratio: number } | null = null;
+  let bestScore = 0;
   const minArea = (sw * sh) * DETECT_MIN_AREA_RATIO;
   const maxArea = (sw * sh) * 0.85;
 
@@ -299,35 +300,43 @@ function findBestQuadFromBinary(
     return null;
   };
 
+  const perim = (c: unknown) => (cv.arcLength as (c: unknown, closed: boolean) => number)(c, true);
   for (let i = 0; i < contours.size(); i++) {
     const cnt = contours.get(i) as { rows?: number; data32S?: Int32Array; delete?: () => void } | undefined;
     if (!cnt) continue;
     const area = (cv.contourArea as (c: unknown) => number)(cnt);
     if (area < minArea || area > maxArea) continue;
-    const epsilon = 0.04 * (cv.arcLength as (c: unknown, closed: boolean) => number)(cnt, true);
-    const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
-    (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
-    if (approx.rows !== 4) {
+    // 複数イプシロンで試して四角を拾う（ナンバーが写っていれば必ず出るように）
+    for (const epsFactor of [0.05, 0.08, 0.12]) {
+      const epsilon = epsFactor * perim(cnt);
+      const approx = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
+      (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx, epsilon, true);
+      if (approx.rows !== 4) {
+        approx.delete();
+        continue;
+      }
+      const rect = (cv.boundingRect as (c: unknown) => { width: number; height: number })(approx);
+      let rw = rect.width;
+      let rh = rect.height;
       approx.delete();
-      continue;
+      if (rw < 3 || rh < 3) continue;
+      if (rw < rh) [rw, rh] = [rh, rw];
+      const ratio = rw / rh;
+      if (ratio < 0.8 || ratio > 12) continue;
+      // 4点は approx を既に delete したので再近似が必要。同じ epsilon で再取得して points を取る
+      const approx2 = new (cv.Mat as new () => { rows: number; data32S: Int32Array; delete: () => void })();
+      (cv.approxPolyDP as (curve: unknown, approx: unknown, eps: number, closed: boolean) => void)(cnt, approx2, epsilon, true);
+      const points = parseFourPoints(approx2.data32S);
+      approx2.delete();
+      if (!points) continue;
+      const plateLike = ratio >= 2.2 && ratio <= 6;
+      const score = plateLike ? area * 2 : area;
+      if (!bestQuad || score > bestScore) {
+        bestQuad = { points, area, ratio };
+        bestScore = score;
+      }
+      break; // この輪郭からは1つ採用したら次へ
     }
-    const rect = (cv.boundingRect as (c: unknown) => { width: number; height: number })(approx);
-    let rw = rect.width;
-    let rh = rect.height;
-    if (rw < 3 || rh < 3) {
-      approx.delete();
-      continue;
-    }
-    if (rw < rh) [rw, rh] = [rh, rw];
-    const ratio = rw / rh;
-    if (ratio < 1.2 || ratio > 9) {
-      approx.delete();
-      continue;
-    }
-    const points = parseFourPoints(approx.data32S);
-    approx.delete();
-    if (!points) continue;
-    if (!bestQuad || area > bestQuad.area) bestQuad = { points, area };
   }
   contours.delete();
   return bestQuad;
@@ -363,26 +372,28 @@ function detectQuadFromCanvas(
 
     let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
 
-    // 1) Canny エッジから検出
+    type QuadCandidate = { points: { x: number; y: number }[]; area: number; ratio: number };
+    const consider = (candidate: QuadCandidate | null) => {
+      if (!candidate) return;
+      const plateLike = candidate.ratio >= 2.2 && candidate.ratio <= 6;
+      const score = plateLike ? candidate.area * 2 : candidate.area;
+      const curScore = bestQuad ? ((bestQuad as QuadCandidate).ratio >= 2.2 && (bestQuad as QuadCandidate).ratio <= 6 ? (bestQuad as QuadCandidate).area * 2 : (bestQuad as QuadCandidate).area) : 0;
+      if (!bestQuad || score > curScore) bestQuad = candidate;
+    };
+    // 1) Canny エッジ（標準）
     (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 25, 120);
-    type QuadCandidate = { points: { x: number; y: number }[]; area: number };
-    const fromCanny = findBestQuadFromBinary(cv, edges, sw, sh);
-    if (fromCanny) {
-      const better = bestQuad === null || fromCanny.area > (bestQuad as QuadCandidate).area;
-      if (better) bestQuad = fromCanny;
-    }
-    // 2) 適応的閾値から検出（照明むらに強い）
+    consider(findBestQuadFromBinary(cv, edges, sw, sh));
+    // 2) Canny 低閾値（白ナンバーなどエッジが弱い場合）
+    (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 15, 80);
+    consider(findBestQuadFromBinary(cv, edges, sw, sh));
+    // 3) 適応的閾値（照明むらに強い）
     const ADAPTIVE_THRESH_GAUSSIAN_C = 1;
     const THRESH_BINARY = 0;
     if (typeof (cv as Record<string, unknown>).adaptiveThreshold === 'function') {
       (cv.adaptiveThreshold as (src: unknown, dst: unknown, maxVal: number, adaptiveMethod: number, thresholdType: number, blockSize: number, C: number) => void)(
         blurred, binary, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 11, 2
       );
-      const fromAdaptive = findBestQuadFromBinary(cv, binary, sw, sh);
-      if (fromAdaptive) {
-        const better = bestQuad === null || fromAdaptive.area > (bestQuad as QuadCandidate).area;
-        if (better) bestQuad = fromAdaptive;
-      }
+      consider(findBestQuadFromBinary(cv, binary, sw, sh));
     }
 
     if (!bestQuad) return null;
