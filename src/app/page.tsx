@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, Download as DownloadIcon } from 'lucide-react';
 
 /** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
@@ -629,9 +629,9 @@ export default function Home() {
     };
   }, [screenMode, stream]);
 
-  // カメラオーバーレイ描画。キャンバスがマウントされたあと（overlayCanvasReady）に描画ループを開始し、検出時はマスク＋ロゴ、未検出時は「プレビュー: 検出中」を表示。
-  useEffect(() => {
-    if (screenMode !== 'camera' || !overlayCanvasReady) return;
+  // カメラオーバーレイ描画。useLayoutEffect で ref 確定直後にループ開始し、検出時はマスク＋ロゴ、未検出時は「プレビュー: 検出中」を表示。
+  useLayoutEffect(() => {
+    if (screenMode !== 'camera') return;
 
     const draw = () => {
       const v = videoRef.current;
@@ -712,7 +712,7 @@ export default function Home() {
       if (overlayRafRef.current != null) cancelAnimationFrame(overlayRafRef.current);
       overlayRafRef.current = null;
     };
-  }, [screenMode, maskImage, carkusuLogoImage, overlayCanvasReady]);
+  }, [screenMode, maskImage, carkusuLogoImage]);
 
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
