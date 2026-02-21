@@ -620,7 +620,7 @@ export default function Home() {
     };
   }, [screenMode, stream]);
 
-  // カメラオーバーレイ描画（OpenCV で検出した四角にマスク＋ロゴを表示）。キャンバスがマウントされたら描画ループ開始。
+  // カメラオーバーレイ描画（OpenCV で検出した四角にマスク＋ロゴを表示）。camera モードに入ったらすぐ描画ループ開始（ref はループ内で取得）。
   useEffect(() => {
     if (screenMode !== 'camera') return;
 
@@ -647,15 +647,17 @@ export default function Home() {
       } else {
         const rect = c.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0 && (c.width !== rect.width || c.height !== rect.height)) {
-          c.width = rect.width;
-          c.height = rect.height;
+          c.width = Math.max(1, Math.round(rect.width));
+          c.height = Math.max(1, Math.round(rect.height));
         }
       }
-      const w = c.width;
-      const h = c.height;
+      let w = c.width;
+      let h = c.height;
       if (w < 1 || h < 1) {
-        overlayRafRef.current = requestAnimationFrame(draw);
-        return;
+        w = w < 1 ? 320 : w;
+        h = h < 1 ? 240 : h;
+        c.width = w;
+        c.height = h;
       }
       ctx.clearRect(0, 0, w, h);
       const quad = liveQuadRef.current;
@@ -706,7 +708,7 @@ export default function Home() {
       if (overlayRafRef.current != null) cancelAnimationFrame(overlayRafRef.current);
       overlayRafRef.current = null;
     };
-  }, [screenMode, maskImage, carkusuLogoImage, overlayCanvasReady]);
+  }, [screenMode, maskImage, carkusuLogoImage]);
 
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
