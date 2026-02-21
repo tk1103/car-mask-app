@@ -342,20 +342,6 @@ function findBestQuadFromBinary(
   return bestQuad;
 }
 
-/** 検出できなかったときに使うデフォルト四角（画面下部中央・ナンバーらしい位置） */
-function getDefaultQuadPx(vw: number, vh: number): QuadPx {
-  const cx = vw * 0.5;
-  const cy = vh * 0.68;
-  const halfW = vw * 0.14;
-  const halfH = vh * 0.045;
-  return [
-    { x: cx - halfW, y: cy - halfH },
-    { x: cx + halfW, y: cy - halfH },
-    { x: cx + halfW, y: cy + halfH },
-    { x: cx - halfW, y: cy + halfH },
-  ];
-}
-
 /** OpenCVで低解像度グレースケールから四角形候補を検出し、動画ピクセル座標の QuadPx を返す。失敗時は null。 */
 function detectQuadFromCanvas(
   smallCanvas: HTMLCanvasElement,
@@ -626,8 +612,7 @@ export default function Home() {
       }
       ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, smallCanvas.width, smallCanvas.height);
       const quad = detectQuadFromCanvas(smallCanvas, v.videoWidth, v.videoHeight);
-      // 検出できなければ下部中央にデフォルト四角を表示（ナンバーがある車なら必ず何か出るように）
-      liveQuadRef.current = quad ?? getDefaultQuadPx(v.videoWidth, v.videoHeight);
+      liveQuadRef.current = quad;
     };
 
     const id = setInterval(tick, DETECT_INTERVAL_MS);
