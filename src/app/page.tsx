@@ -252,25 +252,27 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
 
-const OPENCV_DETECT_SIZE = 320; // 検出用の短辺（アスペクトで長辺も決める）
-const DETECT_INTERVAL_MS = 150;
+const OPENCV_DETECT_SIZE = 480; // 検出用の幅（大きいほどプレート輪郭を拾いやすい）
+const DETECT_INTERVAL_MS = 100;
 // 検出する四角の最小面積（画面に対する比率）。なるべく小さなプレートも拾う
 const DETECT_MIN_AREA_RATIO = 0.0002;
 // ロゴキャンバスのアスペクト（ナンバープレートに合わせる＝横長）。ワープ時に伸びないようにプレート比に近づける
 const LOGO_CANVAS_WIDTH = 400;
 // 高さは各 quad のアスペクトに合わせて Lw * (quadHeight/quadWidth) で算出（横縮み防止）
 
-/** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最良の4点を返す（ナンバーらしいアスペクトを優先）。 */
+/** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最良の4点を返す。retrMode で RETR_LIST または RETR_EXTERNAL。 */
 function findBestQuadFromBinary(
   cv: Record<string, unknown>,
   binary: { delete: () => void },
   sw: number,
-  sh: number
+  sh: number,
+  retrMode?: number
 ): { points: { x: number; y: number }[]; area: number; ratio: number } | null {
   const contours = new (cv.MatVector as new () => { get: (i: number) => unknown; size: () => number; delete: () => void })();
   const hierarchy = new (cv.Mat as new () => { delete: () => void })();
+  const mode = retrMode ?? (cv.RETR_LIST as number);
   (cv.findContours as (img: unknown, c: unknown, h: unknown, mode: number, method: number) => void)(
-    binary, contours, hierarchy, cv.RETR_LIST as number, cv.CHAIN_APPROX_SIMPLE as number
+    binary, contours, hierarchy, mode, cv.CHAIN_APPROX_SIMPLE as number
   );
   hierarchy.delete();
 
@@ -279,24 +281,25 @@ function findBestQuadFromBinary(
   const minArea = (sw * sh) * DETECT_MIN_AREA_RATIO;
   const maxArea = (sw * sh) * 0.85;
 
+  const margin = 5;
+  const inBounds = (p: { x: number; y: number }) => p.x >= -margin && p.x <= sw + margin && p.y >= -margin && p.y <= sh + margin;
+  const clamp = (p: { x: number; y: number }[]) => p.map((q) => ({ x: Math.max(0, Math.min(sw, q.x)), y: Math.max(0, Math.min(sh, q.y)) }));
   const parseFourPoints = (data: Int32Array): { x: number; y: number }[] | null => {
     if (!data || data.length < 8) return null;
-    // レイアウト1: インターリーブ [x0,y0, x1,y1, x2,y2, x3,y3]
     const interleaved = [
       { x: data[0], y: data[1] },
       { x: data[2], y: data[3] },
       { x: data[4], y: data[5] },
       { x: data[6], y: data[7] },
     ];
-    if (interleaved.every((p) => p.x >= 0 && p.x <= sw && p.y >= 0 && p.y <= sh)) return interleaved;
-    // レイアウト2: チャンネル別 [x0,x1,x2,x3, y0,y1,y2,y3]（OpenCV ビルドによってはこちら）
+    if (interleaved.every(inBounds)) return clamp(interleaved);
     const channelMajor = [
       { x: data[0], y: data[4] },
       { x: data[1], y: data[5] },
       { x: data[2], y: data[6] },
       { x: data[3], y: data[7] },
     ];
-    if (channelMajor.every((p) => p.x >= 0 && p.x <= sw && p.y >= 0 && p.y <= sh)) return channelMajor;
+    if (channelMajor.every(inBounds)) return clamp(channelMajor);
     return null;
   };
 
@@ -381,12 +384,15 @@ function detectQuadFromCanvas(
       return scoreOf(b) > scoreOf(a) ? b : a;
     };
     let bestQuad: QuadCandidate | null = null;
-    // 1) Canny エッジ（標準）
+    const RETR_EXT = (cv as Record<string, unknown>).RETR_EXTERNAL as number | undefined;
+    // 1) Canny エッジ（標準）＋ RETR_EXTERNAL で外側輪郭も取得（プレート外形が拾いやすい）
     (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 25, 120);
     bestQuad = better(bestQuad, findBestQuadFromBinary(cv, edges, sw, sh));
+    if (RETR_EXT != null) bestQuad = better(bestQuad, findBestQuadFromBinary(cv, edges, sw, sh, RETR_EXT));
     // 2) Canny 低閾値（白ナンバーなどエッジが弱い場合）
     (cv.Canny as (a: unknown, b: unknown, l: number, h: number) => void)(blurred, edges, 15, 80);
     bestQuad = better(bestQuad, findBestQuadFromBinary(cv, edges, sw, sh));
+    if (RETR_EXT != null) bestQuad = better(bestQuad, findBestQuadFromBinary(cv, edges, sw, sh, RETR_EXT));
     // 3) 適応的閾値（照明むらに強い）
     const ADAPTIVE_THRESH_GAUSSIAN_C = 1;
     const THRESH_BINARY = 0;
@@ -395,16 +401,18 @@ function detectQuadFromCanvas(
         blurred, binary, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY, 11, 2
       );
       bestQuad = better(bestQuad, findBestQuadFromBinary(cv, binary, sw, sh));
+      if (RETR_EXT != null) bestQuad = better(bestQuad, findBestQuadFromBinary(cv, binary, sw, sh, RETR_EXT));
     }
-    // 4) 固定閾値で二値化して検出（白黒はっきりしたプレート用）
+    // 4) 固定閾値で二値化（白プレート用）
     try {
       if (typeof (cv as Record<string, unknown>).threshold === 'function') {
         const threshType = (cv as Record<string, unknown>).THRESH_BINARY ?? 0;
         (cv.threshold as (src: unknown, dst: unknown, thresh: number, maxval: number, type: number) => void)(blurred, binary, 127, 255, threshType as number);
         bestQuad = better(bestQuad, findBestQuadFromBinary(cv, binary, sw, sh));
+        if (RETR_EXT != null) bestQuad = better(bestQuad, findBestQuadFromBinary(cv, binary, sw, sh, RETR_EXT));
       }
     } catch {
-      // threshold のシグネチャが環境で違う場合はスキップ
+      // スキップ
     }
 
     if (!bestQuad) return null;
@@ -610,7 +618,7 @@ export default function Home() {
       smallCanvas.height = Math.round((OPENCV_DETECT_SIZE * (video.videoHeight || 9)) / (video.videoWidth || 16)) || 240;
       smallCanvas.setAttribute('data-opencv-input', '1');
       smallCanvasRef.current = smallCanvas;
-      smallCanvas.style.cssText = 'position:absolute;left:-9999px;width:320px;height:240px;pointer-events:none;';
+      smallCanvas.style.cssText = 'position:absolute;left:-9999px;pointer-events:none;';
       document.body.appendChild(smallCanvas);
     }
     const ctx = smallCanvas.getContext('2d');
