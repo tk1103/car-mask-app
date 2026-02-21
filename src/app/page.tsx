@@ -1607,12 +1607,9 @@ export default function Home() {
             className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[5]"
             style={{ left: 0, top: 0, right: 0, bottom: 0 }}
           />
-          {/* カメラ画面で常に表示（画面中央・z-15でヘッダー/下部バーより下、確実に見える） */}
-          <div
-            className="absolute left-4 right-4 z-[15] pointer-events-none flex items-center justify-center"
-            style={{ top: '50%', transform: 'translateY(-50%)' }}
-          >
-            <div className="px-4 py-2 rounded-lg bg-black/80 text-white text-sm font-light shadow-lg border border-white/20">
+          {/* カメラ画面で常に表示（右上・ヘッダー直下で邪魔にならない位置） */}
+          <div className="absolute top-24 right-4 z-[15] pointer-events-none">
+            <div className="px-3 py-1.5 rounded-lg bg-black/75 text-white text-sm font-light shadow-lg">
               プレビュー: 検出中
             </div>
           </div>
