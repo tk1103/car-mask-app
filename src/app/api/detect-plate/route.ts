@@ -102,6 +102,78 @@ const RESPONSE_SCHEMA = {
   required: ['found', 'plates'],
 } as const;
 
+/** Gemini の返答テキストから JSON 文字列を抽出し、パースしやすく正規化する */
+function extractAndNormalizeJson(raw: string): string {
+  let s = raw.trim();
+  // マークダウンコードブロックを除去
+  if (s.includes('```json')) {
+    const m = s.match(/```json\s*([\s\S]*?)```/);
+    if (m?.[1]) s = m[1].trim();
+  } else if (s.includes('```')) {
+    const m = s.match(/```\s*([\s\S]*?)```/);
+    if (m?.[1]) s = m[1].trim();
+  }
+  // 先頭・末尾の説明文を除去（最初の { から最後の } までを抽出）
+  const firstBrace = s.indexOf('{');
+  if (firstBrace !== -1) {
+    let depth = 0;
+    let end = -1;
+    for (let i = firstBrace; i < s.length; i++) {
+      if (s[i] === '{') depth++;
+      else if (s[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end !== -1) s = s.slice(firstBrace, end + 1);
+  }
+  // トレイリングカンマを除去（, ] や , } は JSON では無効だが Gemini が出力することがある）
+  s = s.replace(/,(\s*[}\]])/g, '$1');
+  return s;
+}
+
+/** 正規化済みの座標オブジェクトかどうか簡易チェック */
+function isValidCorner(c: unknown): c is { x: number; y: number } {
+  return (
+    c !== null &&
+    typeof c === 'object' &&
+    typeof (c as { x?: unknown }).x === 'number' &&
+    typeof (c as { y?: unknown }).y === 'number'
+  );
+}
+
+/** パース結果をスキーマに合わせて正規化（plates が無くても corners があれば復元） */
+function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    found: Boolean(parsed.found),
+    plates: Array.isArray(parsed.plates) ? parsed.plates : [],
+  };
+  const plates = result.plates as unknown[];
+  if (plates.length === 0 && parsed.corners && Array.isArray(parsed.corners)) {
+    const corners = (parsed.corners as unknown[]).filter(isValidCorner);
+    if (corners.length === 4) {
+      result.plates = [{ found: true, corners }];
+      result.found = true;
+    }
+  }
+  const validPlates = (result.plates as unknown[]).filter(
+    (p: unknown) =>
+      p !== null &&
+      typeof p === 'object' &&
+      Array.isArray((p as { corners?: unknown }).corners) &&
+      ((p as { corners: unknown[] }).corners).filter(isValidCorner).length === 4
+  );
+  result.plates = validPlates.map((p: unknown) => ({
+    found: true,
+    corners: (p as { corners: unknown[] }).corners.filter(isValidCorner).slice(0, 4),
+  }));
+  if (validPlates.length === 0) result.found = false;
+  return result;
+}
+
 /** 残り回数だけ取得（消費しない）。撮影前にクライアントが確認する用 */
 export async function GET(request: NextRequest) {
   const clientId = getClientId(request);
@@ -313,47 +385,43 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    let jsonText = text.trim();
-    if (jsonText.includes('```json')) {
-      jsonText = jsonText.split('```json')[1]?.split('```')[0]?.trim() ?? jsonText;
-    } else if (jsonText.includes('```')) {
-      jsonText = jsonText.split('```')[1]?.split('```')[0]?.trim() ?? jsonText;
+    const jsonCandidates = [
+      extractAndNormalizeJson(text),
+      text.trim(),
+    ];
+    let parseErr: unknown = null;
+    let parsed: Record<string, unknown> | null = null;
+
+    for (const jsonText of jsonCandidates) {
+      if (!jsonText) continue;
+      try {
+        const value = JSON.parse(jsonText);
+        if (value && typeof value === 'object') {
+          parsed = normalizeParsedResponse(value as Record<string, unknown>);
+          break;
+        }
+      } catch (e) {
+        parseErr = e;
+      }
     }
 
-    try {
-      const parsed = JSON.parse(jsonText);
-
-      if (parsed.found && Array.isArray(parsed.plates)) {
-        const validPlates = parsed.plates.filter(
-          (p: any) => p?.found && Array.isArray(p?.corners) && p.corners.length === 4
-        );
-        if (validPlates.length === 0) {
-          parsed.found = false;
-          parsed.plates = [];
-        } else {
-          parsed.plates = validPlates;
-        }
-      } else if (parsed.found && !Array.isArray(parsed.plates)) {
-        parsed.found = false;
-        parsed.plates = [];
-      }
-
+    if (parsed) {
       (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
       const totalElapsed = Date.now() - startTime;
-      console.log(`[detect-plate] Success: found=${parsed.found}, plates=${parsed.plates?.length || 0}, elapsed=${totalElapsed}ms`);
+      console.log(`[detect-plate] Success: found=${parsed.found}, plates=${(parsed.plates as unknown[])?.length || 0}, elapsed=${totalElapsed}ms`);
       return NextResponse.json(parsed);
-    } catch (parseErr) {
-      const elapsed = Date.now() - startTime;
-      const errorMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-      console.error(`[detect-plate] JSON parse error after ${elapsed}ms: ${errorMsg}`);
-      console.error(`[detect-plate] Raw JSON text (first 1000 chars):`, jsonText.substring(0, 1000));
-      return NextResponse.json({
-        found: false,
-        error: '座標の解析に失敗しました',
-        userMessage: '座標の解析に失敗しました。画像サイズや明るさを確認して、もう一度撮影してお試しください。',
-        rawResponse: jsonText.substring(0, 500),
-      }, { status: 500 });
     }
+
+    const elapsed = Date.now() - startTime;
+    const errorMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+    console.error(`[detect-plate] JSON parse error after ${elapsed}ms: ${errorMsg}`);
+    console.error(`[detect-plate] Raw text (first 1000 chars):`, text.substring(0, 1000));
+    return NextResponse.json({
+      found: false,
+      error: '座標の解析に失敗しました',
+      userMessage: '座標の解析に失敗しました。画像サイズや明るさを確認して、もう一度撮影してお試しください。',
+      rawResponse: text.substring(0, 500),
+    }, { status: 500 });
   } catch (error) {
     console.error('[detect-plate] Unexpected error:', error);
     return NextResponse.json(
