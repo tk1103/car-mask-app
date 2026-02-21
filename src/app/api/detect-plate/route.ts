@@ -132,6 +132,15 @@ function extractAndNormalizeJson(raw: string): string {
   }
   // トレイリングカンマを除去（, ] や , } は JSON では無効だが Gemini が出力することがある）
   s = s.replace(/,(\s*[}\]])/g, '$1');
+  // 複数箇所のトレイリングカンマを再適用（ネストした配列内など）
+  while (s.match(/,(\s*[}\]])/)) {
+    s = s.replace(/,(\s*[}\]])/g, '$1');
+  }
+  // キー名のシングルクォートをダブルに（"key": の形に）— 簡易: " の直後でない ' の連続を " に
+  s = s.replace(/'([^']*)'(\s*):/g, '"$1"$2:');
+  // 行・ブロックコメントを除去（Gemini がたまに混入）
+  s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+  s = s.replace(/\/\/[^\n]*/g, '');
   return s;
 }
 
