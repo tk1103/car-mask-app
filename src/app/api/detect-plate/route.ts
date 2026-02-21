@@ -251,7 +251,14 @@ export async function POST(request: NextRequest) {
     const mimeType = imageFile.type || 'image/jpeg';
     console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
-    const prompt = "Detect the license plate in this image. Include all types: standard (black on white), kei (yellow/green), and design/pattern plates (地域柄ナンバー). The car or camera might be tilted or in landscape mode. Identify the 4 corners [TL, TR, BR, BL] accurately based on the plate's own orientation, regardless of the image angle. Output JSON only (0-1000 range). No prose.";
+    const prompt = [
+      'Detect the license plate rectangle in this image.',
+      'The car body may be white or light-colored; the plate is still a visible rectangle (frame) on the bumper—detect it by shape and position (front/rear).',
+      'Include all plate types: standard (black on white), kei (yellow/green), design/pattern (地域柄).',
+      'Image may be bright, overexposed, or tilted; still output the plate quad when visible.',
+      'Return JSON only: found (boolean), plates (array of { found, corners: [{x,y}, {x,y}, {x,y}, {x,y}] }). Coordinates 0-1000. If no plate visible use {"found":false,"plates":[]}.',
+      'Output only valid JSON, no explanation or prose.',
+    ].join(' ');
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
