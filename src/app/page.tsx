@@ -887,12 +887,17 @@ export default function Home() {
       const performFetch = async (retryCount: number): Promise<Response> => {
         const controller = new AbortController();
         const fetchStart = Date.now();
-        const timeoutId = setTimeout(() => controller.abort(), 17_000); // 17秒でタイムアウト（API側15sと合わせる）
+        const timeoutId = setTimeout(() => controller.abort(), 35_000); // API側でリトライするため余裕を持たせる
         try {
           const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
           clearTimeout(timeoutId);
           const elapsed = Date.now() - fetchStart;
           console.log(`[client] API fetch completed in ${elapsed}ms, status=${res.status}`);
+          if (res.status === 503 && retryCount === 0) {
+            setCameraError('混雑のため再試行しています...');
+            await new Promise((r) => setTimeout(r, 3000));
+            return performFetch(1);
+          }
           return res;
         } catch (fetchErr: unknown) {
           clearTimeout(timeoutId);
