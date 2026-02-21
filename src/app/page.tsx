@@ -226,6 +226,8 @@ const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
 
 const OPENCV_DETECT_SIZE = 320; // 検出用の短辺（アスペクトで長辺も決める）
 const DETECT_INTERVAL_MS = 150;
+// 検出する四角の最小面積（画面に対する比率）。0.0015 = 約0.15%（320x240で約115px²）。これより小さいと検出されない。
+const DETECT_MIN_AREA_RATIO = 0.0015;
 
 /** 1枚のバイナリ画像から四角形候補を探し、条件を満たす最大面積の4点を返す。 */
 function findBestQuadFromBinary(
@@ -242,8 +244,29 @@ function findBestQuadFromBinary(
   hierarchy.delete();
 
   let bestQuad: { points: { x: number; y: number }[]; area: number } | null = null;
-  const minArea = (sw * sh) * 0.003;
+  const minArea = (sw * sh) * DETECT_MIN_AREA_RATIO;
   const maxArea = (sw * sh) * 0.85;
+
+  const parseFourPoints = (data: Int32Array): { x: number; y: number }[] | null => {
+    if (!data || data.length < 8) return null;
+    // レイアウト1: インターリーブ [x0,y0, x1,y1, x2,y2, x3,y3]
+    const interleaved = [
+      { x: data[0], y: data[1] },
+      { x: data[2], y: data[3] },
+      { x: data[4], y: data[5] },
+      { x: data[6], y: data[7] },
+    ];
+    if (interleaved.every((p) => p.x >= 0 && p.x <= sw && p.y >= 0 && p.y <= sh)) return interleaved;
+    // レイアウト2: チャンネル別 [x0,x1,x2,x3, y0,y1,y2,y3]（OpenCV ビルドによってはこちら）
+    const channelMajor = [
+      { x: data[0], y: data[4] },
+      { x: data[1], y: data[5] },
+      { x: data[2], y: data[6] },
+      { x: data[3], y: data[7] },
+    ];
+    if (channelMajor.every((p) => p.x >= 0 && p.x <= sw && p.y >= 0 && p.y <= sh)) return channelMajor;
+    return null;
+  };
 
   for (let i = 0; i < contours.size(); i++) {
     const cnt = contours.get(i) as { rows?: number; data32S?: Int32Array; delete?: () => void } | undefined;
@@ -270,20 +293,9 @@ function findBestQuadFromBinary(
       approx.delete();
       continue;
     }
-    const data = approx.data32S;
-    if (!data || data.length < 8) {
-      approx.delete();
-      continue;
-    }
-    const points = [
-      { x: data[0], y: data[1] },
-      { x: data[2], y: data[3] },
-      { x: data[4], y: data[5] },
-      { x: data[6], y: data[7] },
-    ];
-    const inRange = points.every((p) => p.x >= 0 && p.x <= sw && p.y >= 0 && p.y <= sh);
+    const points = parseFourPoints(approx.data32S);
     approx.delete();
-    if (!inRange) continue;
+    if (!points) continue;
     if (!bestQuad || area > bestQuad.area) bestQuad = { points, area };
   }
   contours.delete();
@@ -621,6 +633,13 @@ export default function Home() {
             drawImageWarpedToQuad(ctx, lc, quad, lc.width, lc.height);
           }
         }
+      } else {
+        // 四角が検出されていないときもオーバーレイが動いていることを示す（右下に小さく「検出中」）
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.font = '12px sans-serif';
+        ctx.fillText('検出中', c.width - 52, c.height - 12);
+        ctx.restore();
       }
       overlayRafRef.current = requestAnimationFrame(draw);
     };
