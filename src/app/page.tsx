@@ -1222,18 +1222,18 @@ export default function Home() {
             <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
           )}
           {isProcessing && (
-            <div className="absolute inset-0 bg-black/30 backdrop-blur-md flex flex-col items-center justify-between z-10 px-4 py-8">
+            <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-between z-10 px-4 py-8">
               <div className="flex-1 flex flex-col items-center justify-center gap-4">
                 <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
                 <p className="text-white font-light text-sm">AIが愛車をスキャン中...</p>
                 <p className="text-white/80 text-xs font-extralight text-center max-w-xs">少々お待ちください</p>
               </div>
-              <div className="w-full min-h-[100px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
+              <div className="w-full min-h-[100px] flex items-center justify-center rounded-xl bg-white/10 border border-white/10">
                 <span className="text-white/40 text-xs">広告枠（ベータ）</span>
               </div>
             </div>
           )}
-          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/10 backdrop-blur-md border-b border-white/10">
+          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-black/50 border-b border-white/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 shrink-0">
                 <span className="h-5 flex items-center shrink-0 text-white">
@@ -1251,7 +1251,7 @@ export default function Home() {
             {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
             <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/30 backdrop-blur-md border-t border-white/10 flex flex-col items-center gap-2">
+          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/50 border-t border-white/10 flex flex-col items-center gap-2">
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
@@ -1324,7 +1324,7 @@ export default function Home() {
       {screenMode === 'preview_edit' && previewImageUrl && (
         <div className="fixed inset-0 z-0 bg-black flex flex-col">
           {(isBlurWarning || detectionFailed) && (
-            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/30 backdrop-blur-md border-b border-white/10">
+            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/50 border-b border-white/10">
               {isBlurWarning && (
                 <p className="text-amber-200 text-sm font-light text-center">
                   写真がぼやけている可能性があります。撮り直すことをお勧めします。
@@ -1363,19 +1363,19 @@ export default function Home() {
               style={{ touchAction: 'none' }}
             />
             {isProcessing && detectedCorners.length === 0 && (
-              <div className="absolute inset-0 flex flex-col bg-black/30 backdrop-blur-md">
+              <div className="absolute inset-0 flex flex-col bg-black/50">
                 <div className="flex-1 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
                   <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
                   <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
                 </div>
-                <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10 mx-4 mb-4">
+                <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 border border-white/10 mx-4 mb-4">
                   <span className="text-white/40 text-xs">広告枠（ベータ）</span>
                 </div>
               </div>
             )}
           </div>
-          <div className="bg-black/30 backdrop-blur-md border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="bg-black/50 border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <div className="flex items-center gap-3 mb-2">
               <span className="text-white/90 text-xs font-light w-12">角度</span>
               <input

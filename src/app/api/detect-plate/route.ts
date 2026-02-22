@@ -413,18 +413,55 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    const text =
-      geminiJson.candidates?.[0]?.content?.parts
-        ?.map((p: any) => p.text ?? '')
+    const candidate = geminiJson.candidates?.[0];
+    if (!candidate?.content) {
+      const elapsed = Date.now() - startTime;
+      const blockReason = geminiJson.promptFeedback?.blockReason ?? candidate?.finishReason ?? 'no candidate content';
+      console.error(`[detect-plate] No candidate content after ${elapsed}ms`, {
+        blockReason,
+        finishReason: candidate?.finishReason,
+        rawSnippet: JSON.stringify(geminiJson).substring(0, 600),
+      });
+      return NextResponse.json({
+        found: false,
+        error: '解析結果がありません',
+        userMessage: blockReason === 'SAFETY' || blockReason === 'RECITATION'
+          ? '画像の内容により解析をスキップしました。別の写真でお試しください。'
+          : '解析結果が空でした。もう一度撮影してお試しください。',
+        rawResponse: JSON.stringify(geminiJson).substring(0, 500),
+      }, { status: 500 });
+    }
+    const content = candidate.content;
+    const parts = content?.parts ?? [];
+    // テキスト: parts[].text の結合。構造化出力で part がオブジェクトの場合は JSON 文字列に
+    let text =
+      parts
+        .map((p: any) => {
+          if (p != null && typeof p === 'object') {
+            if (typeof p.text === 'string') return p.text;
+            // responseSchema でオブジェクトがそのまま返る場合
+            if ('found' in p && 'plates' in p) return JSON.stringify(p);
+          }
+          return '';
+        })
         .join('') ?? '';
 
     if (!text?.trim()) {
       const elapsed = Date.now() - startTime;
-      console.error(`[detect-plate] Empty response after ${elapsed}ms`);
+      const finishReason = candidate?.finishReason ?? geminiJson.promptFeedback?.blockReason ?? 'unknown';
+      console.error(`[detect-plate] Empty response after ${elapsed}ms`, {
+        finishReason,
+        partsCount: parts.length,
+        hasContent: !!content,
+        rawSnippet: JSON.stringify(geminiJson).substring(0, 800),
+      });
+      const isSafety = finishReason === 'SAFETY' || finishReason === 'RECITATION' || geminiJson.promptFeedback?.blockReason;
       return NextResponse.json({
         found: false,
         error: 'Gemini APIから空の応答が返されました',
-        userMessage: '解析結果が空でした。もう一度撮影してお試しください。',
+        userMessage: isSafety
+          ? '画像の内容により解析をスキップしました。別の写真でお試しください。'
+          : '解析結果が空でした。もう一度撮影してお試しください。',
         rawResponse: JSON.stringify(geminiJson).substring(0, 500),
       }, { status: 500 });
     }
