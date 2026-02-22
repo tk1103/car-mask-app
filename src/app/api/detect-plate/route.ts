@@ -252,10 +252,10 @@ export async function POST(request: NextRequest) {
     console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
     const prompt = [
-      'Detect the license plate rectangle in this image.',
-      'The car body may be white or light-colored; the plate is still a visible rectangle (frame) on the bumper—detect it by shape and position (front/rear).',
-      'Include all plate types: standard (black on white), kei (yellow/green), design/pattern (地域柄).',
-      'Image may be bright, overexposed, or tilted; still output the plate quad when visible.',
+      'Detect every visible license-plate rectangle in this image.',
+      'The image may be: a direct photo of a car, a photo of a screen or monitor showing a car image, a photo of a printed photo, or a picture containing a car. In all cases, detect the plate rectangle(s) by shape and position (front/rear bumper).',
+      'Car body may be white or light-colored; plate is a visible rectangle (frame). Include all plate types: standard (black on white), kei (yellow/green), design/pattern (地域柄).',
+      'Image may be bright, overexposed, tilted, or slightly blurry; if any plate-like rectangle is visible, output its quad. Prefer one confident detection over none.',
       'Return JSON only: found (boolean), plates (array of { found, corners: [{x,y}, {x,y}, {x,y}, {x,y}] }). Coordinates 0-1000. If no plate visible use {"found":false,"plates":[]}.',
       'Output only valid JSON, no explanation or prose.',
     ].join(' ');

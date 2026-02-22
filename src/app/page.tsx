@@ -1335,6 +1335,9 @@ export default function Home() {
                   <p className="text-amber-200 text-sm font-light text-center">
                     ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
                   </p>
+                  <p className="text-white/60 text-xs font-extralight text-center mt-1">
+                    モニター・画面の写真や、ぼやけた画像は検出されにくい場合があります。
+                  </p>
                   <p className="text-white/70 text-sm font-light text-center">
                     本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}。制限に達した場合は明日お試しください。
                   </p>
