@@ -46,6 +46,20 @@ declare global {
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
 const DEVICE_ID_KEY = 'carkus_device_id';
+const CARKUS_DOWNLOAD_COUNT_KEY = 'carkus_download_count';
+
+/** ダウンロードファイル名用の連番を取得しインクリメント。Carkus-001.jpg, Carkus-002.jpg ... */
+function getNextCarkusFilename(): string {
+  if (typeof window === 'undefined' || !window.localStorage) return `Carkus-${Date.now()}.jpg`;
+  let n = 1;
+  try {
+    const s = window.localStorage.getItem(CARKUS_DOWNLOAD_COUNT_KEY);
+    if (s) n = Math.max(1, parseInt(s, 10) || 1);
+    window.localStorage.setItem(CARKUS_DOWNLOAD_COUNT_KEY, String(n + 1));
+  } catch (_) {}
+  return `Carkus-${String(n).padStart(3, '0')}.jpg`;
+}
+
 /** デバイス単位のAPI制限用。localStorage に UUID を保存し、同一デバイスは 20回/日 */
 function getDeviceId(): string {
   if (typeof window === 'undefined' || !window.localStorage) return '';
@@ -858,7 +872,7 @@ export default function Home() {
             setIsProcessing(false);
             return;
           }
-          const file = new File([blob], `number-mask-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          const file = new File([blob], getNextCarkusFilename(), { type: 'image/jpeg' });
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
             await navigator.share({ files: [file], title: 'Carkus' });
             setShowSaveSuccess(true);
@@ -893,7 +907,7 @@ export default function Home() {
             return;
           }
 
-          const file = new File([blob], `automoni-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          const file = new File([blob], getNextCarkusFilename(), { type: 'image/jpeg' });
 
           // navigator.share APIを使用してネイティブのShare Sheetを開く
           // これにより、登録されているSNSアプリが直接選択できる
@@ -1005,7 +1019,7 @@ export default function Home() {
             setIsProcessing(false);
             return;
           }
-          const file = new File([blob], `automoni-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          const file = new File([blob], getNextCarkusFilename(), { type: 'image/jpeg' });
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
             try {
               await navigator.share({
@@ -1059,7 +1073,7 @@ export default function Home() {
             setIsProcessing(false);
             return;
           }
-          const file = new File([blob], `automoni-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          const file = new File([blob], getNextCarkusFilename(), { type: 'image/jpeg' });
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
             try {
               await navigator.share({
