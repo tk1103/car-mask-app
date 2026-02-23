@@ -16,10 +16,10 @@ const DAILY_LIMIT_PER_CLIENT = 20;
 const rateLimitStore = new Map<string, number[]>();
 const dailyLimitStore = new Map<string, { count: number; date: string }>();
 
-/** デバイスID（UUID形式ならデバイス単位で制限）。無効な場合はIPで識別 */
+/** デバイスID（UUID または d- プレフィックスならデバイス単位で制限）。無効な場合はIPで識別 */
 function getClientId(request: NextRequest): string {
   const deviceId = request.headers.get('x-device-id')?.trim();
-  if (deviceId && /^[0-9a-f-]{36}$/i.test(deviceId)) return `device:${deviceId}`;
+  if (deviceId && ( /^[0-9a-f-]{36}$/i.test(deviceId) || /^d-\d+-[a-z0-9]+$/i.test(deviceId) )) return `device:${deviceId}`;
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) {
     const first = forwarded.split(',')[0]?.trim() ?? '';
