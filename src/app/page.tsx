@@ -175,7 +175,7 @@ function drawImageWarpedToQuad(
   ctx.restore();
 }
 
-// 黒マスクの上に白で Carkus のみを中央配置
+// 黒マスクの真ん中に Carkus ロゴを配置（座標系の原点 0,0 が中央）
 function drawCarkusLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
@@ -183,28 +183,25 @@ function drawCarkusLogoAtOrigin(
   _options?: { backgroundAlpha?: number },
   logoImage?: HTMLImageElement | null
 ) {
-  const halfW = logoWidth / 2;
-  const halfH = logoHeight / 2;
   const gothicFont = '-apple-system, "Helvetica Neue", "Hiragino Sans", "Yu Gothic", sans-serif';
-
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-    const drawH = logoHeight * 0.5;
-    const drawW = Math.min(drawH * svgAspect, logoWidth * 0.9);
-    const h = drawW / svgAspect;
+    const size = Math.min(logoWidth * 0.85, logoHeight * 0.85);
+    const drawW = svgAspect >= 1 ? size : size * svgAspect;
+    const drawH = svgAspect >= 1 ? size / svgAspect : size;
     ctx.save();
     ctx.filter = 'brightness(0) invert(1)';
-    ctx.drawImage(logoImage, -drawW / 2, -h / 2, drawW, h);
+    ctx.drawImage(logoImage, -drawW / 2, -drawH / 2, drawW, drawH);
     ctx.restore();
   } else {
-    const trialSize = Math.min(logoHeight * 0.4, 28);
+    const trialSize = Math.min(logoWidth * 0.2, logoHeight * 0.5, 28);
     ctx.font = `500 ${trialSize}px ${gothicFont}`;
     const textW = ctx.measureText('Carkus').width;
-    const fontSize = textW > logoWidth * 0.9 ? (trialSize * (logoWidth * 0.9) / textW) : trialSize;
+    const fontSize = textW > logoWidth * 0.85 ? (trialSize * (logoWidth * 0.85) / textW) : trialSize;
     ctx.font = `500 ${Math.max(14, fontSize)}px ${gothicFont}`;
     ctx.fillText('Carkus', 0, 0);
   }
