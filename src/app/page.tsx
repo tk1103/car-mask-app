@@ -190,7 +190,7 @@ function drawCarkusLogoAtOrigin(
 
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-    const size = Math.min(logoWidth * 1.0, logoHeight * 1.0);
+    const size = Math.min(logoWidth * 1.2, logoHeight * 1.2);
     const drawW = svgAspect >= 1 ? size : size * svgAspect;
     const drawH = svgAspect >= 1 ? size / svgAspect : size;
     const offsetX = drawW * 0.12;
@@ -199,11 +199,11 @@ function drawCarkusLogoAtOrigin(
     ctx.drawImage(logoImage, -drawW / 2 + offsetX, -drawH / 2, drawW, drawH);
     ctx.restore();
   } else {
-    const trialSize = Math.min(logoWidth * 0.35, logoHeight * 0.7, 36);
+    const trialSize = Math.min(logoWidth * 0.42, logoHeight * 0.84, 44);
     ctx.font = `500 ${trialSize}px ${gothicFont}`;
     const textW = ctx.measureText('Carkus').width;
     const fontSize = textW > logoWidth * 0.95 ? (trialSize * (logoWidth * 0.95) / textW) : trialSize;
-    ctx.font = `500 ${Math.max(18, fontSize)}px ${gothicFont}`;
+    ctx.font = `500 ${Math.max(22, fontSize)}px ${gothicFont}`;
     ctx.fillText('Carkus', 0, 0);
   }
 }
@@ -828,7 +828,7 @@ export default function Home() {
             lctx.clearRect(0, 0, Lw, Lh);
             lctx.save();
             lctx.translate(Lw / 2, Lh / 2);
-            drawCarkusLogoAtOrigin(lctx, Lw * 1.0, Lh * 1.0, undefined, carkusLogoImage);
+            drawCarkusLogoAtOrigin(lctx, Lw * 1.2, Lh * 1.2, undefined, carkusLogoImage);
             lctx.restore();
           }
           drawImageWarpedToQuad(ctx, logoCanvas, quadPx, Lw, Lh);
