@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-// 2026年3月廃止対応: Gemini 3 系（v1beta で responseSchema 対応）
-const MODEL_NAME = 'gemini-3-flash-preview';
+// 安定版・高速（3月廃止の影響を受けない）
+const MODEL_NAME = 'gemini-1.5-flash';
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
@@ -252,12 +252,8 @@ export async function POST(request: NextRequest) {
     console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
     const prompt = [
-      'Detect every visible license-plate rectangle in this image.',
-      'The image may be: a direct photo of a car, a photo of a screen or monitor showing a car image, a photo of a printed photo, or a picture containing a car. In all cases, detect the plate rectangle(s) by shape and position (front/rear bumper).',
-      'Car body may be white or light-colored; plate is a visible rectangle (frame). Include all plate types: standard (black on white), kei (yellow/green), design/pattern (地域柄).',
-      'Image may be bright, overexposed, tilted, or slightly blurry; if any plate-like rectangle is visible, output its quad. Prefer one confident detection over none.',
-      'Return JSON only: found (boolean), plates (array of { found, corners: [{x,y}, {x,y}, {x,y}, {x,y}] }). Coordinates 0-1000. If no plate visible use {"found":false,"plates":[]}.',
-      'Output only valid JSON, no explanation or prose.',
+      'Detect the license plate 4 corners in this image. Coordinates 0-1000 for both axes.',
+      'Return only JSON: {"found":true,"plates":[{"found":true,"corners":[{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]} or {"found":false,"plates":[]}. No other text.',
     ].join(' ');
 
     // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
@@ -287,110 +283,75 @@ export async function POST(request: NextRequest) {
       ],
     });
 
-    const RETRY_DELAYS_MS = [2000, 5000]; // 503/混雑時は 2秒後・5秒後に自動リトライ（最大3回まで）
     const startTime = Date.now();
-    let geminiResponse: Response | null = null;
-    let lastErrorBody = '';
-    let lastStatus = 0;
-
-    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-      if (attempt > 0) {
-        const waitMs = RETRY_DELAYS_MS[attempt - 1];
-        console.log(`[detect-plate] Retry ${attempt} after ${waitMs}ms (503/混雑のため)`);
-        await new Promise((r) => setTimeout(r, waitMs));
-      }
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45_000); // 45秒（重い画像・混雑時でも完了しやすく）
-      try {
-        geminiResponse = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body,
-        });
-      } catch (fetchErr: unknown) {
-        clearTimeout(timeoutId);
-        const elapsed = Date.now() - startTime;
-        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-          console.error(`[detect-plate] Gemini API timeout after ${elapsed}ms`);
-          return NextResponse.json(
-            {
-              found: false,
-              error: '解析がタイムアウトしました',
-              userMessage: '解析に時間がかかりすぎました。通信環境を確認するか、しばらく待ってから再度お試しください。',
-              status: 504,
-              remainingToday: getDailyRemaining(clientId),
-            },
-            { status: 504 }
-          );
-        }
-        console.error(`[detect-plate] Gemini API fetch error after ${elapsed}ms:`, fetchErr);
-        throw fetchErr;
-      }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45_000);
+    let geminiResponse: Response;
+    try {
+      geminiResponse = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body,
+      });
+    } catch (fetchErr: unknown) {
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+        console.error(`[detect-plate] Gemini API timeout after ${elapsed}ms`);
+        return NextResponse.json(
+          {
+            found: false,
+            error: '解析がタイムアウトしました',
+            userMessage: '解析に時間がかかりすぎました。位置を手動で調整してください。',
+            status: 504,
+            remainingToday: getDailyRemaining(clientId),
+          },
+          { status: 504 }
+        );
+      }
+      console.error(`[detect-plate] Gemini API fetch error after ${elapsed}ms:`, fetchErr);
+      return NextResponse.json(
+        {
+          found: false,
+          error: '通信エラー',
+          userMessage: '通信エラーです。位置を手動で調整してください。',
+          remainingToday: getDailyRemaining(clientId),
+        },
+        { status: 500 }
+      );
+    }
+    clearTimeout(timeoutId);
 
-      if (geminiResponse.ok) break;
-
-      lastStatus = geminiResponse.status;
+    if (!geminiResponse.ok) {
+      let lastErrorBody = '';
       try {
         lastErrorBody = await geminiResponse.text();
       } catch {
-        lastErrorBody = '';
-      }
-      let errorJson: any = null;
-      try {
-        errorJson = JSON.parse(lastErrorBody);
-      } catch {
         // ignore
       }
+      const errorJson: any = (() => { try { return JSON.parse(lastErrorBody); } catch { return null; } })();
       const errorMessage = errorJson?.error?.message ?? errorJson?.error ?? lastErrorBody;
       const isQuota =
         geminiResponse.status === 429 ||
         /quota|rate limit|exceeded/i.test(String(errorMessage));
-      const isHighDemand =
-        geminiResponse.status === 503 ||
-        /high demand|experiencing.*demand|try again later|overloaded|resource exhausted/i.test(String(errorMessage));
-
-      if (isQuota) {
-        const userMessage = '本日の検出回数の上限に達しました。明日またお試しください。';
-        return NextResponse.json(
-          { found: false, error: userMessage, userMessage, status: 429, remainingToday: getDailyRemaining(clientId) },
-          { status: 429 }
-        );
-      }
-      if (!isHighDemand || attempt >= RETRY_DELAYS_MS.length) {
-        const userMessage = isHighDemand
-          ? '解析サービスが混雑しています。しばらく（1〜2分）待ってから「撮影する」を押し直してください。'
-          : '解析中にエラーが発生しました。しばらく経ってから再度お試しください。';
-        console.error(`[detect-plate] Gemini API error ${geminiResponse.status} after ${Date.now() - startTime}ms (attempt ${attempt + 1})`);
-        return NextResponse.json(
-          {
-            found: false,
-            error: userMessage,
-            userMessage,
-            status: geminiResponse.status,
-            rawResponse: lastErrorBody?.substring?.(0, 1000),
-          },
-          { status: geminiResponse.status === 429 ? 429 : 500 }
-        );
-      }
-      console.warn(`[detect-plate] Gemini ${geminiResponse.status} (attempt ${attempt + 1}), will retry`);
-    }
-
-    const geminiResponseFinal = geminiResponse!;
-    if (!geminiResponseFinal.ok) {
-      const userMessage = '解析サービスが混雑しています。しばらく（1〜2分）待ってから「撮影する」を押し直してください。';
+      const userMessage = isQuota
+        ? '本日の検出回数の上限に達しました。明日またお試しください。'
+        : '解析中にエラーが発生しました。位置を手動で調整してください。';
       return NextResponse.json(
         {
           found: false,
           error: userMessage,
           userMessage,
-          status: lastStatus || 503,
-          rawResponse: lastErrorBody?.substring?.(0, 1000),
+          status: geminiResponse.status === 429 ? 429 : 500,
+          remainingToday: getDailyRemaining(clientId),
+          rawResponse: lastErrorBody?.substring?.(0, 500),
         },
-        { status: 500 }
+        { status: geminiResponse.status === 429 ? 429 : 500 }
       );
     }
+
+    const geminiResponseFinal = geminiResponse;
 
     const parseStart = Date.now();
     let geminiJson: any;

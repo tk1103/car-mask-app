@@ -159,60 +159,45 @@ function drawImageWarpedToQuad(
   ctx.restore();
 }
 
-// 回転済み座標系の中心(0,0)に Carkus ロゴを描画（角丸黒背景＋SVGロゴ or 白文字「Carkus」）
+// 回転済み座標系の中心(0,0)に「透明URL」デザインを描画（carkus.net テキストでナンバーを隠す・背景は透過）
 // 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
-function drawCarkusuLogoAtOrigin(
+function drawCarkusLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
   logoHeight: number,
-  options?: { backgroundAlpha?: number },
+  _options?: { backgroundAlpha?: number },
   logoImage?: HTMLImageElement | null
 ) {
-  const alpha = options?.backgroundAlpha ?? 0.92;
   const halfW = logoWidth / 2;
   const halfH = logoHeight / 2;
-  const cornerRadius = Math.min(logoHeight * 0.1, halfW, halfH);
+  const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
 
-  ctx.beginPath();
-  ctx.moveTo(-halfW + cornerRadius, -halfH);
-  ctx.lineTo(halfW - cornerRadius, -halfH);
-  ctx.quadraticCurveTo(halfW, -halfH, halfW, -halfH + cornerRadius);
-  ctx.lineTo(halfW, halfH - cornerRadius);
-  ctx.quadraticCurveTo(halfW, halfH, halfW - cornerRadius, halfH);
-  ctx.lineTo(-halfW + cornerRadius, halfH);
-  ctx.quadraticCurveTo(-halfW, halfH, -halfW, halfH - cornerRadius);
-  ctx.lineTo(-halfW, -halfH + cornerRadius);
-  ctx.quadraticCurveTo(-halfW, -halfH, -halfW + cornerRadius, -halfH);
-  ctx.closePath();
-  ctx.fillStyle = `rgba(0,0,0,${alpha})`;
-  ctx.fill();
+  // 軽い白オーバーレイでナンバーを薄く隠しつつ透過感を維持
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillRect(-halfW, -halfH, logoWidth, logoHeight);
 
+  // メイン: 「carkus.net」をスタイリッシュに中央配置
+  const urlText = 'carkus.net';
+  const trialSize = Math.min(logoHeight * 0.36, 28);
+  ctx.font = `600 ${trialSize}px ${gothicFont}`;
+  const textW = ctx.measureText(urlText).width;
+  const fontSize = textW > logoWidth * 0.9 ? (trialSize * (logoWidth * 0.9) / textW) : trialSize;
+  ctx.font = `600 ${Math.max(14, fontSize)}px ${gothicFont}`;
+  ctx.fillStyle = '#111111';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(urlText, 0, 0);
+
+  // 上部に小さく「Carkus」ロゴ or テキスト
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-    const boxAspect = logoWidth / logoHeight;
-    let drawW: number, drawH: number;
-    if (svgAspect > boxAspect) {
-      drawW = logoWidth * 0.9;
-      drawH = drawW / svgAspect;
-    } else {
-      drawH = logoHeight * 0.5;
-      drawW = drawH * svgAspect;
-    }
-    ctx.drawImage(logoImage, -drawW / 2, -drawH / 2, drawW, drawH);
+    const drawH = logoHeight * 0.22;
+    const drawW = drawH * svgAspect;
+    ctx.drawImage(logoImage, -drawW / 2, -halfH + drawH * 0.6, drawW, drawH);
   } else {
-    const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
-    ctx.fillStyle = '#ffffff';
-    const testFontSize = logoHeight * 0.5;
-    ctx.font = `bold ${testFontSize}px ${gothicFont}`;
-    const textMetrics = ctx.measureText('Carkus');
-    const maxTextWidth = logoWidth * 0.9;
-    const fontSize = textMetrics.width > maxTextWidth
-      ? (testFontSize * maxTextWidth / textMetrics.width)
-      : testFontSize;
-    ctx.font = `bold ${Math.max(12, fontSize)}px ${gothicFont}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Carkus', 0, 0);
+    ctx.font = `500 ${Math.max(10, logoHeight * 0.14)}px ${gothicFont}`;
+    ctx.fillStyle = '#333333';
+    ctx.fillText('Carkus', 0, -halfH * 0.5);
   }
 }
 
@@ -282,7 +267,7 @@ export default function Home() {
   const [detectionFailed, setDetectionFailed] = useState(false); // 編集画面では常に「編集モード」として扱い、トーストのみ表示
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
-  const [carkusuLogoImage, setCarkusuLogoImage] = useState<HTMLImageElement | null>(null);
+  const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [isAndroid, setIsAndroid] = useState(false);
@@ -308,8 +293,8 @@ export default function Home() {
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => setCarkusuLogoImage(img);
-    img.onerror = () => setCarkusuLogoImage(null);
+    img.onload = () => setCarkusLogoImage(img);
+    img.onerror = () => setCarkusLogoImage(null);
     img.src = '/Carkus.svg';
   }, []);
 
@@ -581,144 +566,92 @@ export default function Home() {
         apiCanvasSmall.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.85);
       });
 
-      // 撮影後すぐプレビュー表示（体感短縮）。ブレ検出は非同期で実行しAPI呼び出しを遅らせない
+      // 投機的実行: 即座に編集画面へ移行し、中央にデフォルトロゴを表示。API はバックグラウンドで実行
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
       setScreenMode('preview_edit');
-      setDetectedCorners([]);
-      setIsProcessing(true);
+      setDetectedCorners([getDefaultCenterCorners()]);
+      setEditLogoOffset({ x: 0, y: 0 });
+      setEditLogoScale(1);
+      setEditLogoRotation(0);
       setCameraError(null);
-      // ブレ検出を非同期化（API呼び出しをブロックしない）
+      setToastMessage(null);
+      setIsProcessing(true);
+
       setTimeout(() => {
         const blurScore = getBlurScore(apiCanvas);
         setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
       }, 0);
 
-      const createFormData = (useSmallImage: boolean) => {
+      const createFormData = () => {
         const fd = new FormData();
-        if (useSmallImage) {
-          fd.append('image', apiBlobSmall, 'photo.jpg');
-          fd.append('width', apiWSmall.toString());
-          fd.append('height', apiHSmall.toString());
-        } else {
-          fd.append('image', apiBlob, 'photo.jpg');
-          fd.append('width', apiW.toString());
-          fd.append('height', apiH.toString());
-        }
+        fd.append('image', apiBlob, 'photo.jpg');
+        fd.append('width', apiW.toString());
+        fd.append('height', apiH.toString());
         return fd;
       };
 
-      const API_TIMEOUT_MS_FIRST = 48_000;  // サーバー45sより長め
-      const API_TIMEOUT_MS_RETRY = 35_000;  // 小さい画像で再試行時
-
-      const performFetch = async (retryCount: number): Promise<Response> => {
-        const useSmall = retryCount > 0;
-        const timeoutMs = useSmall ? API_TIMEOUT_MS_RETRY : API_TIMEOUT_MS_FIRST;
-        const controller = new AbortController();
-        const fetchStart = Date.now();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(useSmall), signal: controller.signal });
-          clearTimeout(timeoutId);
-          const elapsed = Date.now() - fetchStart;
-          console.log(`[client] API fetch completed in ${elapsed}ms, status=${res.status}, small=${useSmall}`);
-          return res;
-        } catch (fetchErr: unknown) {
-          clearTimeout(timeoutId);
-          const elapsed = Date.now() - fetchStart;
-          if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-            console.error(`[client] API fetch timeout after ${elapsed}ms`);
-          } else {
-            console.error(`[client] API fetch error after ${elapsed}ms:`, fetchErr);
-          }
-          if (retryCount === 0 && (fetchErr instanceof Error && fetchErr.name === 'AbortError' || fetchErr instanceof TypeError)) {
-            setCameraError('画像を小さくして再試行しています...');
-            await new Promise((resolve) => setTimeout(resolve, 300));
-            return performFetch(1);
-          }
-          throw fetchErr;
+      const applyResult = (result: any, res: Response) => {
+        const remaining = (result as { remainingToday?: number }).remainingToday;
+        if (remaining !== undefined) setDailyRemaining(remaining);
+        if (!res.ok) {
+          const raw = (result.error || '') as string;
+          const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
+          setToastMessage(
+            isQuota
+              ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。位置を手動で調整してください。`
+              : ((result as { userMessage?: string }).userMessage || '解析できませんでした。位置を手動で調整してください。')
+          );
+          setIsProcessing(false);
+          return;
         }
+        if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
+          const platesCorners: Corners[] = result.plates
+            .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
+            .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
+          if (platesCorners.length > 0) {
+            setDetectedCorners(platesCorners);
+            setEditLogoOffset({ x: 0, y: 0 });
+            setEditLogoScale(1);
+            setEditLogoRotation(0);
+          } else {
+            setToastMessage('プレートの座標を読み取れませんでした。位置を手動で調整してください。');
+          }
+        } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
+          const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
+          setDetectedCorners([single]);
+          setEditLogoOffset({ x: 0, y: 0 });
+          setEditLogoScale(1);
+          setEditLogoRotation(0);
+        } else {
+          setToastMessage('ナンバーを検出できませんでした。位置を手動で調整してください。');
+        }
+        setIsProcessing(false);
       };
 
-      let res: Response;
-      try {
-        res = await performFetch(0);
-      } catch (fetchErr: unknown) {
-        setDetectedCorners([getDefaultCenterCorners()]);
-        setDetectionFailed(false);
-        setEditLogoOffset({ x: 0, y: 0 });
-        setEditLogoScale(1);
-        setEditLogoRotation(0);
-        setToastMessage(
-          fetchErr instanceof Error && fetchErr.name === 'AbortError'
-            ? '解析がタイムアウトしました。位置を手動で調整してください。'
-            : '通信エラーです。位置を手動で調整してください。'
-        );
-        setIsProcessing(false);
-        return;
-      }
-      const result = await res.json();
-
-      if (!res.ok) {
+      (async () => {
         const videoTrack = streamRef.current?.getVideoTracks()[0];
         if (videoTrack && 'applyConstraints' in videoTrack) {
           try {
             await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
           } catch (_) {}
         }
-        const raw = (result.error || '') as string;
-        const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
-        const remaining = (result as { remainingToday?: number }).remainingToday;
-        if (remaining !== undefined) setDailyRemaining(remaining);
-        setDetectedCorners([getDefaultCenterCorners()]);
-        setDetectionFailed(false);
-        setEditLogoOffset({ x: 0, y: 0 });
-        setEditLogoScale(1);
-        setEditLogoRotation(0);
-        setToastMessage(
-          isQuota
-            ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。位置を手動で調整してください。`
-            : ((result as { userMessage?: string }).userMessage || '解析できませんでした。位置を手動で調整してください。')
-        );
-        setIsProcessing(false);
-        return;
-      }
-
-      if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
-        const platesCorners: Corners[] = result.plates
-          .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
-          .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
-        if (platesCorners.length > 0) {
-          setDetectionFailed(false);
-          setDetectedCorners(platesCorners);
-          setEditLogoOffset({ x: 0, y: 0 });
-          setEditLogoScale(1);
-          setEditLogoRotation(0);
-        } else {
-          setDetectedCorners([getDefaultCenterCorners()]);
-          setDetectionFailed(false);
-          setEditLogoOffset({ x: 0, y: 0 });
-          setEditLogoScale(1);
-          setEditLogoRotation(0);
-          setToastMessage('プレートの座標を読み取れませんでした。位置を手動で調整してください。');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 48_000);
+        try {
+          const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
+          clearTimeout(timeoutId);
+          const result = await res.json();
+          applyResult(result, res);
+        } catch (fetchErr: unknown) {
+          clearTimeout(timeoutId);
+          setToastMessage(
+            fetchErr instanceof Error && fetchErr.name === 'AbortError'
+              ? '解析がタイムアウトしました。位置を手動で調整してください。'
+              : '通信エラーです。位置を手動で調整してください。'
+          );
+          setIsProcessing(false);
         }
-      } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
-        setDetectionFailed(false);
-        const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
-        setDetectedCorners([single]);
-        setEditLogoOffset({ x: 0, y: 0 });
-        setEditLogoScale(1);
-        setEditLogoRotation(0);
-      } else {
-        setDetectedCorners([getDefaultCenterCorners()]);
-        setDetectionFailed(false);
-        setEditLogoOffset({ x: 0, y: 0 });
-        setEditLogoScale(1);
-        setEditLogoRotation(0);
-        setToastMessage('ナンバーを検出できませんでした。位置を手動で調整してください。');
-      }
-      const remaining = (result as { remainingToday?: number }).remainingToday;
-      if (remaining !== undefined) setDailyRemaining(remaining);
-      setIsProcessing(false);
+      })();
     } catch (e) {
       const videoTrack = streamRef.current?.getVideoTracks()[0];
       if (videoTrack && 'applyConstraints' in videoTrack) {
@@ -727,7 +660,6 @@ export default function Home() {
         } catch (_) {}
       }
       setDetectedCorners([getDefaultCenterCorners()]);
-      setDetectionFailed(false);
       setEditLogoOffset({ x: 0, y: 0 });
       setEditLogoScale(1);
       setEditLogoRotation(0);
@@ -791,6 +723,7 @@ export default function Home() {
     const canvas = previewCanvasRef.current;
     const w = img.width;
     const h = img.height;
+    // キャンバスを画像実寸に合わせ、API の 0-1000 座標を画像ピクセルに正確にマッピング。object-cover 表示でも保存画像は正しい位置に描画される
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
@@ -855,10 +788,7 @@ export default function Home() {
           };
         }) as QuadPx;
 
-        // 1) 黒マスクを四角で塗りつぶし（パースに合わせた四角形）
-        fillQuad(ctx, quadPx, 'rgba(0,0,0,0.92)');
-
-        // 2) ロゴ／マスク画像を同じ四角に射影変換。ロゴは「この四角のアスペクト」でキャンバスを作りワープすると伸び縮みしない
+        // 透明URLデザイン: 黒塗りは使わず、ロゴ／carkus.net のみを四角に射影
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
@@ -878,14 +808,14 @@ export default function Home() {
             lctx.clearRect(0, 0, Lw, Lh);
             lctx.save();
             lctx.translate(Lw / 2, Lh / 2);
-            drawCarkusuLogoAtOrigin(lctx, Lw * 0.95, Lh * 0.95, { backgroundAlpha: 0.92 }, carkusuLogoImage);
+            drawCarkusLogoAtOrigin(lctx, Lw * 0.95, Lh * 0.95, undefined, carkusLogoImage);
             lctx.restore();
           }
           drawImageWarpedToQuad(ctx, logoCanvas, quadPx, Lw, Lh);
         }
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, carkusuLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
+  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
@@ -899,7 +829,7 @@ export default function Home() {
           }
           const file = new File([blob], `number-mask-${Date.now()}.jpg`, { type: 'image/jpeg' });
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
-            await navigator.share({ files: [file], title: 'Carkusu' });
+            await navigator.share({ files: [file], title: 'Carkus' });
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
           } else {
@@ -940,15 +870,15 @@ export default function Home() {
             try {
               // プラットフォームに応じたテキストを設定
               const shareTexts: Record<string, string> = {
-                facebook: 'Carkusuでナンバープレートをマスクしました',
-                twitter: 'Carkusuでナンバープレートをマスクしました',
-                instagram: 'Carkusuでナンバープレートをマスクしました',
+                facebook: 'Carkusでナンバープレートをマスクしました',
+                twitter: 'Carkusでナンバープレートをマスクしました',
+                instagram: 'Carkusでナンバープレートをマスクしました',
               };
 
               await navigator.share({
                 files: [file],
-                title: 'Carkusu',
-                text: shareTexts[platform] || 'Carkusuでナンバープレートをマスクしました',
+                title: 'Carkus',
+                text: shareTexts[platform] || 'Carkusでナンバープレートをマスクしました',
               });
               
               setShowShareMenu(false);
@@ -982,7 +912,7 @@ export default function Home() {
               // 各SNSの共有URLを構築
               const shareUrls: Record<string, string> = {
                 facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(imageUrl)}`,
-                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Carkusuでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
+                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Carkusでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
                 instagram: `https://www.instagram.com/create/select/`,
               };
 
@@ -1049,7 +979,7 @@ export default function Home() {
             try {
               await navigator.share({
                 files: [file],
-                title: 'Carkusu',
+                title: 'Carkus',
                 text: '画像を端末に保存する場合は「画像を保存」などを選んでください。',
               });
               setShowShareMenu(false);
@@ -1103,7 +1033,7 @@ export default function Home() {
             try {
               await navigator.share({
                 files: [file],
-                title: 'Carkusu',
+                title: 'Carkus',
                 text: '近くのPCやデバイスを選択して共有できます。',
               });
               setShowShareMenu(false);
@@ -1197,37 +1127,37 @@ export default function Home() {
   const fontFamily = '"Helvetica Neue", Helvetica, "Hiragino Sans", "Yu Gothic", sans-serif';
 
   return (
-    <div className="min-h-screen bg-black" style={{ fontFamily }}>
+    <div className="min-h-screen bg-white" style={{ fontFamily }}>
       {screenMode === 'idle' && (
-        <header className="sticky top-0 z-10 bg-white/10 backdrop-blur-md border-b border-white/10">
+        <header className="sticky top-0 z-10 bg-white/95 backdrop-blur-md border-b border-gray-200">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
-            <span className="h-6 flex items-center shrink-0 text-white">
-              <CarkusLogo className="h-full w-auto" />
+            <span className="h-6 flex items-center shrink-0 text-gray-900">
+              <CarkusLogo className="h-full w-auto text-gray-900" />
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
-            <span className="text-white/90 text-xs font-extralight shrink-0">ver0.8</span>
+            <span className="px-2 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-600 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
+            <span className="text-gray-500 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
         </header>
       )}
 
       {showSaveSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-          <div className="bg-white/20 backdrop-blur-xl border border-white/10 rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
-            <CheckCircle className="text-emerald-300" size={40} strokeWidth={2} />
-            <p className="text-white font-light">保存しました</p>
-            <p className="text-white/80 text-xs font-extralight">ご利用ありがとうございます</p>
+          <div className="bg-white/95 backdrop-blur-xl border border-gray-200 rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
+            <CheckCircle className="text-emerald-500" size={40} strokeWidth={2} />
+            <p className="text-gray-900 font-light">保存しました</p>
+            <p className="text-gray-600 text-xs font-extralight">ご利用ありがとうございます</p>
           </div>
         </div>
       )}
 
       {cameraError && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
-          <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl px-6 py-5 max-w-sm shadow-2xl flex flex-col items-center gap-4">
-            <p className="text-white font-light text-sm text-center leading-relaxed">{cameraError}</p>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/20 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl px-6 py-5 max-w-sm shadow-2xl flex flex-col items-center gap-4 border border-gray-200">
+            <p className="text-gray-900 font-light text-sm text-center leading-relaxed">{cameraError}</p>
             <button
               type="button"
               onClick={() => setCameraError(null)}
-              className="px-6 py-2.5 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
+              className="px-6 py-2.5 rounded-full bg-gray-100 text-gray-900 text-sm font-light border border-gray-200 hover:bg-gray-200 transition-colors"
             >
               閉じる
             </button>
@@ -1236,7 +1166,7 @@ export default function Home() {
       )}
 
       {screenMode === 'camera' && (
-        <div className="fixed inset-0 z-0 bg-black flex flex-col landscape:flex-row">
+        <div className="fixed inset-0 z-0 bg-gray-900 flex flex-col landscape:flex-row">
           <div className="flex-1 min-h-0 relative">
             <video
               ref={videoRef}
@@ -1249,111 +1179,111 @@ export default function Home() {
               <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
             )}
             {isProcessing && (
-              <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center z-10 px-4">
-                <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
-                <p className="text-white font-light text-sm mt-4">AIが愛車をスキャン中...</p>
-                <p className="text-white/80 text-xs font-extralight text-center max-w-xs mt-1">少々お待ちください</p>
+              <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center z-10 px-4">
+                <Loader2 className="animate-spin text-gray-700" size={48} strokeWidth={2.5} />
+                <p className="text-gray-800 font-light text-sm mt-4">解析中...</p>
+                <p className="text-gray-600 text-xs font-extralight text-center max-w-xs mt-1">そのまま位置を調整できます</p>
               </div>
             )}
-            <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-black/50 border-b border-white/10 landscape:right-0 landscape:border-b-0 landscape:border-r landscape:border-white/10">
+            <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/95 backdrop-blur-md border-b border-gray-200 landscape:right-0 landscape:border-b-0 landscape:border-r landscape:border-gray-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="h-5 flex items-center shrink-0 text-white">
-                    <CarkusLogo className="h-full w-auto" />
+                  <span className="h-5 flex items-center shrink-0 text-gray-900">
+                    <CarkusLogo className="h-full w-auto text-gray-900" />
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+                  <span className="px-2 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-gray-600 text-[10px] font-medium tracking-widest">BETA</span>
                 </div>
                 <button
                   onClick={stopCamera}
-                  className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
+                  className="py-2 px-4 rounded-full bg-gray-100 text-gray-900 text-sm font-light border border-gray-200 hover:bg-gray-200 transition-colors"
                 >
                   終了
                 </button>
               </div>
-              {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
-              <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+              {cameraError && <p className="mt-2 text-red-600 text-xs font-light">{cameraError}</p>}
+              <p className="mt-1 text-gray-600 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
             </div>
           </div>
-          <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-black/50 border-t border-white/10 landscape:border-t-0 landscape:border-l landscape:border-white/10 landscape:w-44 landscape:py-4">
+          <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-white/95 backdrop-blur-md border-t border-gray-200 landscape:border-t-0 landscape:border-l landscape:border-gray-200 landscape:w-44 landscape:py-4">
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
-              className="min-w-[8rem] px-6 py-3 rounded-full bg-white/20 backdrop-blur-md border border-white/10 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform"
+              className="min-w-[8rem] px-6 py-3 rounded-full bg-gray-900 text-white text-sm font-light border border-gray-700 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform hover:bg-gray-800"
             >
               {isProcessing ? (
                 <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
               ) : (
-                <span className="text-white font-light text-sm tracking-wide">撮影する</span>
+                <span className="font-light text-sm tracking-wide">撮影する</span>
               )}
             </button>
-            <p className="text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+            <p className="text-gray-600 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
           </div>
         </div>
       )}
 
       {screenMode === 'idle' && (
         <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-8 px-6">
-          <p className="text-white/80 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
+          <p className="text-gray-600 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
           <button
             onClick={startCamera}
-            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/20 text-white font-light text-sm tracking-widest backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
+            className="flex items-center gap-3 px-10 py-4 rounded-full bg-gray-900 text-white font-light text-sm tracking-widest border border-gray-700 hover:bg-gray-800 transition-colors"
           >
             <Camera size={22} strokeWidth={1.5} />
             カメラを起動
           </button>
           {cameraError && (
-            <p className="text-red-400 text-xs font-light max-w-xs text-center">{cameraError}</p>
+            <p className="text-red-600 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
           {!isStandalone && (
             <button
               onClick={handleInstallClick}
-              className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-500/20 text-blue-300 font-light text-xs tracking-wide backdrop-blur-md border border-blue-400/30 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+              className="flex items-center gap-2 px-6 py-3 rounded-full bg-gray-100 text-gray-700 font-light text-xs tracking-wide border border-gray-200 hover:bg-gray-200 transition-colors"
             >
               <DownloadIcon size={16} strokeWidth={1.5} />
               {isIOS ? 'ホーム画面に追加（iOS）' : isAndroid ? (deferredPrompt ? 'ホーム画面に追加（Android）' : 'ホーム画面に追加') : deferredPrompt ? 'ホーム画面に追加（Chrome）' : 'アプリをインストール'}
             </button>
           )}
-          <p className="text-white/70 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+          <p className="text-gray-500 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
         </main>
       )}
 
       {showInstallGuide && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto border border-gray-200">
             <div className="flex items-center justify-between">
-              <h2 className="text-white font-light text-lg">ホーム画面に追加</h2>
-              <button onClick={() => setShowInstallGuide(false)} className="text-white/60 hover:text-white">✕</button>
+              <h2 className="text-gray-900 font-light text-lg">ホーム画面に追加</h2>
+              <button onClick={() => setShowInstallGuide(false)} className="text-gray-500 hover:text-gray-900">✕</button>
             </div>
             {isIOS ? (
-              <div className="text-white/90 text-sm space-y-2">
+              <div className="text-gray-700 text-sm space-y-2">
                 <p className="font-medium">【iPhone / iPad】</p>
                 <p>1. アドレスバー右の「共有」ボタン（□↑）をタップ</p>
                 <p>2. 「ホーム画面に追加」を選択 → 「追加」をタップ</p>
               </div>
             ) : isAndroid ? (
-              <div className="text-white/90 text-sm space-y-2">
+              <div className="text-gray-700 text-sm space-y-2">
                 <p className="font-medium">【Android】</p>
                 <p>1. ブラウザメニュー（⋮）→「ホーム画面に追加」または「アプリをインストール」</p>
                 <p>2. 「追加」をタップ</p>
               </div>
             ) : (
-              <p className="text-white/90 text-sm">ブラウザのメニューから「ホーム画面に追加」を選択してください。</p>
+              <p className="text-gray-700 text-sm">ブラウザのメニューから「ホーム画面に追加」を選択してください。</p>
             )}
-            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-white/20 text-white text-sm font-light border border-white/10 hover:bg-white/30">閉じる</button>
+            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-gray-100 text-gray-900 text-sm font-light border border-gray-200 hover:bg-gray-200">閉じる</button>
           </div>
         </div>
       )}
 
       {screenMode === 'preview_edit' && previewImageUrl && (
-        <div className="fixed inset-0 z-0 bg-black flex flex-col landscape:flex-row">
+        <div className="fixed inset-0 z-0 bg-white flex flex-col landscape:flex-row">
           {toastMessage && (
-            <div className="fixed top-4 left-4 right-4 landscape:left-auto landscape:right-4 landscape:max-w-sm z-30 px-4 py-3 rounded-xl bg-black/80 text-white text-sm font-light shadow-lg animate-scale-in">
+            <div className="fixed top-4 left-4 right-4 landscape:left-auto landscape:right-4 landscape:max-w-sm z-30 px-4 py-3 rounded-xl bg-white/95 text-gray-900 text-sm font-light shadow-lg border border-gray-200 animate-scale-in">
               {toastMessage}
             </div>
           )}
           {isBlurWarning && (
-            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/50 border-b border-white/10 landscape:border-b-0 landscape:border-r landscape:border-white/10">
-              <p className="text-amber-200 text-sm font-light text-center">
+            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-amber-50 border-b border-amber-200 landscape:border-b-0 landscape:border-r landscape:border-amber-200">
+              <p className="text-amber-800 text-sm font-light text-center">
                 写真がぼやけている可能性があります。撮り直すことをお勧めします。
               </p>
             </div>
@@ -1372,21 +1302,17 @@ export default function Home() {
                 style={{ touchAction: 'none' }}
               />
               {isProcessing && detectedCorners.length === 0 && (
-                <div className="absolute inset-0 flex flex-col bg-black/50">
+                <div className="absolute inset-0 flex flex-col bg-white/80">
                   <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                    <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
-                    <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
-                    <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
-                  </div>
-                  <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 border border-white/10 mx-4 mb-4">
-                    <span className="text-white/40 text-xs">広告枠（ベータ）</span>
+                    <Loader2 className="animate-spin text-gray-700" size={40} strokeWidth={2} />
+                    <p className="text-gray-800 text-sm font-light">解析中...</p>
                   </div>
                 </div>
               )}
             </div>
-            <div className="shrink-0 bg-black/50 border-t border-white/10 landscape:border-t-0 landscape:border-l landscape:border-white/10 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
+            <div className="shrink-0 bg-white/95 border-t border-gray-200 landscape:border-t-0 landscape:border-l landscape:border-gray-200 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/90 text-xs font-light w-12">角度</span>
+              <span className="text-gray-700 text-xs font-light w-12">角度</span>
               <input
                 type="range"
                 min="-30"
@@ -1394,12 +1320,12 @@ export default function Home() {
                 step="1"
                 value={editLogoRotation}
                 onChange={(e) => setEditLogoRotation(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                className="flex-1 h-1.5 bg-gray-200 rounded-full appearance-none accent-gray-700 max-w-[200px]"
               />
-              <span className="text-white/70 text-xs tabular-nums w-8">{editLogoRotation}°</span>
+              <span className="text-gray-600 text-xs tabular-nums w-8">{editLogoRotation}°</span>
             </div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/90 text-xs font-light w-12">サイズ</span>
+              <span className="text-gray-700 text-xs font-light w-12">サイズ</span>
               <input
                 type="range"
                 min="0.3"
@@ -1407,13 +1333,13 @@ export default function Home() {
                 step="0.05"
                 value={editLogoScale}
                 onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                className="flex-1 h-1.5 bg-gray-200 rounded-full appearance-none accent-gray-700 max-w-[200px]"
               />
             </div>
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
                 onClick={retake}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-md border border-white/10 bg-white/20 text-white hover:bg-white/30 active:bg-white/40 transition-colors"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light bg-gray-100 border border-gray-200 text-gray-900 hover:bg-gray-200 transition-colors"
               >
                 <RotateCcw size={18} strokeWidth={2} />
                 撮り直す
@@ -1421,7 +1347,7 @@ export default function Home() {
               <button
                 onClick={handleSaveToDevice}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white hover:bg-white/30 active:bg-white/40 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 border border-gray-200 text-gray-900 hover:bg-gray-200 transition-colors disabled:opacity-50"
                 title="端末に保存"
               >
                 <Download size={18} strokeWidth={2} />
@@ -1429,7 +1355,7 @@ export default function Home() {
               <button
                 onClick={() => handleShareToSNS('facebook')}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50"
                 title="Facebook"
               >
                 <Facebook size={18} strokeWidth={2} />
@@ -1437,7 +1363,7 @@ export default function Home() {
               <button
                 onClick={() => handleShareToSNS('twitter')}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50"
                 title="X"
               >
                 <Twitter size={18} strokeWidth={2} />
@@ -1445,7 +1371,7 @@ export default function Home() {
               <button
                 onClick={() => handleShareToSNS('instagram')}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50"
                 title="Instagram"
               >
                 <Instagram size={18} strokeWidth={2} />
@@ -1453,20 +1379,20 @@ export default function Home() {
               <button
                 onClick={() => setShowShareMenu(!showShareMenu)}
                 disabled={isProcessing}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-sm font-light hover:bg-white/30 active:bg-white/40 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gray-100 border border-gray-200 text-gray-900 text-sm font-light hover:bg-gray-200 transition-colors disabled:opacity-50"
               >
                 {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
                 その他
               </button>
             </div>
             {showShareMenu && (
-              <div className="flex flex-wrap justify-center gap-2 mt-3 pt-3 border-t border-white/10">
-                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-xs font-light hover:bg-white/30 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
-                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/20 backdrop-blur-md border border-white/10 text-white text-xs font-light hover:bg-white/30 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
+              <div className="flex flex-wrap justify-center gap-2 mt-3 pt-3 border-t border-gray-200">
+                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-gray-100 border border-gray-200 text-gray-700 text-xs font-light hover:bg-gray-200 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
+                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-gray-100 border border-gray-200 text-gray-700 text-xs font-light hover:bg-gray-200 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
               </div>
             )}
-            <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
-              <span className="text-white/40 text-xs">広告枠（ベータ）</span>
+            <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-gray-100 border border-gray-200">
+              <span className="text-gray-400 text-xs">広告枠（ベータ）</span>
             </div>
             </div>
           </div>
