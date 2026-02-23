@@ -717,6 +717,15 @@ export default function Home() {
   }, [previewImageUrl]);
 
   useEffect(() => {
+    if (!isProcessing || screenMode !== 'preview_edit') return;
+    const t = setTimeout(() => {
+      setIsProcessing(false);
+      setToastMessage('解析がタイムアウトしました。位置を手動で調整してください。');
+    }, 50_000);
+    return () => clearTimeout(t);
+  }, [isProcessing, screenMode]);
+
+  useEffect(() => {
     if (!previewImageUrl) {
       previewImageRef.current = null;
       setPreviewImageLoaded(false);
@@ -1321,16 +1330,14 @@ export default function Home() {
                 className="absolute inset-0 w-full h-full object-cover"
                 style={{ touchAction: 'none' }}
               />
-              {isProcessing && detectedCorners.length === 0 && (
-                <div className="absolute inset-0 flex flex-col bg-black/25 backdrop-blur-sm">
-                  <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                    <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
-                    <p className="text-white text-sm font-light">解析中...</p>
-                  </div>
-                </div>
-              )}
             </div>
             <div className="shrink-0 bg-white/40 backdrop-blur-2xl border-t border-white/30 landscape:border-t-0 landscape:border-l landscape:border-white/30 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
+            {isProcessing && (
+              <div className="mb-3 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-amber-500/20 border border-amber-400/30">
+                <Loader2 className="animate-spin text-amber-700" size={16} strokeWidth={2} />
+                <span className="text-amber-800 text-xs font-light">解析中… 位置は調整できます</span>
+              </div>
+            )}
             <div className="flex items-center gap-3 mb-2">
               <span className="text-gray-800 text-xs font-light w-12">角度</span>
               <input
@@ -1402,7 +1409,7 @@ export default function Home() {
                 className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-900 text-sm font-light hover:bg-white/70 transition-colors disabled:opacity-50"
               >
                 {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
-                その他
+                {isProcessing ? '解析中' : 'その他'}
               </button>
             </div>
             {showShareMenu && (
