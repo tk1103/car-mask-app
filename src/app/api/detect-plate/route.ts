@@ -3,8 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-// 3.0 を優先、404/400 時は 2.5 にフォールバック（2.0 は 2026年6月サービス終了予定）
-const MODEL_NAMES = ['gemini-3-flash-preview', 'gemini-2.5-flash'] as const;
+const MODEL_NAMES = ['gemini-3-flash-preview', 'gemini-2.0-flash'] as const;
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
@@ -191,6 +190,38 @@ function isValidCorner(c: unknown): c is { x: number; y: number } {
   );
 }
 
+/** parts と text から座標データを抽出。成功時は正規化済みオブジェクト、失敗時は null */
+function tryParsePlateResponse(parts: unknown[], text: string): Record<string, unknown> | null {
+  for (const p of parts) {
+    if (p != null && typeof p === 'object') {
+      const po = p as Record<string, unknown>;
+      const struct = po.struct as Record<string, unknown> | undefined;
+      const obj: Record<string, unknown> | null = ('found' in po && 'plates' in po) ? po : (struct && typeof struct === 'object' && 'found' in struct ? struct : null);
+      if (obj) {
+        try {
+          return normalizeParsedResponse(obj as Record<string, unknown>);
+        } catch (_) {}
+      }
+    }
+  }
+  const jsonCandidates = [
+    extractAndNormalizeJson(text),
+    text.trim(),
+    ...extractAllJsonCandidates(text),
+  ];
+  const seen = new Set<string>();
+  const uniqueCandidates = jsonCandidates.filter((s) => s && s.length > 10 && !seen.has(s) && (seen.add(s), true));
+  for (const jsonText of uniqueCandidates) {
+    try {
+      const value = JSON.parse(jsonText);
+      if (value && typeof value === 'object' && ('found' in value || 'plates' in value)) {
+        return normalizeParsedResponse(value as Record<string, unknown>);
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 /** パース結果をスキーマに合わせて正規化（plates が無くても corners があれば復元） */
 function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {
@@ -289,8 +320,10 @@ export async function POST(request: NextRequest) {
     console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
     const prompt = [
-      'Detect the license plate rectangle in this image. Return JSON only, no other text.',
-      'Coordinates 0-1000 for x and y. Format: {"found":true,"plates":[{"found":true,"corners":[{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]} or {"found":false,"plates":[]}.',
+      'You are a precise license plate detector. Detect the 4 corners of the license plate.',
+      'Coordinates: [0,0] is top-left, [1000,1000] is bottom-right.',
+      'Return ONLY JSON in this format: {"found": true, "plates": [{"found": true, "corners": [{"x": 123, "y": 456}, ...]}]}.',
+      'Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.',
     ].join(' ');
 
     const urlTemplate = (model: string) =>
@@ -312,6 +345,7 @@ export async function POST(request: NextRequest) {
         responseMimeType: 'application/json',
       },
       safetySettings: [
+        // BLOCK_NONE でナンバープレート画像が個人情報としてブロックされないようにする
         { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
         { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
         { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
@@ -320,10 +354,10 @@ export async function POST(request: NextRequest) {
     });
 
     const startTime = Date.now();
-    let geminiResponse: Response | null = null;
     let lastErrorBody = '';
     let lastStatus = 0;
     let lastErrorMessage = '';
+    let lastRawText = '';
 
     for (const modelName of MODEL_NAMES) {
       const controller = new AbortController();
@@ -337,19 +371,63 @@ export async function POST(request: NextRequest) {
         });
         clearTimeout(timeoutId);
         lastStatus = res.status;
-        if (res.ok) {
-          geminiResponse = res;
-          break;
+
+        if (!res.ok) {
+          lastErrorBody = await res.text().catch(() => '');
+          const errJson: any = (() => { try { return JSON.parse(lastErrorBody); } catch { return null; } })();
+          lastErrorMessage = errJson?.error?.message ?? errJson?.error ?? lastErrorBody;
+          if (res.status === 404 || res.status === 400) {
+            console.warn(`[detect-plate] Model ${modelName} returned ${res.status}, trying next.`, lastErrorMessage?.substring(0, 200));
+            continue;
+          }
+          const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(String(lastErrorMessage));
+          const userMessage = isQuota
+            ? '本日の検出回数の上限に達しました。明日またお試しください。'
+            : res.status === 403 || res.status === 404
+              ? 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。'
+              : '解析中にエラーが発生しました。位置を手動で調整してください。';
+          return NextResponse.json(
+            { found: false, error: userMessage, userMessage, remainingToday: getDailyRemaining(clientId) },
+            { status: res.status === 429 ? 429 : 500 }
+          );
         }
-        lastErrorBody = await res.text().catch(() => '');
-        const errJson: any = (() => { try { return JSON.parse(lastErrorBody); } catch { return null; } })();
-        lastErrorMessage = errJson?.error?.message ?? errJson?.error ?? lastErrorBody;
-        // 404/400 はモデル名違いの可能性があるので次のモデルを試す
-        if (res.status === 404 || res.status === 400) {
-          console.warn(`[detect-plate] Model ${modelName} returned ${res.status}, trying next.`, lastErrorMessage?.substring(0, 200));
+
+        let geminiJson: any;
+        try {
+          geminiJson = await res.json();
+        } catch {
+          console.warn(`[detect-plate] Model ${modelName}: response body parse failed, trying next`);
           continue;
         }
-        break;
+
+        const candidate = geminiJson.candidates?.[0];
+        if (!candidate?.content) {
+          console.warn(`[detect-plate] Model ${modelName}: no candidate content, trying next`);
+          continue;
+        }
+
+        const content = candidate.content;
+        const parts = content?.parts ?? [];
+        const text = parts
+          .map((p: any) => {
+            if (p != null && typeof p === 'object') {
+              if (typeof p.text === 'string') return p.text;
+              if ('found' in p && 'plates' in p) return JSON.stringify(p);
+              if (p.struct && typeof p.struct === 'object' && 'found' in p.struct) return JSON.stringify(p.struct);
+            }
+            return '';
+          })
+          .join('') ?? '';
+
+        const parsed = tryParsePlateResponse(parts, text);
+        if (parsed) {
+          (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
+          console.log(`[detect-plate] Success (${modelName}): found=${parsed.found}, plates=${(parsed.plates as unknown[])?.length || 0}, elapsed=${Date.now() - startTime}ms`);
+          return NextResponse.json(parsed);
+        }
+
+        lastRawText = text;
+        console.warn(`[detect-plate] Model ${modelName}: coordinate parse failed, trying next. Raw (500 chars):`, text.substring(0, 500));
       } catch (fetchErr: unknown) {
         clearTimeout(timeoutId);
         if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
@@ -378,163 +456,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!geminiResponse || !geminiResponse.ok) {
-      const isQuota =
-        lastStatus === 429 ||
-        /quota|rate limit|exceeded/i.test(String(lastErrorMessage));
-      const userMessage = isQuota
-        ? '本日の検出回数の上限に達しました。明日またお試しください。'
-        : lastStatus === 403 || lastStatus === 404
-          ? 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。'
-          : '解析中にエラーが発生しました。位置を手動で調整してください。';
-      console.error(`[detect-plate] Gemini API error ${lastStatus}:`, lastErrorMessage?.substring(0, 300));
-      return NextResponse.json(
-        {
-          found: false,
-          error: userMessage,
-          userMessage,
-          status: lastStatus === 429 ? 429 : 500,
-          remainingToday: getDailyRemaining(clientId),
-          rawResponse: lastErrorBody?.substring?.(0, 500),
-        },
-        { status: lastStatus === 429 ? 429 : 500 }
-      );
-    }
-
-    const geminiResponseFinal = geminiResponse;
-
-    const parseStart = Date.now();
-    let geminiJson: any;
-    try {
-      geminiJson = await geminiResponseFinal.json();
-    } catch {
-      const elapsed = Date.now() - startTime;
-      console.error(`[detect-plate] Failed to parse JSON after ${elapsed}ms`);
-      let rawText = '';
-      try {
-        rawText = await geminiResponseFinal.text();
-      } catch {
-        // body already consumed
-      }
+    if (!lastRawText && (lastStatus === 404 || lastStatus === 400)) {
       return NextResponse.json({
         found: false,
-        error: 'Gemini APIの応答を解析できませんでした',
-        userMessage: '解析の応答を読み取れませんでした。しばらく経ってから再度お試しください。',
-        rawResponse: rawText.substring(0, 500),
+        error: 'APIキーまたはモデル設定を確認してください',
+        userMessage: 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。',
+        remainingToday: getDailyRemaining(clientId),
       }, { status: 500 });
     }
-
-    const candidate = geminiJson.candidates?.[0];
-    if (!candidate?.content) {
-      const elapsed = Date.now() - startTime;
-      const blockReason = geminiJson.promptFeedback?.blockReason ?? candidate?.finishReason ?? 'no candidate content';
-      console.error(`[detect-plate] No candidate content after ${elapsed}ms`, {
-        blockReason,
-        finishReason: candidate?.finishReason,
-        rawSnippet: JSON.stringify(geminiJson).substring(0, 600),
-      });
-      return NextResponse.json({
-        found: false,
-        error: '解析結果がありません',
-        userMessage: blockReason === 'SAFETY' || blockReason === 'RECITATION'
-          ? '画像の内容により解析をスキップしました。別の写真でお試しください。'
-          : '解析結果が空でした。もう一度撮影してお試しください。',
-        rawResponse: JSON.stringify(geminiJson).substring(0, 500),
-      }, { status: 500 });
-    }
-    const content = candidate.content;
-    const parts = content?.parts ?? [];
-    // テキスト: parts[].text の結合。構造化出力で part がオブジェクトの場合は JSON 文字列に
-    let text =
-      parts
-        .map((p: any) => {
-          if (p != null && typeof p === 'object') {
-            if (typeof p.text === 'string') return p.text;
-            // responseSchema でオブジェクトがそのまま返る場合（found/plates がトップレベル）
-            if ('found' in p && 'plates' in p) return JSON.stringify(p);
-            // ネストした構造（struct 等）のフォールバック
-            if (p.struct && typeof p.struct === 'object' && 'found' in p.struct) return JSON.stringify(p.struct);
-          }
-          return '';
-        })
-        .join('') ?? '';
-
-    // parts から直接オブジェクトを取得（パース不要）
-    for (const p of parts) {
-      if (p != null && typeof p === 'object') {
-        const obj = ('found' in p && 'plates' in p) ? p : (p.struct && typeof p.struct === 'object' && 'found' in p.struct ? p.struct : null);
-        if (obj && typeof obj === 'object') {
-          try {
-            const normalized = normalizeParsedResponse(obj as Record<string, unknown>);
-            if (normalized && (normalized.plates as unknown[]).length >= 0) {
-              (normalized as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
-              console.log(`[detect-plate] Success (direct object): found=${normalized.found}, plates=${(normalized.plates as unknown[])?.length || 0}`);
-              return NextResponse.json(normalized);
-            }
-          } catch (_) {}
-        }
-      }
-    }
-
-    if (!text?.trim()) {
-      const elapsed = Date.now() - startTime;
-      const finishReason = candidate?.finishReason ?? geminiJson.promptFeedback?.blockReason ?? 'unknown';
-      console.error(`[detect-plate] Empty response after ${elapsed}ms`, {
-        finishReason,
-        partsCount: parts.length,
-        hasContent: !!content,
-        rawSnippet: JSON.stringify(geminiJson).substring(0, 800),
-      });
-      const isSafety = finishReason === 'SAFETY' || finishReason === 'RECITATION' || geminiJson.promptFeedback?.blockReason;
-      return NextResponse.json({
-        found: false,
-        error: 'Gemini APIから空の応答が返されました',
-        userMessage: isSafety
-          ? '画像の内容により解析をスキップしました。別の写真でお試しください。'
-          : '解析結果が空でした。もう一度撮影してお試しください。',
-        rawResponse: JSON.stringify(geminiJson).substring(0, 500),
-      }, { status: 500 });
-    }
-
-    const jsonCandidates = [
-      extractAndNormalizeJson(text),
-      text.trim(),
-      ...extractAllJsonCandidates(text),
-    ];
-    const seen = new Set<string>();
-    const uniqueCandidates = jsonCandidates.filter((s) => s && s.length > 10 && !seen.has(s) && (seen.add(s), true));
-    let parseErr: unknown = null;
-    let parsed: Record<string, unknown> | null = null;
-
-    for (const jsonText of uniqueCandidates) {
-      try {
-        const value = JSON.parse(jsonText);
-        if (value && typeof value === 'object' && ('found' in value || 'plates' in value)) {
-          parsed = normalizeParsedResponse(value as Record<string, unknown>);
-          break;
-        }
-      } catch (e) {
-        parseErr = e;
-      }
-    }
-
-    if (parsed) {
-      (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
-      const totalElapsed = Date.now() - startTime;
-      console.log(`[detect-plate] Success: found=${parsed.found}, plates=${(parsed.plates as unknown[])?.length || 0}, elapsed=${totalElapsed}ms`);
-      return NextResponse.json(parsed);
-    }
-
-    const elapsed = Date.now() - startTime;
-    const errorMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-    console.error(`[detect-plate] JSON parse error after ${elapsed}ms: ${errorMsg}`);
-    console.error(`[detect-plate] Raw text (first 1000 chars):`, text.substring(0, 1000));
+    console.error(`[detect-plate] All models failed. Last raw text:`, (lastRawText || '').substring(0, 1000));
     return NextResponse.json({
       found: false,
       error: '座標の解析に失敗しました',
       userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
       remainingToday: getDailyRemaining(clientId),
-      rawResponse: text.substring(0, 500),
+      rawResponse: (lastRawText || '').substring(0, 500),
     }, { status: 500 });
   } catch (error) {
     console.error('[detect-plate] Unexpected error:', error);

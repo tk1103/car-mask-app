@@ -69,13 +69,13 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-/** 編集用デフォルト四角（正規化座標 0-1）。解析失敗時やAPIエラー時に使用。車のナンバープレートは通常画像下部にあるため、下部中央に配置 */
+/** 編集用デフォルト四角（正規化座標 0-1）。解析失敗時やAPIエラー時に使用。一般的なナンバープレート位置（画像下部中央） */
 function getDefaultCenterCorners(): Corners {
   return [
-    { x: 0.25, y: 0.72 },
-    { x: 0.75, y: 0.72 },
-    { x: 0.75, y: 0.92 },
-    { x: 0.25, y: 0.92 },
+    { x: 0.28, y: 0.70 },
+    { x: 0.72, y: 0.70 },
+    { x: 0.72, y: 0.90 },
+    { x: 0.28, y: 0.90 },
   ];
 }
 
@@ -611,8 +611,8 @@ export default function Home() {
           const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
           setToastMessage(
             isQuota
-              ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。位置を手動で調整してください。`
-              : ((result as { userMessage?: string }).userMessage || '解析できませんでした。位置を手動で調整してください。')
+              ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。手動で位置を合わせてください。`
+              : ((result as { userMessage?: string }).userMessage || '自動検出に失敗しました。手動で位置を合わせてください。')
           );
           setIsProcessing(false);
           return;
@@ -627,7 +627,7 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
           } else {
-            setToastMessage('プレートの座標を読み取れませんでした。位置を手動で調整してください。');
+            setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
           }
         } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
           const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
@@ -636,7 +636,7 @@ export default function Home() {
           setEditLogoScale(1);
           setEditLogoRotation(0);
         } else {
-          setToastMessage('ナンバーを検出できませんでした。位置を手動で調整してください。');
+          setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
         }
         setIsProcessing(false);
       };
@@ -665,8 +665,8 @@ export default function Home() {
           clearTimeout(timeoutId);
           setToastMessage(
             fetchErr instanceof Error && fetchErr.name === 'AbortError'
-              ? '解析がタイムアウトしました。位置を手動で調整してください。'
-              : '通信エラーです。位置を手動で調整してください。'
+              ? '自動検出に失敗しました。手動で位置を合わせてください。'
+              : '自動検出に失敗しました。手動で位置を合わせてください。'
           );
           setIsProcessing(false);
         }
@@ -682,7 +682,7 @@ export default function Home() {
       setEditLogoOffset({ x: 0, y: 0 });
       setEditLogoScale(1);
       setEditLogoRotation(0);
-      setToastMessage('解析に失敗しました。位置を手動で調整してください。');
+      setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
       setIsProcessing(false);
     }
   }, []);
@@ -751,7 +751,8 @@ export default function Home() {
     const canvas = previewCanvasRef.current;
     const w = img.width;
     const h = img.height;
-    // キャンバスを画像実寸に合わせ、API の 0-1000 座標を画像ピクセルに正確にマッピング。object-cover 表示でも保存画像は正しい位置に描画される
+    // キャンバスを画像実寸に合わせ、API の 0-1000 正規化座標を画像ピクセルに正確にマッピング
+    // object-contain で表示するため、表示範囲と画像データが一致し座標ズレが発生しない
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
@@ -768,6 +769,7 @@ export default function Home() {
       const cosR = Math.cos((editLogoRotation * Math.PI) / 180);
       const sinR = Math.sin((editLogoRotation * Math.PI) / 180);
 
+      // 複数プレート対応: 各検出座標に対して fillQuad とロゴ描画を一括適用
       detectedCorners.forEach((corners) => {
         // 正規化座標 0-1 をそのまま画像ピクセルにマッピング（portrait/landscape 共通で w,h が画像実寸）
         const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
@@ -1319,7 +1321,7 @@ export default function Home() {
           )}
           <div className="flex-1 min-h-0 flex flex-col landscape:flex-row">
             <div
-              className="flex-1 min-h-0 relative touch-none"
+              className="flex-1 min-h-0 relative touch-none bg-black"
               onTouchStart={onPreviewTouchStart}
               onTouchMove={onPreviewTouchMove}
               onTouchEnd={onPreviewTouchEnd}
@@ -1327,7 +1329,7 @@ export default function Home() {
             >
               <canvas
                 ref={previewCanvasRef}
-                className="absolute inset-0 w-full h-full object-cover"
+                className="absolute inset-0 w-full h-full object-contain"
                 style={{ touchAction: 'none' }}
               />
             </div>
