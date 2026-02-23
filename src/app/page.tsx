@@ -171,8 +171,7 @@ function drawImageWarpedToQuad(
   ctx.restore();
 }
 
-// 回転済み座標系の中心(0,0)に「透明URL」デザインを描画（carkus.net テキストでナンバーを隠す・背景は透過）
-// 注意: この関数は既に回転された座標系で呼ばれるため、内部で save/restore を使わない
+// iPhone URL風: 黒マスクの上に白で Carkus + carkus.net を描画。背景は透過（fillQuad で黒塗り済み）
 function drawCarkusLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
   logoWidth: number,
@@ -182,35 +181,39 @@ function drawCarkusLogoAtOrigin(
 ) {
   const halfW = logoWidth / 2;
   const halfH = logoHeight / 2;
-  const gothicFont = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif';
+  const gothicFont = '-apple-system, "Helvetica Neue", "Hiragino Sans", "Yu Gothic", sans-serif';
 
-  // 軽い白オーバーレイでナンバーを薄く隠しつつ透過感を維持
-  ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  ctx.fillRect(-halfW, -halfH, logoWidth, logoHeight);
+  // 白テキストのみ（背景は fillQuad の黒）
+  ctx.fillStyle = '#ffffff';
 
-  // メイン: 「carkus.net」をスタイリッシュに中央配置
-  const urlText = 'carkus.net';
-  const trialSize = Math.min(logoHeight * 0.36, 28);
-  ctx.font = `600 ${trialSize}px ${gothicFont}`;
-  const textW = ctx.measureText(urlText).width;
-  const fontSize = textW > logoWidth * 0.9 ? (trialSize * (logoWidth * 0.9) / textW) : trialSize;
-  ctx.font = `600 ${Math.max(14, fontSize)}px ${gothicFont}`;
-  ctx.fillStyle = '#111111';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(urlText, 0, 0);
-
-  // 上部に小さく「Carkus」ロゴ or テキスト
+  // 上部: Carkus ロゴ or テキスト
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-    const drawH = logoHeight * 0.22;
+    const drawH = logoHeight * 0.28;
     const drawW = drawH * svgAspect;
-    ctx.drawImage(logoImage, -drawW / 2, -halfH + drawH * 0.6, drawW, drawH);
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.filter = 'brightness(0) invert(1)'; // SVG を白に
+    ctx.drawImage(logoImage, -drawW / 2, -halfH * 0.7, drawW, drawH);
+    ctx.restore();
   } else {
-    ctx.font = `500 ${Math.max(10, logoHeight * 0.14)}px ${gothicFont}`;
-    ctx.fillStyle = '#333333';
-    ctx.fillText('Carkus', 0, -halfH * 0.5);
+    ctx.font = `500 ${Math.max(12, logoHeight * 0.2)}px ${gothicFont}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Carkus', 0, -halfH * 0.35);
   }
+
+  // 中央: carkus.net（iPhone URL 風）
+  const urlText = 'carkus.net';
+  const trialSize = Math.min(logoHeight * 0.32, 24);
+  ctx.font = `400 ${trialSize}px ${gothicFont}`;
+  const textW = ctx.measureText(urlText).width;
+  const fontSize = textW > logoWidth * 0.9 ? (trialSize * (logoWidth * 0.9) / textW) : trialSize;
+  ctx.font = `400 ${Math.max(12, fontSize)}px ${gothicFont}`;
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(urlText, 0, halfH * 0.15);
 }
 
 // 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
@@ -812,7 +815,8 @@ export default function Home() {
           };
         }) as QuadPx;
 
-        // 透明URLデザイン: 黒塗りは使わず、ロゴ／carkus.net のみを四角に射影
+        // 黒マスク + その上に白で Carkus / carkus.net（iPhone URL 風）
+        fillQuad(ctx, quadPx, '#000000');
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         if (maskImage && maskImage.complete && maskImage.naturalWidth) {
