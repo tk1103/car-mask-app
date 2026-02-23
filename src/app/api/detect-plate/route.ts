@@ -3,8 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-// 安定版・高速。1.5-flash が 404 の場合は 2.0-flash を利用
-const MODEL_NAMES = ['gemini-1.5-flash', 'gemini-2.0-flash'] as const;
+const MODEL_NAMES = ['gemini-3-flash-preview'] as const;
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
