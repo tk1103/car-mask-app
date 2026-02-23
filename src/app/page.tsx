@@ -45,12 +45,22 @@ declare global {
 }
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
-// API座標をクライアント座標に変換（0-1000 → 0-1）。Gemini 3 座標系に完全一致（Y軸反転なし）
+// API座標をクライアント座標に変換（0-1000 → 0-1）。画像の幅・高さに依存しない正規化座標（portrait/landscape 共通）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
   return plate.corners.map((c) => ({
-    x: c.x / 1000,
-    y: c.y / 1000,
+    x: Math.max(0, Math.min(1, c.x / 1000)),
+    y: Math.max(0, Math.min(1, c.y / 1000)),
   })) as Corners;
+}
+
+/** 編集用デフォルト四角（画像中央・正規化座標 0-1）。解析失敗時やAPIエラー時に使用 */
+function getDefaultCenterCorners(): Corners {
+  return [
+    { x: 0.35, y: 0.45 },
+    { x: 0.65, y: 0.45 },
+    { x: 0.65, y: 0.55 },
+    { x: 0.35, y: 0.55 },
+  ];
 }
 
 function normalizeCornersOrder(corners: Corners): Corners {
@@ -269,7 +279,8 @@ export default function Home() {
   const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
   const [isBlurWarning, setIsBlurWarning] = useState(false);
-  const [detectionFailed, setDetectionFailed] = useState(false);
+  const [detectionFailed, setDetectionFailed] = useState(false); // 編集画面では常に「編集モード」として扱い、トーストのみ表示
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
   const [carkusuLogoImage, setCarkusuLogoImage] = useState<HTMLImageElement | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -333,6 +344,12 @@ export default function Home() {
   useEffect(() => {
     if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
   }, [screenMode, fetchRemainingQuota]);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const t = setTimeout(() => setToastMessage(null), 4000);
+    return () => clearTimeout(t);
+  }, [toastMessage]);
 
   const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
@@ -626,16 +643,16 @@ export default function Home() {
       try {
         res = await performFetch(0);
       } catch (fetchErr: unknown) {
-        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-          setCameraError('解析がタイムアウトしました。通信環境を確認してもう一度お試しください。');
-        } else {
-          setCameraError('解析に失敗しました。通信を確認してもう一度お試しください。');
-        }
-        setDetectedCorners([[
-          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-        ]]);
-        setDetectionFailed(true);
+        setDetectedCorners([getDefaultCenterCorners()]);
+        setDetectionFailed(false);
+        setEditLogoOffset({ x: 0, y: 0 });
+        setEditLogoScale(1);
+        setEditLogoRotation(0);
+        setToastMessage(
+          fetchErr instanceof Error && fetchErr.name === 'AbortError'
+            ? '解析がタイムアウトしました。位置を手動で調整してください。'
+            : '通信エラーです。位置を手動で調整してください。'
+        );
         setIsProcessing(false);
         return;
       }
@@ -650,16 +667,18 @@ export default function Home() {
         }
         const raw = (result.error || '') as string;
         const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
-        const message = (result as { userMessage?: string }).userMessage
-          ?? (isQuota ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。` : (result.error || `解析に失敗しました（${res.status}）`));
-        setCameraError(message);
         const remaining = (result as { remainingToday?: number }).remainingToday;
         if (remaining !== undefined) setDailyRemaining(remaining);
-        setDetectedCorners([[
-          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-        ]]);
-        setDetectionFailed(true);
+        setDetectedCorners([getDefaultCenterCorners()]);
+        setDetectionFailed(false);
+        setEditLogoOffset({ x: 0, y: 0 });
+        setEditLogoScale(1);
+        setEditLogoRotation(0);
+        setToastMessage(
+          isQuota
+            ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。位置を手動で調整してください。`
+            : ((result as { userMessage?: string }).userMessage || '解析できませんでした。位置を手動で調整してください。')
+        );
         setIsProcessing(false);
         return;
       }
@@ -675,12 +694,12 @@ export default function Home() {
           setEditLogoScale(1);
           setEditLogoRotation(0);
         } else {
-          setDetectionFailed(true);
-          setDetectedCorners([[
-            { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-            { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-          ]]);
-          setCameraError('プレートの座標が不正でした。手動で調整してください。');
+          setDetectedCorners([getDefaultCenterCorners()]);
+          setDetectionFailed(false);
+          setEditLogoOffset({ x: 0, y: 0 });
+          setEditLogoScale(1);
+          setEditLogoRotation(0);
+          setToastMessage('プレートの座標を読み取れませんでした。位置を手動で調整してください。');
         }
       } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
         setDetectionFailed(false);
@@ -690,15 +709,12 @@ export default function Home() {
         setEditLogoScale(1);
         setEditLogoRotation(0);
       } else {
-        setDetectionFailed(true);
-        setDetectedCorners([[
-          { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-          { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-        ]]);
+        setDetectedCorners([getDefaultCenterCorners()]);
+        setDetectionFailed(false);
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setEditLogoRotation(0);
-        setCameraError('AIが自動検出できなかったため、手動で調整してください。');
+        setToastMessage('ナンバーを検出できませんでした。位置を手動で調整してください。');
       }
       const remaining = (result as { remainingToday?: number }).remainingToday;
       if (remaining !== undefined) setDailyRemaining(remaining);
@@ -710,12 +726,12 @@ export default function Home() {
           await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
         } catch (_) {}
       }
-      setCameraError('解析に失敗しました。しばらく経ってから再度お試しください。');
-      setDetectedCorners([[
-        { x: 0.35, y: 0.45 }, { x: 0.65, y: 0.45 },
-        { x: 0.65, y: 0.55 }, { x: 0.35, y: 0.55 }
-      ]]);
-      setDetectionFailed(true);
+      setDetectedCorners([getDefaultCenterCorners()]);
+      setDetectionFailed(false);
+      setEditLogoOffset({ x: 0, y: 0 });
+      setEditLogoScale(1);
+      setEditLogoRotation(0);
+      setToastMessage('解析に失敗しました。位置を手動で調整してください。');
       setIsProcessing(false);
     }
   }, []);
@@ -729,6 +745,7 @@ export default function Home() {
     setEditLogoRotation(0);
     setPreviewImageLoaded(false);
     setCameraError(null);
+    setToastMessage(null);
     setIsBlurWarning(false);
     setDetectionFailed(false);
     setScreenMode('camera');
@@ -791,6 +808,7 @@ export default function Home() {
       const sinR = Math.sin((editLogoRotation * Math.PI) / 180);
 
       detectedCorners.forEach((corners) => {
+        // 正規化座標 0-1 をそのまま画像ピクセルにマッピング（portrait/landscape 共通で w,h が画像実寸）
         const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
         const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
         const centerX = centerNx * w;
@@ -801,9 +819,17 @@ export default function Home() {
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        const dx = scaled[1].x - scaled[0].x;
-        const dy = scaled[1].y - scaled[0].y;
-        const baseAngle = Math.atan2(dy, dx);
+        // 上辺(0→1)と下辺(3→2)の角度を平均し、ナンバーに対して平行なロゴ向きを算出（45度傾きでも安定）
+        const topDx = scaled[1].x - scaled[0].x;
+        const topDy = scaled[1].y - scaled[0].y;
+        const bottomDx = scaled[2].x - scaled[3].x;
+        const bottomDy = scaled[2].y - scaled[3].y;
+        const angleTop = Math.atan2(topDy, topDx);
+        const angleBottom = Math.atan2(bottomDy, bottomDx);
+        let baseAngle = (angleTop + angleBottom) / 2;
+        if (Math.abs(angleTop - angleBottom) > Math.PI) {
+          baseAngle += Math.PI;
+        }
         const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
         const cf = Math.cos(finalRotation);
         const sf = Math.sin(finalRotation);
@@ -1210,48 +1236,45 @@ export default function Home() {
       )}
 
       {screenMode === 'camera' && (
-        <div className="fixed inset-0 z-0 bg-black">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-          {showFlash && (
-            <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
-          )}
-          {isProcessing && (
-            <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-between z-10 px-4 py-8">
-              <div className="flex-1 flex flex-col items-center justify-center gap-4">
+        <div className="fixed inset-0 z-0 bg-black flex flex-col landscape:flex-row">
+          <div className="flex-1 min-h-0 relative">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            {showFlash && (
+              <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
+            )}
+            {isProcessing && (
+              <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center z-10 px-4">
                 <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
-                <p className="text-white font-light text-sm">AIが愛車をスキャン中...</p>
-                <p className="text-white/80 text-xs font-extralight text-center max-w-xs">少々お待ちください</p>
+                <p className="text-white font-light text-sm mt-4">AIが愛車をスキャン中...</p>
+                <p className="text-white/80 text-xs font-extralight text-center max-w-xs mt-1">少々お待ちください</p>
               </div>
-              <div className="w-full min-h-[100px] flex items-center justify-center rounded-xl bg-white/10 border border-white/10">
-                <span className="text-white/40 text-xs">広告枠（ベータ）</span>
+            )}
+            <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-black/50 border-b border-white/10 landscape:right-0 landscape:border-b-0 landscape:border-r landscape:border-white/10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="h-5 flex items-center shrink-0 text-white">
+                    <CarkusLogo className="h-full w-auto" />
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+                </div>
+                <button
+                  onClick={stopCamera}
+                  className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
+                >
+                  終了
+                </button>
               </div>
+              {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
+              <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
             </div>
-          )}
-          <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-black/50 border-b border-white/10">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="h-5 flex items-center shrink-0 text-white">
-                  <CarkusLogo className="h-full w-auto" />
-                </span>
-                <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm border border-white/10 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
-              </div>
-              <button
-                onClick={stopCamera}
-                className="py-2 px-4 rounded-full bg-white/20 text-white text-sm font-light backdrop-blur-md border border-white/10 hover:bg-white/30 active:bg-white/40 transition-colors"
-              >
-                終了
-              </button>
-            </div>
-            {cameraError && <p className="mt-2 text-red-300 text-xs font-light">{cameraError}</p>}
-            <p className="mt-1 text-white/70 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 z-20 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-12 bg-black/50 border-t border-white/10 flex flex-col items-center gap-2">
+          <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-black/50 border-t border-white/10 landscape:border-t-0 landscape:border-l landscape:border-white/10 landscape:w-44 landscape:py-4">
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
@@ -1322,63 +1345,46 @@ export default function Home() {
       )}
 
       {screenMode === 'preview_edit' && previewImageUrl && (
-        <div className="fixed inset-0 z-0 bg-black flex flex-col">
-          {(isBlurWarning || detectionFailed) && (
-            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/50 border-b border-white/10">
-              {isBlurWarning && (
-                <p className="text-amber-200 text-sm font-light text-center">
-                  写真がぼやけている可能性があります。撮り直すことをお勧めします。
-                </p>
-              )}
-              {detectionFailed && (
-                <>
-                  <p className="text-amber-200 text-sm font-light text-center">
-                    ナンバーを自動検出できませんでした。位置を手動で調整するか、もう一度撮影してください。
-                  </p>
-                  <p className="text-white/60 text-xs font-extralight text-center mt-1">
-                    モニター・画面の写真や、ぼやけた画像は検出されにくい場合があります。
-                  </p>
-                  <p className="text-white/70 text-sm font-light text-center">
-                    本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}。制限に達した場合は明日お試しください。
-                  </p>
-                  <button
-                    type="button"
-                    onClick={retake}
-                    className="mx-auto flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-amber-500 text-gray-900 font-medium text-sm hover:bg-amber-400 active:bg-amber-300 transition-colors"
-                  >
-                    <RotateCcw size={20} strokeWidth={2} />
-                    もう一度撮影
-                  </button>
-                </>
-              )}
+        <div className="fixed inset-0 z-0 bg-black flex flex-col landscape:flex-row">
+          {toastMessage && (
+            <div className="fixed top-4 left-4 right-4 landscape:left-auto landscape:right-4 landscape:max-w-sm z-30 px-4 py-3 rounded-xl bg-black/80 text-white text-sm font-light shadow-lg animate-scale-in">
+              {toastMessage}
             </div>
           )}
-          <div
-            className="flex-1 min-h-0 relative touch-none"
-            onTouchStart={onPreviewTouchStart}
-            onTouchMove={onPreviewTouchMove}
-            onTouchEnd={onPreviewTouchEnd}
-            onTouchCancel={onPreviewTouchEnd}
-          >
-            <canvas
-              ref={previewCanvasRef}
-              className="absolute inset-0 w-full h-full object-contain"
-              style={{ touchAction: 'none' }}
-            />
-            {isProcessing && detectedCorners.length === 0 && (
-              <div className="absolute inset-0 flex flex-col bg-black/50">
-                <div className="flex-1 flex flex-col items-center justify-center gap-3">
-                  <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
-                  <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
-                  <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
+          {isBlurWarning && (
+            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-black/50 border-b border-white/10 landscape:border-b-0 landscape:border-r landscape:border-white/10">
+              <p className="text-amber-200 text-sm font-light text-center">
+                写真がぼやけている可能性があります。撮り直すことをお勧めします。
+              </p>
+            </div>
+          )}
+          <div className="flex-1 min-h-0 flex flex-col landscape:flex-row">
+            <div
+              className="flex-1 min-h-0 relative touch-none"
+              onTouchStart={onPreviewTouchStart}
+              onTouchMove={onPreviewTouchMove}
+              onTouchEnd={onPreviewTouchEnd}
+              onTouchCancel={onPreviewTouchEnd}
+            >
+              <canvas
+                ref={previewCanvasRef}
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{ touchAction: 'none' }}
+              />
+              {isProcessing && detectedCorners.length === 0 && (
+                <div className="absolute inset-0 flex flex-col bg-black/50">
+                  <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                    <Loader2 className="animate-spin text-white" size={40} strokeWidth={2} />
+                    <p className="text-white/90 text-sm font-light">AIが愛車をスキャン中...</p>
+                    <p className="text-white/60 text-xs font-extralight">少々お待ちください</p>
+                  </div>
+                  <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 border border-white/10 mx-4 mb-4">
+                    <span className="text-white/40 text-xs">広告枠（ベータ）</span>
+                  </div>
                 </div>
-                <div className="w-full min-h-[80px] flex items-center justify-center rounded-xl bg-white/10 border border-white/10 mx-4 mb-4">
-                  <span className="text-white/40 text-xs">広告枠（ベータ）</span>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="bg-black/50 border-t border-white/10 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              )}
+            </div>
+            <div className="shrink-0 bg-black/50 border-t border-white/10 landscape:border-t-0 landscape:border-l landscape:border-white/10 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
             <div className="flex items-center gap-3 mb-2">
               <span className="text-white/90 text-xs font-light w-12">角度</span>
               <input
@@ -1404,14 +1410,10 @@ export default function Home() {
                 className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
             </div>
-            <div className="flex justify-center items-center gap-2 flex-wrap">
+            <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
                 onClick={retake}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-md border border-white/10 transition-colors ${
-                  detectionFailed
-                    ? 'bg-amber-500/90 text-gray-900 font-medium hover:bg-amber-400 active:bg-amber-300'
-                    : 'bg-white/20 text-white hover:bg-white/30 active:bg-white/40'
-                }`}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light backdrop-blur-md border border-white/10 bg-white/20 text-white hover:bg-white/30 active:bg-white/40 transition-colors"
               >
                 <RotateCcw size={18} strokeWidth={2} />
                 撮り直す
@@ -1465,6 +1467,7 @@ export default function Home() {
             )}
             <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-lg border border-white/10">
               <span className="text-white/40 text-xs">広告枠（ベータ）</span>
+            </div>
             </div>
           </div>
         </div>
