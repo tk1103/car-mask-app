@@ -289,13 +289,10 @@ export async function POST(request: NextRequest) {
     console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
     const prompt = [
-      'Detect the Japanese license plate (ナンバープレート) rectangle in this image. Return the 4 corner coordinates.',
-      'Image coordinate system: x and y from 0 to 1000. Top-left of image is (0,0), bottom-right is (1000,1000).',
-      'Corners order: topLeft, topRight, bottomRight, bottomLeft. Each corner: {"x":number,"y":number}.',
-      'Output JSON only: {"found":true,"plates":[{"found":true,"corners":[{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]} or {"found":false,"plates":[]}.',
+      'Detect the license plate rectangle in this image. Return JSON only, no other text.',
+      'Coordinates 0-1000 for x and y. Format: {"found":true,"plates":[{"found":true,"corners":[{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]} or {"found":false,"plates":[]}.',
     ].join(' ');
 
-    // v1beta で responseMimeType/responseSchema を使用
     const urlTemplate = (model: string) =>
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const body = JSON.stringify({
@@ -311,9 +308,8 @@ export async function POST(request: NextRequest) {
         temperature: 0,
         topP: 0.1,
         topK: 1,
-        maxOutputTokens: 400,
+        maxOutputTokens: 512,
         responseMimeType: 'application/json',
-        responseSchema: RESPONSE_SCHEMA,
       },
       safetySettings: [
         { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
@@ -536,7 +532,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       found: false,
       error: '座標の解析に失敗しました',
-      userMessage: '座標の解析に失敗しました。画像サイズや明るさを確認して、もう一度撮影してお試しください。',
+      userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
+      remainingToday: getDailyRemaining(clientId),
       rawResponse: text.substring(0, 500),
     }, { status: 500 });
   } catch (error) {
