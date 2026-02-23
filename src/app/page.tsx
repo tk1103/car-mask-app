@@ -1156,37 +1156,37 @@ export default function Home() {
   const fontFamily = '"Helvetica Neue", Helvetica, "Hiragino Sans", "Yu Gothic", sans-serif';
 
   return (
-    <div className="min-h-screen bg-white" style={{ fontFamily }}>
+    <div className="min-h-screen bg-black" style={{ fontFamily }}>
       {screenMode === 'idle' && (
-        <header className="sticky top-0 z-10 bg-white/40 backdrop-blur-xl border-b border-white/30">
+        <header className="sticky top-0 z-10 bg-black/40 backdrop-blur-xl border-b border-white/20">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
-            <span className="h-6 flex items-center shrink-0 text-gray-900">
-              <CarkusLogo className="h-full w-auto text-gray-900" />
+            <span className="h-6 flex items-center shrink-0 text-white">
+              <CarkusLogo className="h-full w-auto text-white" />
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-white/50 backdrop-blur-sm border border-white/40 text-gray-600 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
-            <span className="text-gray-500 text-xs font-extralight shrink-0">ver0.8</span>
+            <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/80 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
+            <span className="text-white/50 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
         </header>
       )}
 
       {showSaveSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-          <div className="bg-white/60 backdrop-blur-2xl border border-white/40 rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
-            <CheckCircle className="text-emerald-500" size={40} strokeWidth={2} />
-            <p className="text-gray-900 font-light">保存しました</p>
-            <p className="text-gray-600 text-xs font-extralight">ご利用ありがとうございます</p>
+          <div className="bg-black/50 backdrop-blur-2xl border border-white/20 rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
+            <CheckCircle className="text-emerald-400" size={40} strokeWidth={2} />
+            <p className="text-white font-light">保存しました</p>
+            <p className="text-white/70 text-xs font-extralight">ご利用ありがとうございます</p>
           </div>
         </div>
       )}
 
       {cameraError && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/20 backdrop-blur-md">
-          <div className="bg-white/70 backdrop-blur-2xl rounded-2xl px-6 py-5 max-w-sm shadow-2xl flex flex-col items-center gap-4 border border-white/40">
-            <p className="text-gray-900 font-light text-sm text-center leading-relaxed">{cameraError}</p>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="bg-black/70 backdrop-blur-2xl rounded-2xl px-6 py-5 max-w-sm shadow-2xl flex flex-col items-center gap-4 border border-white/20">
+            <p className="text-white font-light text-sm text-center leading-relaxed">{cameraError}</p>
             <button
               type="button"
               onClick={() => setCameraError(null)}
-              className="px-6 py-2.5 rounded-full bg-white/60 backdrop-blur-sm text-gray-900 text-sm font-light border border-white/40 hover:bg-white/80 transition-colors"
+              className="px-6 py-2.5 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20 transition-colors"
             >
               閉じる
             </button>
@@ -1214,17 +1214,17 @@ export default function Home() {
                 <p className="text-white/80 text-xs font-extralight text-center max-w-xs mt-1">そのまま位置を調整できます</p>
               </div>
             )}
-            <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-white/30 backdrop-blur-xl border-b border-white/20 landscape:right-0 landscape:border-b-0 landscape:border-r landscape:border-white/20">
+            <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-black/30 backdrop-blur-xl border-b border-white/20 landscape:right-0 landscape:border-b-0 landscape:border-r landscape:border-white/20">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="h-5 flex items-center shrink-0 text-white drop-shadow-md">
                     <CarkusLogo className="h-full w-auto text-white" />
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-white/30 backdrop-blur-sm border border-white/30 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+                  <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
                 </div>
                 <button
                   onClick={stopCamera}
-                  className="py-2 px-4 rounded-full bg-white/30 backdrop-blur-sm text-white text-sm font-light border border-white/30 hover:bg-white/50 transition-colors"
+                  className="py-2 px-4 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20 transition-colors"
                 >
                   終了
                 </button>
@@ -1237,7 +1237,7 @@ export default function Home() {
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
-              className="min-w-[8rem] px-6 py-3 rounded-full bg-white/40 backdrop-blur-sm text-white text-sm font-light border border-white/40 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform hover:bg-white/60"
+              className="min-w-[8rem] px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform hover:bg-white/20"
             >
               {isProcessing ? (
                 <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
@@ -1252,53 +1252,53 @@ export default function Home() {
 
       {screenMode === 'idle' && (
         <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-8 px-6">
-          <p className="text-gray-600 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
+          <p className="text-white/70 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
           <button
             onClick={startCamera}
-            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/50 backdrop-blur-xl text-gray-900 font-light text-sm tracking-widest border border-white/40 hover:bg-white/70 transition-colors shadow-lg"
+            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-widest border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
           >
             <Camera size={22} strokeWidth={1.5} />
             カメラを起動
           </button>
           {cameraError && (
-            <p className="text-red-600 text-xs font-light max-w-xs text-center">{cameraError}</p>
+            <p className="text-red-300 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
           {!isStandalone && (
             <button
               onClick={handleInstallClick}
-              className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/40 backdrop-blur-sm text-gray-700 font-light text-xs tracking-wide border border-white/40 hover:bg-white/60 transition-colors"
+              className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white/90 font-light text-xs tracking-wide border border-white/20 hover:bg-white/20 transition-colors"
             >
               <DownloadIcon size={16} strokeWidth={1.5} />
               {isIOS ? 'ホーム画面に追加（iOS）' : isAndroid ? (deferredPrompt ? 'ホーム画面に追加（Android）' : 'ホーム画面に追加') : deferredPrompt ? 'ホーム画面に追加（Chrome）' : 'アプリをインストール'}
             </button>
           )}
-          <p className="text-gray-500 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+          <p className="text-white/50 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
         </main>
       )}
 
       {showInstallGuide && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/25 backdrop-blur-md">
-          <div className="bg-white/70 backdrop-blur-2xl rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto border border-white/40">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+          <div className="bg-black/70 backdrop-blur-2xl rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto border border-white/20">
             <div className="flex items-center justify-between">
-              <h2 className="text-gray-900 font-light text-lg">ホーム画面に追加</h2>
-              <button onClick={() => setShowInstallGuide(false)} className="text-gray-500 hover:text-gray-900">✕</button>
+              <h2 className="text-white font-light text-lg">ホーム画面に追加</h2>
+              <button onClick={() => setShowInstallGuide(false)} className="text-white/60 hover:text-white">✕</button>
             </div>
             {isIOS ? (
-              <div className="text-gray-700 text-sm space-y-2">
+              <div className="text-white/80 text-sm space-y-2">
                 <p className="font-medium">【iPhone / iPad】</p>
                 <p>1. アドレスバー右の「共有」ボタン（□↑）をタップ</p>
                 <p>2. 「ホーム画面に追加」を選択 → 「追加」をタップ</p>
               </div>
             ) : isAndroid ? (
-              <div className="text-gray-700 text-sm space-y-2">
+              <div className="text-white/80 text-sm space-y-2">
                 <p className="font-medium">【Android】</p>
                 <p>1. ブラウザメニュー（⋮）→「ホーム画面に追加」または「アプリをインストール」</p>
                 <p>2. 「追加」をタップ</p>
               </div>
             ) : (
-              <p className="text-gray-700 text-sm">ブラウザのメニューから「ホーム画面に追加」を選択してください。</p>
+              <p className="text-white/80 text-sm">ブラウザのメニューから「ホーム画面に追加」を選択してください。</p>
             )}
-            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-white/60 backdrop-blur-sm text-gray-900 text-sm font-light border border-white/40 hover:bg-white/80">閉じる</button>
+            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20">閉じる</button>
           </div>
         </div>
       )}
@@ -1306,13 +1306,13 @@ export default function Home() {
       {screenMode === 'preview_edit' && previewImageUrl && (
         <div className="fixed inset-0 z-0 flex flex-col landscape:flex-row">
           {toastMessage && (
-            <div className="fixed top-4 left-4 right-4 landscape:left-auto landscape:right-4 landscape:max-w-sm z-30 px-4 py-3 rounded-xl bg-white/60 backdrop-blur-2xl text-gray-900 text-sm font-light shadow-lg border border-white/40 animate-scale-in">
+            <div className="fixed top-4 left-4 right-4 landscape:left-auto landscape:right-4 landscape:max-w-sm z-30 px-4 py-3 rounded-xl bg-black/60 backdrop-blur-2xl text-white text-sm font-light shadow-lg border border-white/20 animate-scale-in">
               {toastMessage}
             </div>
           )}
           {isBlurWarning && (
             <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-amber-500/20 backdrop-blur-xl border-b border-amber-400/30 landscape:border-b-0 landscape:border-r landscape:border-amber-400/30">
-              <p className="text-amber-900 text-sm font-light text-center">
+              <p className="text-amber-200 text-sm font-light text-center">
                 写真がぼやけている可能性があります。撮り直すことをお勧めします。
               </p>
             </div>
@@ -1331,15 +1331,15 @@ export default function Home() {
                 style={{ touchAction: 'none' }}
               />
             </div>
-            <div className="shrink-0 bg-white/40 backdrop-blur-2xl border-t border-white/30 landscape:border-t-0 landscape:border-l landscape:border-white/30 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
+            <div className="shrink-0 bg-black/40 backdrop-blur-2xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
             {isProcessing && (
               <div className="mb-3 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-amber-500/20 border border-amber-400/30">
-                <Loader2 className="animate-spin text-amber-700" size={16} strokeWidth={2} />
-                <span className="text-amber-800 text-xs font-light">解析中… 位置は調整できます</span>
+                <Loader2 className="animate-spin text-amber-400" size={16} strokeWidth={2} />
+                <span className="text-amber-200 text-xs font-light">解析中… 位置は調整できます</span>
               </div>
             )}
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-gray-800 text-xs font-light w-12">角度</span>
+              <span className="text-white/80 text-xs font-light w-12">角度</span>
               <input
                 type="range"
                 min="-30"
@@ -1347,12 +1347,12 @@ export default function Home() {
                 step="1"
                 value={editLogoRotation}
                 onChange={(e) => setEditLogoRotation(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/50 rounded-full appearance-none accent-gray-700 max-w-[200px]"
+                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
-              <span className="text-gray-700 text-xs tabular-nums w-8">{editLogoRotation}°</span>
+              <span className="text-white/80 text-xs tabular-nums w-8">{editLogoRotation}°</span>
             </div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-gray-800 text-xs font-light w-12">サイズ</span>
+              <span className="text-white/80 text-xs font-light w-12">サイズ</span>
               <input
                 type="range"
                 min="0.3"
@@ -1360,13 +1360,13 @@ export default function Home() {
                 step="0.05"
                 value={editLogoScale}
                 onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/50 rounded-full appearance-none accent-gray-700 max-w-[200px]"
+                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
             </div>
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
                 onClick={retake}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light bg-white/50 backdrop-blur-sm border border-white/40 text-gray-900 hover:bg-white/70 transition-colors"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light bg-white/10 backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors"
               >
                 <RotateCcw size={18} strokeWidth={2} />
                 撮り直す
@@ -1374,7 +1374,7 @@ export default function Home() {
               <button
                 onClick={handleSaveToDevice}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-900 hover:bg-white/70 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
                 title="端末に保存"
               >
                 <Download size={18} strokeWidth={2} />
@@ -1382,7 +1382,7 @@ export default function Home() {
               <button
                 onClick={() => handleShareToSNS('facebook')}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-700 hover:bg-white/70 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
                 title="Facebook"
               >
                 <Facebook size={18} strokeWidth={2} />
@@ -1390,7 +1390,7 @@ export default function Home() {
               <button
                 onClick={() => handleShareToSNS('twitter')}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-700 hover:bg-white/70 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
                 title="X"
               >
                 <Twitter size={18} strokeWidth={2} />
@@ -1398,7 +1398,7 @@ export default function Home() {
               <button
                 onClick={() => handleShareToSNS('instagram')}
                 disabled={isProcessing}
-                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-700 hover:bg-white/70 transition-colors disabled:opacity-50"
+                className="flex items-center justify-center w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors disabled:opacity-50"
                 title="Instagram"
               >
                 <Instagram size={18} strokeWidth={2} />
@@ -1406,20 +1406,20 @@ export default function Home() {
               <button
                 onClick={() => setShowShareMenu(!showShareMenu)}
                 disabled={isProcessing}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-900 text-sm font-light hover:bg-white/70 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm font-light hover:bg-white/20 transition-colors disabled:opacity-50"
               >
                 {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
                 {isProcessing ? '解析中' : 'その他'}
               </button>
             </div>
             {showShareMenu && (
-              <div className="flex flex-wrap justify-center gap-2 mt-3 pt-3 border-t border-white/30">
-                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-700 text-xs font-light hover:bg-white/70 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
-                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/50 backdrop-blur-sm border border-white/40 text-gray-700 text-xs font-light hover:bg-white/70 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
+              <div className="flex flex-wrap justify-center gap-2 mt-3 pt-3 border-t border-white/20">
+                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
+                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
               </div>
             )}
-            <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/30 backdrop-blur-sm border border-white/30">
-              <span className="text-gray-500 text-xs">広告枠（ベータ）</span>
+            <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm border border-white/20">
+              <span className="text-white/50 text-xs">広告枠（ベータ）</span>
             </div>
             </div>
           </div>
