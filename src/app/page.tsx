@@ -69,13 +69,13 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
   })) as Corners;
 }
 
-/** 編集用デフォルト四角（画像中央・正規化座標 0-1）。解析失敗時やAPIエラー時に使用 */
+/** 編集用デフォルト四角（正規化座標 0-1）。解析失敗時やAPIエラー時に使用。車のナンバープレートは通常画像下部にあるため、下部中央に配置 */
 function getDefaultCenterCorners(): Corners {
   return [
-    { x: 0.35, y: 0.45 },
-    { x: 0.65, y: 0.45 },
-    { x: 0.65, y: 0.55 },
-    { x: 0.35, y: 0.55 },
+    { x: 0.25, y: 0.72 },
+    { x: 0.75, y: 0.72 },
+    { x: 0.75, y: 0.92 },
+    { x: 0.25, y: 0.92 },
   ];
 }
 

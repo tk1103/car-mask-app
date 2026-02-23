@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-const MODEL_NAMES = ['gemini-3-flash-preview'] as const;
+// 3.0 を優先、404/400 時は 2.5 にフォールバック（2.0 は 2026年6月サービス終了予定）
+const MODEL_NAMES = ['gemini-3-flash-preview', 'gemini-2.5-flash'] as const;
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
@@ -288,8 +289,10 @@ export async function POST(request: NextRequest) {
     console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
 
     const prompt = [
-      'Detect the license plate 4 corners in this image. Coordinates 0-1000 for both axes.',
-      'Return only JSON: {"found":true,"plates":[{"found":true,"corners":[{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]} or {"found":false,"plates":[]}. No other text.',
+      'Detect the Japanese license plate (ナンバープレート) rectangle in this image. Return the 4 corner coordinates.',
+      'Image coordinate system: x and y from 0 to 1000. Top-left of image is (0,0), bottom-right is (1000,1000).',
+      'Corners order: topLeft, topRight, bottomRight, bottomLeft. Each corner: {"x":number,"y":number}.',
+      'Output JSON only: {"found":true,"plates":[{"found":true,"corners":[{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]} or {"found":false,"plates":[]}.',
     ].join(' ');
 
     // v1beta で responseMimeType/responseSchema を使用
