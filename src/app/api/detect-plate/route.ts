@@ -121,10 +121,11 @@ function extractAndNormalizeJson(raw: string): string {
     let depth = 0;
     let end = -1;
     for (let i = firstBrace; i < s.length; i++) {
-      if (s[i] === '{') depth++;
-      else if (s[i] === '}') {
+      const ch = s[i];
+      if (ch === '{' || ch === '[') depth++;
+      else if (ch === '}' || ch === ']') {
         depth--;
-        if (depth === 0) {
+        if (depth === 0 && ch === '}') {
           end = i;
           break;
         }
@@ -134,16 +135,49 @@ function extractAndNormalizeJson(raw: string): string {
   }
   // トレイリングカンマを除去（, ] や , } は JSON では無効だが Gemini が出力することがある）
   s = s.replace(/,(\s*[}\]])/g, '$1');
-  // 複数箇所のトレイリングカンマを再適用（ネストした配列内など）
   while (s.match(/,(\s*[}\]])/)) {
     s = s.replace(/,(\s*[}\]])/g, '$1');
   }
-  // キー名のシングルクォートをダブルに（"key": の形に）— 簡易: " の直後でない ' の連続を " に
+  // キー名のシングルクォートをダブルに
   s = s.replace(/'([^']*)'(\s*):/g, '"$1"$2:');
-  // 行・ブロックコメントを除去（Gemini がたまに混入）
+  // 行・ブロックコメントを除去
   s = s.replace(/\/\*[\s\S]*?\*\//g, '');
   s = s.replace(/\/\/[^\n]*/g, '');
+  // 制御文字・BOM を除去
+  s = s.replace(/^\uFEFF/, '').replace(/[\x00-\x1F\x7F]/g, ' ');
   return s;
+}
+
+/** テキストから複数の JSON オブジェクト候補を抽出してパースを試行 */
+function extractAllJsonCandidates(text: string): string[] {
+  const candidates: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const idx = text.indexOf('{', i);
+    if (idx === -1) break;
+    let depth = 0;
+    let end = -1;
+    for (let j = idx; j < text.length; j++) {
+      const ch = text[j];
+      if (ch === '{' || ch === '[') depth++;
+      else if (ch === '}' || ch === ']') {
+        depth--;
+        if (depth === 0 && ch === '}') {
+          end = j;
+          break;
+        }
+      }
+    }
+    if (end !== -1) {
+      const slice = text.slice(idx, end + 1);
+      const normalized = extractAndNormalizeJson(slice);
+      if (normalized && normalized.startsWith('{')) candidates.push(normalized);
+      i = end + 1;
+    } else {
+      i = idx + 1;
+    }
+  }
+  return candidates;
 }
 
 /** 正規化済みの座標オブジェクトかどうか簡易チェック */
@@ -417,12 +451,31 @@ export async function POST(request: NextRequest) {
         .map((p: any) => {
           if (p != null && typeof p === 'object') {
             if (typeof p.text === 'string') return p.text;
-            // responseSchema でオブジェクトがそのまま返る場合
+            // responseSchema でオブジェクトがそのまま返る場合（found/plates がトップレベル）
             if ('found' in p && 'plates' in p) return JSON.stringify(p);
+            // ネストした構造（struct 等）のフォールバック
+            if (p.struct && typeof p.struct === 'object' && 'found' in p.struct) return JSON.stringify(p.struct);
           }
           return '';
         })
         .join('') ?? '';
+
+    // parts から直接オブジェクトを取得（パース不要）
+    for (const p of parts) {
+      if (p != null && typeof p === 'object') {
+        const obj = ('found' in p && 'plates' in p) ? p : (p.struct && typeof p.struct === 'object' && 'found' in p.struct ? p.struct : null);
+        if (obj && typeof obj === 'object') {
+          try {
+            const normalized = normalizeParsedResponse(obj as Record<string, unknown>);
+            if (normalized && (normalized.plates as unknown[]).length >= 0) {
+              (normalized as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
+              console.log(`[detect-plate] Success (direct object): found=${normalized.found}, plates=${(normalized.plates as unknown[])?.length || 0}`);
+              return NextResponse.json(normalized);
+            }
+          } catch (_) {}
+        }
+      }
+    }
 
     if (!text?.trim()) {
       const elapsed = Date.now() - startTime;
@@ -447,15 +500,17 @@ export async function POST(request: NextRequest) {
     const jsonCandidates = [
       extractAndNormalizeJson(text),
       text.trim(),
+      ...extractAllJsonCandidates(text),
     ];
+    const seen = new Set<string>();
+    const uniqueCandidates = jsonCandidates.filter((s) => s && s.length > 10 && !seen.has(s) && (seen.add(s), true));
     let parseErr: unknown = null;
     let parsed: Record<string, unknown> | null = null;
 
-    for (const jsonText of jsonCandidates) {
-      if (!jsonText) continue;
+    for (const jsonText of uniqueCandidates) {
       try {
         const value = JSON.parse(jsonText);
-        if (value && typeof value === 'object') {
+        if (value && typeof value === 'object' && ('found' in value || 'plates' in value)) {
           parsed = normalizeParsedResponse(value as Record<string, unknown>);
           break;
         }
