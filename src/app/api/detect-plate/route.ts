@@ -10,13 +10,16 @@ const MODEL_NAMES = ['gemini-1.5-flash', 'gemini-2.0-flash'] as const;
 const RATE_LIMIT_PER_MINUTE = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
-// 簡易IP制限: 1日あたり20回（サーバー再起動でリセット。ベータ用）
-const DAILY_LIMIT_PER_IP = 20;
+// 1日あたり20回（デバイス単位。X-Device-Id が無い場合はIP単位）
+const DAILY_LIMIT_PER_CLIENT = 20;
 
 const rateLimitStore = new Map<string, number[]>();
 const dailyLimitStore = new Map<string, { count: number; date: string }>();
 
+/** デバイスID（UUID形式ならデバイス単位で制限）。無効な場合はIPで識別 */
 function getClientId(request: NextRequest): string {
+  const deviceId = request.headers.get('x-device-id')?.trim();
+  if (deviceId && /^[0-9a-f-]{36}$/i.test(deviceId)) return `device:${deviceId}`;
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) {
     const first = forwarded.split(',')[0]?.trim() ?? '';
@@ -38,7 +41,7 @@ function isOverDailyLimit(clientId: string): boolean {
     entry = { count: 0, date: today };
     dailyLimitStore.set(clientId, entry);
   }
-  return entry.count >= DAILY_LIMIT_PER_IP;
+  return entry.count >= DAILY_LIMIT_PER_CLIENT;
 }
 
 function incrementDailyCount(clientId: string): void {
@@ -54,8 +57,8 @@ function incrementDailyCount(clientId: string): void {
 function getDailyRemaining(clientId: string): number {
   const today = getTodayDateString();
   const entry = dailyLimitStore.get(clientId);
-  if (!entry || entry.date !== today) return DAILY_LIMIT_PER_IP;
-  return Math.max(0, DAILY_LIMIT_PER_IP - entry.count);
+  if (!entry || entry.date !== today) return DAILY_LIMIT_PER_CLIENT;
+  return Math.max(0, DAILY_LIMIT_PER_CLIENT - entry.count);
 }
 
 function isRateLimited(clientId: string): boolean {

@@ -45,6 +45,18 @@ declare global {
 }
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
+const DEVICE_ID_KEY = 'carkus_device_id';
+/** デバイス単位のAPI制限用。localStorage に UUID を保存し、同一デバイスは 20回/日 */
+function getDeviceId(): string {
+  if (typeof window === 'undefined' || !window.localStorage) return '';
+  let id = window.localStorage.getItem(DEVICE_ID_KEY);
+  if (!id && typeof crypto !== 'undefined' && crypto.randomUUID) {
+    id = crypto.randomUUID();
+    window.localStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id ?? '';
+}
+
 // API座標をクライアント座標に変換（0-1000 → 0-1）。画像の幅・高さに依存しない正規化座標（portrait/landscape 共通）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
   return plate.corners.map((c) => ({
@@ -318,7 +330,10 @@ export default function Home() {
   /** 画面表示用に残り回数を取得（APIは消費しない） */
   const fetchRemainingQuota = useCallback(async () => {
     try {
-      const res = await fetch('/api/detect-plate');
+      const deviceId = getDeviceId();
+      const res = await fetch('/api/detect-plate', {
+        headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+      });
       if (res.ok) {
         const data = await res.json();
         if (typeof data.remainingToday === 'number') setDailyRemaining(data.remainingToday);
@@ -446,7 +461,10 @@ export default function Home() {
 
     // 撮影前に残数チェック（ローディングを出さずに即エラーにする）
     try {
-      const quotaRes = await fetch('/api/detect-plate');
+      const deviceId = getDeviceId();
+      const quotaRes = await fetch('/api/detect-plate', {
+        headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+      });
       if (quotaRes.ok) {
         const quotaData = await quotaRes.json();
         const remaining = quotaData.remainingToday;
@@ -638,7 +656,13 @@ export default function Home() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 48_000);
         try {
-          const res = await fetch('/api/detect-plate', { method: 'POST', body: createFormData(), signal: controller.signal });
+          const deviceId = getDeviceId();
+          const res = await fetch('/api/detect-plate', {
+            method: 'POST',
+            body: createFormData(),
+            signal: controller.signal,
+            headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+          });
           clearTimeout(timeoutId);
           const result = await res.json();
           applyResult(result, res);
