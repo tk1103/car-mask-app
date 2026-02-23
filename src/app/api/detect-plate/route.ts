@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-// 安定版・高速（3月廃止の影響を受けない）
-const MODEL_NAME = 'gemini-1.5-flash';
+// 安定版・高速。1.5-flash が 404 の場合は 2.0-flash を利用
+const MODEL_NAMES = ['gemini-1.5-flash', 'gemini-2.0-flash'] as const;
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
@@ -256,8 +256,9 @@ export async function POST(request: NextRequest) {
       'Return only JSON: {"found":true,"plates":[{"found":true,"corners":[{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n},{"x":n,"y":n}]}]} or {"found":false,"plates":[]}. No other text.',
     ].join(' ');
 
-    // v1 では responseMimeType/responseSchema が未対応のため v1beta を使用
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
+    // v1beta で responseMimeType/responseSchema を使用
+    const urlTemplate = (model: string) =>
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const body = JSON.stringify({
       contents: [
         {
@@ -284,70 +285,84 @@ export async function POST(request: NextRequest) {
     });
 
     const startTime = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45_000);
-    let geminiResponse: Response;
-    try {
-      geminiResponse = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body,
-      });
-    } catch (fetchErr: unknown) {
-      clearTimeout(timeoutId);
-      const elapsed = Date.now() - startTime;
-      if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-        console.error(`[detect-plate] Gemini API timeout after ${elapsed}ms`);
+    let geminiResponse: Response | null = null;
+    let lastErrorBody = '';
+    let lastStatus = 0;
+    let lastErrorMessage = '';
+
+    for (const modelName of MODEL_NAMES) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45_000);
+      try {
+        const res = await fetch(urlTemplate(modelName), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body,
+        });
+        clearTimeout(timeoutId);
+        lastStatus = res.status;
+        if (res.ok) {
+          geminiResponse = res;
+          break;
+        }
+        lastErrorBody = await res.text().catch(() => '');
+        const errJson: any = (() => { try { return JSON.parse(lastErrorBody); } catch { return null; } })();
+        lastErrorMessage = errJson?.error?.message ?? errJson?.error ?? lastErrorBody;
+        // 404/400 はモデル名違いの可能性があるので次のモデルを試す
+        if (res.status === 404 || res.status === 400) {
+          console.warn(`[detect-plate] Model ${modelName} returned ${res.status}, trying next.`, lastErrorMessage?.substring(0, 200));
+          continue;
+        }
+        break;
+      } catch (fetchErr: unknown) {
+        clearTimeout(timeoutId);
+        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+          console.error(`[detect-plate] Gemini API timeout (model ${modelName}) after ${Date.now() - startTime}ms`);
+          return NextResponse.json(
+            {
+              found: false,
+              error: '解析がタイムアウトしました',
+              userMessage: '解析に時間がかかりすぎました。位置を手動で調整してください。',
+              status: 504,
+              remainingToday: getDailyRemaining(clientId),
+            },
+            { status: 504 }
+          );
+        }
+        console.error(`[detect-plate] Gemini API fetch error (model ${modelName}):`, fetchErr);
         return NextResponse.json(
           {
             found: false,
-            error: '解析がタイムアウトしました',
-            userMessage: '解析に時間がかかりすぎました。位置を手動で調整してください。',
-            status: 504,
+            error: '通信エラー',
+            userMessage: '通信エラーです。位置を手動で調整してください。',
             remainingToday: getDailyRemaining(clientId),
           },
-          { status: 504 }
+          { status: 500 }
         );
       }
-      console.error(`[detect-plate] Gemini API fetch error after ${elapsed}ms:`, fetchErr);
-      return NextResponse.json(
-        {
-          found: false,
-          error: '通信エラー',
-          userMessage: '通信エラーです。位置を手動で調整してください。',
-          remainingToday: getDailyRemaining(clientId),
-        },
-        { status: 500 }
-      );
     }
-    clearTimeout(timeoutId);
 
-    if (!geminiResponse.ok) {
-      let lastErrorBody = '';
-      try {
-        lastErrorBody = await geminiResponse.text();
-      } catch {
-        // ignore
-      }
-      const errorJson: any = (() => { try { return JSON.parse(lastErrorBody); } catch { return null; } })();
-      const errorMessage = errorJson?.error?.message ?? errorJson?.error ?? lastErrorBody;
+    if (!geminiResponse || !geminiResponse.ok) {
       const isQuota =
-        geminiResponse.status === 429 ||
-        /quota|rate limit|exceeded/i.test(String(errorMessage));
+        lastStatus === 429 ||
+        /quota|rate limit|exceeded/i.test(String(lastErrorMessage));
       const userMessage = isQuota
         ? '本日の検出回数の上限に達しました。明日またお試しください。'
-        : '解析中にエラーが発生しました。位置を手動で調整してください。';
+        : lastStatus === 403 || lastStatus === 404
+          ? 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。'
+          : '解析中にエラーが発生しました。位置を手動で調整してください。';
+      console.error(`[detect-plate] Gemini API error ${lastStatus}:`, lastErrorMessage?.substring(0, 300));
       return NextResponse.json(
         {
           found: false,
           error: userMessage,
           userMessage,
-          status: geminiResponse.status === 429 ? 429 : 500,
+          status: lastStatus === 429 ? 429 : 500,
           remainingToday: getDailyRemaining(clientId),
           rawResponse: lastErrorBody?.substring?.(0, 500),
         },
-        { status: geminiResponse.status === 429 ? 429 : 500 }
+        { status: lastStatus === 429 ? 429 : 500 }
       );
     }
 
