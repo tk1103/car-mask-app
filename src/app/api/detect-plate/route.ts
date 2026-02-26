@@ -29,8 +29,15 @@ function getClientId(request: NextRequest): string {
   return 'anonymous';
 }
 
+/** 1日の境界を JST（UTC+9）で計算。日本時間の 0:00 でリセットされる */
 function getTodayDateString(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const jstMs = now.getTime() + 9 * 60 * 60 * 1000;
+  const jstDate = new Date(jstMs);
+  const y = jstDate.getUTCFullYear();
+  const m = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(jstDate.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function isOverDailyLimit(clientId: string): boolean {
