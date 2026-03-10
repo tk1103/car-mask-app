@@ -9,7 +9,7 @@ const MODEL_NAMES = ['gemini-3-flash-preview', 'gemini-2.0-flash'] as const;
 const RATE_LIMIT_PER_MINUTE = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
-// 1日あたり20回（デバイス単位。X-Device-Id が無い場合はIP単位）
+// 1日あたり20回（フロント表示用の目安）。バックエンドでのハード制限は一旦オフにする。
 const DAILY_LIMIT_PER_CLIENT = 20;
 
 const rateLimitStore = new Map<string, number[]>();
@@ -29,7 +29,8 @@ function getClientId(request: NextRequest): string {
   return 'anonymous';
 }
 
-/** 日次利用回数の制限は「デバイスID がある場合のみ」適用（IP 共有による誤検知を避ける） */
+/** 日次利用回数の制限は「デバイスID がある場合のみ」適用（IP 共有による誤検知を避ける）。
+ *  現状は UI 用の残数表示のみに利用し、サーバー側でブロックはしない。 */
 function getQuotaId(request: NextRequest): string | null {
   const deviceId = request.headers.get('x-device-id')?.trim();
   if (deviceId && ( /^[0-9a-f-]{36}$/i.test(deviceId) || /^d-\d+-[a-z0-9]+$/i.test(deviceId) )) {
@@ -270,9 +271,10 @@ function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string
 export async function GET(request: NextRequest) {
   const quotaId = getQuotaId(request);
   if (!quotaId) {
-    // デバイスIDが無い場合は日次制限を適用しない（レート制限のみ）
+    // デバイスIDが無い場合は「残り回数不明」として扱い、フロント側で 20回 を表示させる
     return NextResponse.json({ remainingToday: null });
   }
+  // 日次カウンタは UI 表示用のみ。実際のブロックは行わない。
   return NextResponse.json({ remainingToday: getDailyRemaining(quotaId) });
 }
 
@@ -280,19 +282,6 @@ export async function POST(request: NextRequest) {
   try {
     const clientId = getClientId(request);
     const quotaId = getQuotaId(request);
-
-    if (quotaId && isOverDailyLimit(quotaId)) {
-      return NextResponse.json(
-        {
-          found: false,
-          error: '1日の利用制限に達しました',
-          userMessage: 'Carkusベータ版の1日あたりの利用制限（20回）に達しました。また明日お試しください',
-          status: 429,
-          remainingToday: 0,
-        },
-        { status: 429 }
-      );
-    }
 
     if (isRateLimited(clientId)) {
       return NextResponse.json(
@@ -307,9 +296,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (quotaId) {
-      incrementDailyCount(quotaId);
-    }
+    // NOTE: quotaId に対する日次カウントは現在 UI 用にのみ利用し、ここではインクリメントしない。
 
     const requestStart = Date.now();
     const formData = await request.formData();
