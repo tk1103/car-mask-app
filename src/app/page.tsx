@@ -623,10 +623,15 @@ export default function Home() {
         if (!res.ok) {
           const raw = (result.error || '') as string;
           const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
+          const backendMessage = (result as { userMessage?: string }).userMessage;
+          // 自前の 20回/日 制限は GET の remaining===0 だけで判定する。
+          // ここでの 429 は Gemini API やプロジェクト全体の quota の可能性が高いので、バックエンドのメッセージをそのまま表示する。
           setToastMessage(
-            isQuota
-              ? `本日の検出回数（${API_DAILY_LIMIT}回）に達しました。手動で位置を合わせてください。`
-              : ((result as { userMessage?: string }).userMessage || '自動検出に失敗しました。手動で位置を合わせてください。')
+            backendMessage
+              ? backendMessage
+              : isQuota
+                ? 'サーバー側の利用制限に達しました。しばらく時間をおいて再度お試しください。'
+                : '自動検出に失敗しました。手動で位置を合わせてください。'
           );
           setIsProcessing(false);
           return;
