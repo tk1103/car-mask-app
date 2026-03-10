@@ -404,7 +404,7 @@ export async function POST(request: NextRequest) {
           }
           const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(String(lastErrorMessage));
           const userMessage = isQuota
-            ? '本日の検出回数の上限に達しました。明日またお試しください。'
+            ? 'サーバー側の利用制限に達しました。しばらく時間をおいて再度お試しください。位置を手動で調整することもできます。'
             : res.status === 403 || res.status === 404
               ? 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。'
               : '解析中にエラーが発生しました。位置を手動で調整してください。';
