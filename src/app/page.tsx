@@ -783,7 +783,7 @@ export default function Home() {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0);
 
-    if (detectedCorners.length > 0 && (maskImage?.complete || true)) {
+    if (!isProcessing && detectedCorners.length > 0 && (maskImage?.complete || true)) {
       const scale = editLogoScale;
       const cosR = Math.cos((editLogoRotation * Math.PI) / 180);
       const sinR = Math.sin((editLogoRotation * Math.PI) / 180);
@@ -1351,6 +1351,16 @@ export default function Home() {
                 className="absolute inset-0 w-full h-full object-contain"
                 style={{ touchAction: 'none' }}
               />
+              {isProcessing && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="relative w-24 h-24 flex items-center justify-center">
+                    <div className="absolute inset-0 rounded-full border border-white/40 border-t-white animate-spin-slow" />
+                    <div className="w-16 h-16 rounded-full bg-black/70 flex items-center justify-center animate-pulse-mask">
+                      <span className="text-white text-xs font-light tracking-wide">解析中</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="shrink-0 bg-black/40 backdrop-blur-2xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
             {isProcessing && (
