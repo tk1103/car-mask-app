@@ -15,7 +15,7 @@ const DAILY_LIMIT_PER_CLIENT = 20;
 const rateLimitStore = new Map<string, number[]>();
 const dailyLimitStore = new Map<string, { count: number; date: string }>();
 
-/** デバイスID（UUID または d- プレフィックスならデバイス単位で制限）。無効な場合はIPで識別 */
+/** デバイスID（UUID または d- プレフィックスならデバイス単位で制限）。無効な場合はIPで識別（レート制限用） */
 function getClientId(request: NextRequest): string {
   const deviceId = request.headers.get('x-device-id')?.trim();
   if (deviceId && ( /^[0-9a-f-]{36}$/i.test(deviceId) || /^d-\d+-[a-z0-9]+$/i.test(deviceId) )) return `device:${deviceId}`;
@@ -27,6 +27,15 @@ function getClientId(request: NextRequest): string {
   const realIp = request.headers.get('x-real-ip');
   if (realIp) return realIp;
   return 'anonymous';
+}
+
+/** 日次利用回数の制限は「デバイスID がある場合のみ」適用（IP 共有による誤検知を避ける） */
+function getQuotaId(request: NextRequest): string | null {
+  const deviceId = request.headers.get('x-device-id')?.trim();
+  if (deviceId && ( /^[0-9a-f-]{36}$/i.test(deviceId) || /^d-\d+-[a-z0-9]+$/i.test(deviceId) )) {
+    return `device:${deviceId}`;
+  }
+  return null;
 }
 
 /** 1日の境界を JST（UTC+9）で計算。日本時間の 0:00 でリセットされる */
@@ -258,17 +267,21 @@ function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string
   return result;
 }
 
-/** 残り回数だけ取得（消費しない）。撮影前にクライアントが確認する用 */
 export async function GET(request: NextRequest) {
-  const clientId = getClientId(request);
-  return NextResponse.json({ remainingToday: getDailyRemaining(clientId) });
+  const quotaId = getQuotaId(request);
+  if (!quotaId) {
+    // デバイスIDが無い場合は日次制限を適用しない（レート制限のみ）
+    return NextResponse.json({ remainingToday: null });
+  }
+  return NextResponse.json({ remainingToday: getDailyRemaining(quotaId) });
 }
 
 export async function POST(request: NextRequest) {
   try {
     const clientId = getClientId(request);
+    const quotaId = getQuotaId(request);
 
-    if (isOverDailyLimit(clientId)) {
+    if (quotaId && isOverDailyLimit(quotaId)) {
       return NextResponse.json(
         {
           found: false,
@@ -294,7 +307,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    incrementDailyCount(clientId);
+    if (quotaId) {
+      incrementDailyCount(quotaId);
+    }
 
     const requestStart = Date.now();
     const formData = await request.formData();
