@@ -9,7 +9,7 @@ const MODEL_NAMES = ['gemini-3-flash-preview', 'gemini-2.0-flash'] as const;
 const RATE_LIMIT_PER_MINUTE = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
-// 1日あたり20回（フロント表示用の目安）。バックエンドでのハード制限は一旦オフにする。
+// 1日あたりの利用回数の「目安値」。バックエンドではこの値でハード制限は行わず、UI 向けの参考情報としてのみ利用する。
 const DAILY_LIMIT_PER_CLIENT = 20;
 
 const rateLimitStore = new Map<string, number[]>();
@@ -48,26 +48,6 @@ function getTodayDateString(): string {
   const m = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
   const d = String(jstDate.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
-}
-
-function isOverDailyLimit(clientId: string): boolean {
-  const today = getTodayDateString();
-  let entry = dailyLimitStore.get(clientId);
-  if (!entry || entry.date !== today) {
-    entry = { count: 0, date: today };
-    dailyLimitStore.set(clientId, entry);
-  }
-  return entry.count >= DAILY_LIMIT_PER_CLIENT;
-}
-
-function incrementDailyCount(clientId: string): void {
-  const today = getTodayDateString();
-  let entry = dailyLimitStore.get(clientId);
-  if (!entry || entry.date !== today) {
-    entry = { count: 0, date: today };
-    dailyLimitStore.set(clientId, entry);
-  }
-  entry.count += 1;
 }
 
 function getDailyRemaining(clientId: string): number {

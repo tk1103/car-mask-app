@@ -60,7 +60,7 @@ function getNextCarkusFilename(): string {
   return `Carkus-${String(n).padStart(3, '0')}.jpg`;
 }
 
-/** デバイス単位のAPI制限用。localStorage に UUID を保存し、同一デバイスは 20回/日 */
+/** デバイス単位の識別用。サーバー側の日次ブロックは行わず、あくまで利用状況の参考にのみ使用する。 */
 function getDeviceId(): string {
   if (typeof window === 'undefined' || !window.localStorage) return '';
   let id = window.localStorage.getItem(DEVICE_ID_KEY);
@@ -263,7 +263,7 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 }
 
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
-const API_DAILY_LIMIT = 20; // 1日のナンバー検出API利用回数上限
+const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限とは異なる場合があります）
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
@@ -468,7 +468,7 @@ export default function Home() {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
 
-    // 撮影前に残数チェック（ローディングを出さずに即エラーにする）
+    // 撮影前に残数チェック（UI 上の目安表示用）。サーバー側では日次ブロックは行わない。
     try {
       const deviceId = getDeviceId();
       const quotaRes = await fetch('/api/detect-plate', {
@@ -478,10 +478,6 @@ export default function Home() {
         const quotaData = await quotaRes.json();
         const remaining = quotaData.remainingToday;
         if (typeof remaining === 'number') setDailyRemaining(remaining);
-        if (remaining === 0) {
-          setCameraError(`本日の検出回数（${API_DAILY_LIMIT}回）に達しました。明日またお試しください。`);
-          return;
-        }
       }
     } catch (_) {}
 
@@ -1251,10 +1247,12 @@ export default function Home() {
                 </button>
               </div>
               {cameraError && <p className="mt-2 text-red-200 text-xs font-light">{cameraError}</p>}
-              <p className="mt-1 text-white/90 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+              <p className="mt-1 text-white/70 text-xs font-light">
+                このアプリの目安は 1日あたり約{API_DAILY_LIMIT}回ですが、実際の上限は Google Gemini API 側の利用制限により前後する場合があります。
+              </p>
             </div>
           </div>
-          <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-black/30 backdrop-blur-xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-44 landscape:py-4">
+            <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-black/30 backdrop-blur-xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-44 landscape:py-4">
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
@@ -1266,7 +1264,9 @@ export default function Home() {
                 <span className="font-light text-sm tracking-wide">撮影する</span>
               )}
             </button>
-            <p className="text-white/90 text-sm font-light">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+            <p className="text-white/70 text-xs font-light text-center">
+              無料版では Google Gemini API の利用制限により、1日にご利用いただける回数が変動する場合があります。
+            </p>
           </div>
         </div>
       )}
@@ -1293,7 +1293,9 @@ export default function Home() {
               {isIOS ? 'ホーム画面に追加（iOS）' : isAndroid ? (deferredPrompt ? 'ホーム画面に追加（Android）' : 'ホーム画面に追加') : deferredPrompt ? 'ホーム画面に追加（Chrome）' : 'アプリをインストール'}
             </button>
           )}
-          <p className="text-white/50 text-sm font-light mt-4">本日{dailyRemaining !== null ? `あと${dailyRemaining}回` : `${API_DAILY_LIMIT}回まで`}</p>
+          <p className="text-white/60 text-xs font-light mt-4 text-center max-w-xs">
+            BETA: このアプリの想定は 1日あたり約{API_DAILY_LIMIT}回ですが、実際の上限はご利用中の Google アカウントの Gemini API 制限に依存します。
+          </p>
         </main>
       )}
 
