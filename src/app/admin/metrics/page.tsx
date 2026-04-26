@@ -9,6 +9,8 @@ type MetricsResponse = {
   detectSuccess: number;
   detectFailure: number;
   storage: 'kv' | 'memory';
+  kvConfigured?: boolean;
+  missingEnvVars?: string[];
 };
 
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
@@ -109,15 +111,28 @@ export default function AdminMetricsPage() {
         </section>
 
         {data && (
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <MetricCard label="日付" value={data.date} />
-            <MetricCard label="保存方式" value={data.storage === 'kv' ? 'KV（永続）' : 'Memory（一時）'} />
-            <MetricCard label="ユニーク利用端末" value={`${data.uniqueUsers}`} />
-            <MetricCard label="検出リクエスト" value={`${data.detectAttempts}`} />
-            <MetricCard label="成功数" value={`${data.detectSuccess}`} />
-            <MetricCard label="失敗数" value={`${data.detectFailure}`} />
-            <MetricCard label="成功率" value={`${successRate}%`} />
-          </section>
+          <>
+            {!data.kvConfigured && (
+              <section className="rounded-2xl border border-amber-300/30 bg-amber-500/10 p-4 space-y-2">
+                <p className="text-amber-100 text-sm font-light">
+                  いまは一時保存（Memory）です。Vercelに以下の環境変数を追加すると、数字が永続化されます。
+                </p>
+                <p className="text-amber-100/90 text-xs">不足: {(data.missingEnvVars ?? []).join(', ') || 'なし'}</p>
+                <p className="text-amber-100/90 text-xs">
+                  設定後は再デプロイしてからこの画面を更新してください。
+                </p>
+              </section>
+            )}
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <MetricCard label="日付" value={data.date} />
+              <MetricCard label="保存方式" value={data.storage === 'kv' ? 'KV（永続）' : 'Memory（一時）'} />
+              <MetricCard label="ユニーク利用端末" value={`${data.uniqueUsers}`} />
+              <MetricCard label="検出リクエスト" value={`${data.detectAttempts}`} />
+              <MetricCard label="成功数" value={`${data.detectSuccess}`} />
+              <MetricCard label="失敗数" value={`${data.detectFailure}`} />
+              <MetricCard label="成功率" value={`${successRate}%`} />
+            </section>
+          </>
         )}
       </div>
     </main>

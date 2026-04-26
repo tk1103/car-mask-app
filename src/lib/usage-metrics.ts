@@ -9,6 +9,8 @@ type UsageSummary = {
   detectSuccess: number;
   detectFailure: number;
   storage: 'kv' | 'memory';
+  kvConfigured: boolean;
+  missingEnvVars: string[];
 };
 
 const MEMORY_STORE = {
@@ -28,6 +30,13 @@ function getTodayDateStringJst(): string {
 
 function isKvConfigured(): boolean {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+function getMissingKvEnvVars(): string[] {
+  const missing: string[] = [];
+  if (!process.env.KV_REST_API_URL) missing.push('KV_REST_API_URL');
+  if (!process.env.KV_REST_API_TOKEN) missing.push('KV_REST_API_TOKEN');
+  return missing;
 }
 
 function getSetKey(date: string): string {
@@ -80,7 +89,16 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
     const detectAttempts = Number(countersRaw?.detectAttempts || 0);
     const detectSuccess = Number(countersRaw?.detectSuccess || 0);
     const detectFailure = Number(countersRaw?.detectFailure || 0);
-    return { date, uniqueUsers, detectAttempts, detectSuccess, detectFailure, storage: 'kv' };
+    return {
+      date,
+      uniqueUsers,
+      detectAttempts,
+      detectSuccess,
+      detectFailure,
+      storage: 'kv',
+      kvConfigured: true,
+      missingEnvVars: [],
+    };
   }
 
   const users = MEMORY_STORE.usersByDate.get(date) ?? new Set<string>();
@@ -92,5 +110,7 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
     detectSuccess: counters.detectSuccess,
     detectFailure: counters.detectFailure,
     storage: 'memory',
+    kvConfigured: false,
+    missingEnvVars: getMissingKvEnvVars(),
   };
 }
