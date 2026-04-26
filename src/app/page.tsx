@@ -312,6 +312,8 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const activeDetectControllerRef = useRef<AbortController | null>(null);
+  const activeDetectRequestIdRef = useRef(0);
   const objectUrlRegistryRef = useRef<Set<string>>(new Set());
   const playAttemptCountRef = useRef(0);
   const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
@@ -355,6 +357,7 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
+      activeDetectControllerRef.current?.abort();
       objectUrlRegistryRef.current.forEach((url) => URL.revokeObjectURL(url));
       objectUrlRegistryRef.current.clear();
     };
@@ -503,6 +506,11 @@ export default function Home() {
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
+    activeDetectControllerRef.current?.abort();
+    activeDetectControllerRef.current = null;
+    const requestId = activeDetectRequestIdRef.current + 1;
+    activeDetectRequestIdRef.current = requestId;
+    const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
 
     // 撮影前に残数チェック（UI 上の目安表示用）。サーバー側では日次ブロックは行わない。
     try {
@@ -751,6 +759,7 @@ export default function Home() {
           } catch (_) {}
         }
         const controller = new AbortController();
+        activeDetectControllerRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 48_000);
         const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
         try {
@@ -787,12 +796,16 @@ export default function Home() {
             await wait(backoffMs);
           }
 
-          if (lastResponse) {
+          if (lastResponse && isLatestRequest()) {
             applyResult(lastResult, lastResponse);
-          } else {
+          } else if (!lastResponse) {
             throw new Error('No response from detect-plate API');
+          } else {
+            return;
           }
         } catch (fetchErr: unknown) {
+          if (!isLatestRequest()) return;
+          if (fetchErr instanceof Error && fetchErr.name === 'AbortError') return;
           console.error('detect-plate fetch failed:', fetchErr);
           const fetchErrMessage =
             fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
@@ -803,7 +816,12 @@ export default function Home() {
           );
         } finally {
           clearTimeout(timeoutId);
-          setIsProcessing(false);
+          if (activeDetectControllerRef.current === controller) {
+            activeDetectControllerRef.current = null;
+          }
+          if (isLatestRequest()) {
+            setIsProcessing(false);
+          }
         }
       })();
     } catch (e) {
