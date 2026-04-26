@@ -312,11 +312,24 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const objectUrlRegistryRef = useRef<Set<string>>(new Set());
   const playAttemptCountRef = useRef(0);
   const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
   const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
   const logoCanvasRef = useRef<HTMLCanvasElement | null>(null); // 編集画面でマスク画像が無いときのロゴ用オフスクリーン
+
+  const createTrackedObjectUrl = useCallback((blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    objectUrlRegistryRef.current.add(url);
+    return url;
+  }, []);
+
+  const revokeTrackedObjectUrl = useCallback((url: string | null | undefined) => {
+    if (!url) return;
+    URL.revokeObjectURL(url);
+    objectUrlRegistryRef.current.delete(url);
+  }, []);
 
   useEffect(() => {
     const img = new Image();
@@ -338,6 +351,13 @@ export default function Home() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').then(() => {}).catch(() => {});
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      objectUrlRegistryRef.current.forEach((url) => URL.revokeObjectURL(url));
+      objectUrlRegistryRef.current.clear();
+    };
   }, []);
 
   useEffect(() => {
@@ -606,7 +626,7 @@ export default function Home() {
       });
 
       // 投機的実行: 即座に編集画面へ移行し、中央にデフォルトロゴを表示。API はバックグラウンドで実行
-      setPreviewImageUrl(URL.createObjectURL(fullResBlob));
+      setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
       setScreenMode('preview_edit');
       const defaultCorners = getDefaultCenterCorners();
       setDetectedCorners([defaultCorners]);
@@ -777,10 +797,10 @@ export default function Home() {
       setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
       setIsProcessing(false);
     }
-  }, []);
+  }, [createTrackedObjectUrl]);
 
   const retake = useCallback(() => {
-    if (previewImageUrl) URL.revokeObjectURL(previewImageUrl);
+    if (previewImageUrl) revokeTrackedObjectUrl(previewImageUrl);
     setPreviewImageUrl(null);
     setDetectedCorners([]);
     setDetectedBaseAngles([]);
@@ -807,7 +827,7 @@ export default function Home() {
       setTimeout(applyStream, 250);
       setTimeout(applyStream, 600);
     }
-  }, [previewImageUrl]);
+  }, [previewImageUrl, revokeTrackedObjectUrl]);
 
   useEffect(() => {
     if (!isProcessing || screenMode !== 'preview_edit') return;
@@ -947,10 +967,10 @@ export default function Home() {
             setTimeout(() => setShowSaveSuccess(false), 2500);
           } else {
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
+            a.href = createTrackedObjectUrl(blob);
             a.download = file.name;
             a.click();
-            URL.revokeObjectURL(a.href);
+            revokeTrackedObjectUrl(a.href);
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
           }
@@ -962,7 +982,7 @@ export default function Home() {
     } catch (e) {
       setIsProcessing(false);
     }
-  }, []);
+  }, [createTrackedObjectUrl, revokeTrackedObjectUrl]);
 
   const handleShareToSNS = useCallback(async (platform: 'facebook' | 'twitter' | 'instagram') => {
     if (!previewCanvasRef.current) return;
@@ -1054,10 +1074,10 @@ export default function Home() {
               } catch (clipboardError) {
                 // クリップボードAPIが使えない場合、ダウンロードにフォールバック
                 const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
+                a.href = createTrackedObjectUrl(blob);
                 a.download = file.name;
                 a.click();
-                URL.revokeObjectURL(a.href);
+                revokeTrackedObjectUrl(a.href);
                 setShowShareMenu(false);
                 setShowSaveSuccess(true);
                 setTimeout(() => setShowSaveSuccess(false), 2500);
@@ -1074,7 +1094,7 @@ export default function Home() {
       setIsProcessing(false);
       setCameraError('画像の処理に失敗しました');
     }
-  }, []);
+  }, [createTrackedObjectUrl, revokeTrackedObjectUrl]);
 
   /** 端末に保存（ダウンロード or 共有シートで「画像を保存」を選択） */
   const handleSaveToDevice = useCallback(async () => {
@@ -1101,10 +1121,10 @@ export default function Home() {
             } catch (shareErr: any) {
               if (shareErr.name !== 'AbortError') {
                 const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
+                a.href = createTrackedObjectUrl(blob);
                 a.download = file.name;
                 a.click();
-                URL.revokeObjectURL(a.href);
+                revokeTrackedObjectUrl(a.href);
                 setShowShareMenu(false);
                 setShowSaveSuccess(true);
                 setTimeout(() => setShowSaveSuccess(false), 2500);
@@ -1112,10 +1132,10 @@ export default function Home() {
             }
           } else {
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
+            a.href = createTrackedObjectUrl(blob);
             a.download = file.name;
             a.click();
-            URL.revokeObjectURL(a.href);
+            revokeTrackedObjectUrl(a.href);
             setShowShareMenu(false);
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
@@ -1128,7 +1148,7 @@ export default function Home() {
     } catch (e) {
       setIsProcessing(false);
     }
-  }, []);
+  }, [createTrackedObjectUrl, revokeTrackedObjectUrl]);
 
   /** 近くのPCなどに共有（共有シートに「近くのデバイス」が出る場合あり） */
   const handleShareToNearbyDevice = useCallback(async () => {
