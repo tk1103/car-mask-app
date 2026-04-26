@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, Download as DownloadIcon } from 'lucide-react';
+import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, ImagePlus, Download as DownloadIcon } from 'lucide-react';
 
 /** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
 function CarkusLogo({ className }: { className?: string }) {
@@ -336,6 +336,7 @@ export default function Home() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const photoPickerRef = useRef<HTMLInputElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const activeDetectControllerRef = useRef<AbortController | null>(null);
@@ -559,6 +560,233 @@ export default function Home() {
     
     return sum / (data.length / 40);
   }, []);
+
+  const handlePickImageFromDevice = useCallback(() => {
+    photoPickerRef.current?.click();
+  }, []);
+
+  const handleImageFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.currentTarget.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setCameraError('画像ファイルを選択してください。');
+      return;
+    }
+
+    activeDetectControllerRef.current?.abort();
+    activeDetectControllerRef.current = null;
+    const requestId = activeDetectRequestIdRef.current + 1;
+    activeDetectRequestIdRef.current = requestId;
+    const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
+
+    setIsProcessing(true);
+    setCameraError(null);
+    setDetectionFailed(false);
+    setShowManualGuide(false);
+    setRetryStatusText(null);
+
+    try {
+      const pickedUrl = createTrackedObjectUrl(file);
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+        img.src = pickedUrl;
+      });
+      revokeTrackedObjectUrl(pickedUrl);
+
+      const originalW = img.naturalWidth || img.width;
+      const originalH = img.naturalHeight || img.height;
+      if (!originalW || !originalH) throw new Error('画像サイズを取得できませんでした');
+
+      const fullResCanvas = document.createElement('canvas');
+      fullResCanvas.width = originalW;
+      fullResCanvas.height = originalH;
+      const fullResCtx = fullResCanvas.getContext('2d');
+      if (!fullResCtx) throw new Error('Canvas error');
+      fullResCtx.drawImage(img, 0, 0, originalW, originalH);
+
+      const fullResBlob = await new Promise<Blob>((resolve, reject) => {
+        fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
+      });
+
+      const maxApiLongEdge = 1024;
+      const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
+      const apiW = Math.round(originalW * apiScale);
+      const apiH = Math.round(originalH * apiScale);
+      const apiCanvas = document.createElement('canvas');
+      apiCanvas.width = apiW;
+      apiCanvas.height = apiH;
+      const apiCtx = apiCanvas.getContext('2d');
+      if (!apiCtx) throw new Error('Canvas error');
+      apiCtx.imageSmoothingEnabled = true;
+      apiCtx.imageSmoothingQuality = 'high';
+      apiCtx.filter = 'contrast(1.4) brightness(1.1)';
+      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
+      apiCtx.filter = 'none';
+
+      const MAX_VERCEL_BODY_BYTES = Math.floor(4.5 * 1024 * 1024);
+      const encodeCanvasToJpeg = (canvas: HTMLCanvasElement, quality: number) =>
+        new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', quality);
+        });
+      const compressCanvasToLimit = async (canvas: HTMLCanvasElement, initialQuality: number, minQuality = 0.45, qualityStep = 0.08): Promise<Blob> => {
+        const tryCompress = async (quality: number): Promise<Blob> => {
+          const blob = await encodeCanvasToJpeg(canvas, quality);
+          if (blob.size <= MAX_VERCEL_BODY_BYTES || quality <= minQuality) return blob;
+          return tryCompress(Math.max(minQuality, quality - qualityStep));
+        };
+        return tryCompress(initialQuality);
+      };
+      const apiBlob = await compressCanvasToLimit(apiCanvas, 0.88);
+
+      const maxApiLongEdgeSmall = 512;
+      const apiScaleSmall = Math.min(maxApiLongEdgeSmall / Math.max(originalW, originalH), 1);
+      const apiWSmall = Math.round(originalW * apiScaleSmall);
+      const apiHSmall = Math.round(originalH * apiScaleSmall);
+      const apiCanvasSmall = document.createElement('canvas');
+      apiCanvasSmall.width = apiWSmall;
+      apiCanvasSmall.height = apiHSmall;
+      const apiCtxSmall = apiCanvasSmall.getContext('2d');
+      if (apiCtxSmall) {
+        apiCtxSmall.imageSmoothingEnabled = true;
+        apiCtxSmall.imageSmoothingQuality = 'high';
+        apiCtxSmall.filter = 'contrast(1.4) brightness(1.1)';
+        apiCtxSmall.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiWSmall, apiHSmall);
+        apiCtxSmall.filter = 'none';
+      }
+      const apiBlobSmall = await compressCanvasToLimit(apiCanvasSmall, 0.85);
+
+      setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
+      setScreenMode('preview_edit');
+      const defaultCorners = getDefaultCenterCorners();
+      setDetectedCorners([defaultCorners]);
+      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
+      setEditLogoOffset({ x: 0, y: 0 });
+      setEditLogoScale(1);
+      setEditLogoRotation(0);
+      setToastMessage(null);
+      setIsProcessing(true);
+
+      setTimeout(() => {
+        const blurScore = getBlurScore(apiCanvas);
+        setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
+      }, 0);
+
+      const createFormData = (useSmallImage = false) => {
+        const fd = new FormData();
+        if (useSmallImage) {
+          fd.append('image', apiBlobSmall, 'photo-small.jpg');
+          fd.append('width', apiWSmall.toString());
+          fd.append('height', apiHSmall.toString());
+        } else {
+          fd.append('image', apiBlob, 'photo.jpg');
+          fd.append('width', apiW.toString());
+          fd.append('height', apiH.toString());
+        }
+        return fd;
+      };
+
+      const controller = new AbortController();
+      activeDetectControllerRef.current = controller;
+      const timeoutId = setTimeout(() => controller.abort(), 48_000);
+      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      try {
+        const deviceId = getDeviceId();
+        const maxRetryCount = 2;
+        let lastResponse: Response | null = null;
+        let lastResult: DetectApiResponse | null = null;
+
+        for (let attempt = 0; attempt <= maxRetryCount; attempt++) {
+          const useSmallImage = attempt > 0;
+          const res = await fetch('/api/detect', {
+            method: 'POST',
+            body: createFormData(useSmallImage),
+            signal: controller.signal,
+            headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+          });
+          let result: DetectApiResponse = {};
+          try {
+            result = await res.json();
+          } catch (_) {
+            result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
+          }
+          lastResponse = res;
+          lastResult = result;
+          if (res.status !== 429 || attempt === maxRetryCount) break;
+
+          const retryAfterHeader = res.headers.get('retry-after');
+          const retryAfterFromHeader = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN;
+          const retryAfterFromBody = typeof result.retryAfterSeconds === 'number' ? result.retryAfterSeconds : NaN;
+          const serverSuggestedSeconds = Number.isFinite(retryAfterFromBody) ? retryAfterFromBody : Number.isFinite(retryAfterFromHeader) ? retryAfterFromHeader : 0;
+          const baseBackoffMs = 1500 * Math.pow(2, attempt);
+          const jitterMs = Math.floor(Math.random() * 700);
+          const backoffMs = Math.max(baseBackoffMs + jitterMs, serverSuggestedSeconds * 1000);
+          setRetryStatusText(`サーバー混雑のため ${Math.ceil(backoffMs / 1000)}秒後に再試行します（${attempt + 1}/${maxRetryCount + 1}）`);
+          await wait(backoffMs);
+        }
+
+        if (lastResponse && lastResult && isLatestRequest()) {
+          const remaining = lastResult.remainingToday;
+          if (remaining !== undefined) setDailyRemaining(remaining);
+          if (!lastResponse.ok) {
+            const errPayload = lastResult.error;
+            const msg = typeof errPayload === 'string' ? errPayload : lastResult.userMessage || '自動検出に失敗しました。手動で位置を合わせてください。';
+            setToastMessage(getMessageByErrorType(lastResult.errorType, msg, lastResult.retryAfterSeconds));
+            maybeShowManualGuideOnce();
+          } else if (lastResult.found && lastResult.plates && Array.isArray(lastResult.plates) && lastResult.plates.length > 0) {
+            const platesCorners: Corners[] = lastResult.plates
+              .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
+              .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
+            if (platesCorners.length > 0) {
+              setDetectedCorners(platesCorners);
+              setDetectedBaseAngles(platesCorners.map((corners) => getPlateBaseAngle(corners)));
+              setEditLogoOffset({ x: 0, y: 0 });
+              setEditLogoScale(1);
+              setEditLogoRotation(0);
+              setDetectionFailed(false);
+            } else {
+              setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+              maybeShowManualGuideOnce();
+            }
+          } else if (lastResult.found && lastResult.corners && Array.isArray(lastResult.corners) && lastResult.corners.length === 4) {
+            const single = normalizeCornersOrder(apiCornersToClient({ corners: lastResult.corners }));
+            setDetectedCorners([single]);
+            setDetectedBaseAngles([getPlateBaseAngle(single)]);
+            setEditLogoOffset({ x: 0, y: 0 });
+            setEditLogoScale(1);
+            setEditLogoRotation(0);
+            setDetectionFailed(false);
+          } else {
+            setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+            maybeShowManualGuideOnce();
+          }
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        if (activeDetectControllerRef.current === controller) {
+          activeDetectControllerRef.current = null;
+        }
+        if (isLatestRequest()) {
+          setIsProcessing(false);
+          setRetryStatusText(null);
+        }
+      }
+    } catch (err) {
+      const defaultCorners = getDefaultCenterCorners();
+      setDetectedCorners([defaultCorners]);
+      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
+      setEditLogoOffset({ x: 0, y: 0 });
+      setEditLogoScale(1);
+      setEditLogoRotation(0);
+      setScreenMode('preview_edit');
+      setToastMessage(`画像の解析に失敗しました。手動で位置を合わせてください。${err instanceof Error ? ` (${err.message})` : ''}`);
+      maybeShowManualGuideOnce();
+      setIsProcessing(false);
+      setRetryStatusText(null);
+    }
+  }, [createTrackedObjectUrl, getMessageByErrorType, maybeShowManualGuideOnce, revokeTrackedObjectUrl]);
 
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
@@ -1378,6 +1606,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
+      <input ref={photoPickerRef} type="file" accept="image/*" onChange={handleImageFileSelected} className="hidden" />
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-black/40 backdrop-blur-xl border-b border-white/20">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
@@ -1468,6 +1697,14 @@ export default function Home() {
                 <span className="font-light text-sm tracking-wide">撮影する</span>
               )}
             </button>
+            <button
+              onClick={handlePickImageFromDevice}
+              disabled={isProcessing}
+              className="min-w-[8rem] px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform hover:bg-white/20"
+            >
+              <ImagePlus size={20} strokeWidth={1.8} />
+              <span className="font-light text-sm tracking-wide">写真を選択</span>
+            </button>
             <p className="text-white/70 text-xs font-light text-center">
               無料版では Google Gemini API の利用制限により、1日にご利用いただける回数が変動する場合があります。
             </p>
@@ -1484,6 +1721,13 @@ export default function Home() {
           >
             <Camera size={22} strokeWidth={1.5} />
             カメラを起動
+          </button>
+          <button
+            onClick={handlePickImageFromDevice}
+            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-widest border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
+          >
+            <ImagePlus size={22} strokeWidth={1.5} />
+            写真を選択
           </button>
           {cameraError && (
             <p className="text-red-300 text-xs font-light max-w-xs text-center">{cameraError}</p>
