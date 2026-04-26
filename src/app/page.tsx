@@ -329,6 +329,8 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限とは異なる場合があります）
+const LOCAL_DAILY_FREE_LIMIT = 1;
+const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
@@ -375,6 +377,8 @@ const t = {
     configIssue: '現在自動検出の設定に問題があります。手動で位置を合わせてください。',
     imageReadFailed: '画像の読み取りに失敗しました。撮り直すか、手動で位置を合わせてください。',
     serverBusyRetry: 'サーバーが混み合っています。少し時間をおいて再試行してください。手動調整はそのまま利用できます。',
+    dailyFreeLimitReached: '本日の無料枠を使い切りました。',
+    freeQuotaLabel: '本日の無料解析',
   },
   en: {
     beta: 'BETA',
@@ -416,8 +420,20 @@ const t = {
     configIssue: 'Auto-detection config issue detected. Please adjust manually.',
     imageReadFailed: 'Failed to read image. Retake or adjust manually.',
     serverBusyRetry: 'Server is busy. Please retry in a moment. Manual adjustment is available.',
+    dailyFreeLimitReached: 'You have used all free attempts for today.',
+    freeQuotaLabel: 'Daily free detections',
   },
 } as const;
+
+function getJstDateString(): string {
+  const now = new Date();
+  const jstMs = now.getTime() + 9 * 60 * 60 * 1000;
+  const jstDate = new Date(jstMs);
+  const y = jstDate.getUTCFullYear();
+  const m = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(jstDate.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>('ja');
@@ -443,6 +459,7 @@ export default function Home() {
   const [retryStatusText, setRetryStatusText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
+  const [localDailySuccessCount, setLocalDailySuccessCount] = useState(0);
   const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
@@ -466,6 +483,47 @@ export default function Home() {
   const text = t[lang];
 
   const tx = useCallback((key: keyof typeof t.ja): string => t[langRef.current][key], []);
+
+  const loadLocalDailyUsage = useCallback(() => {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      setLocalDailySuccessCount(0);
+      return { date: getJstDateString(), count: 0 };
+    }
+    const today = getJstDateString();
+    try {
+      const raw = window.localStorage.getItem(LOCAL_DAILY_SUCCESS_KEY);
+      if (!raw) {
+        setLocalDailySuccessCount(0);
+        return { date: today, count: 0 };
+      }
+      const parsed = JSON.parse(raw) as { date?: string; count?: number };
+      const count = parsed.date === today ? Math.max(0, Number(parsed.count || 0)) : 0;
+      setLocalDailySuccessCount(count);
+      if (parsed.date !== today) {
+        window.localStorage.setItem(LOCAL_DAILY_SUCCESS_KEY, JSON.stringify({ date: today, count: 0 }));
+      }
+      return { date: today, count };
+    } catch (_) {
+      setLocalDailySuccessCount(0);
+      return { date: today, count: 0 };
+    }
+  }, []);
+
+  const hasLocalDailyQuota = useCallback(() => {
+    const usage = loadLocalDailyUsage();
+    return usage.count < LOCAL_DAILY_FREE_LIMIT;
+  }, [loadLocalDailyUsage]);
+
+  const incrementLocalDailyUsageOnSuccess = useCallback(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const today = getJstDateString();
+    const usage = loadLocalDailyUsage();
+    const nextCount = Math.min(LOCAL_DAILY_FREE_LIMIT, usage.count + 1);
+    try {
+      window.localStorage.setItem(LOCAL_DAILY_SUCCESS_KEY, JSON.stringify({ date: today, count: nextCount }));
+    } catch (_) {}
+    setLocalDailySuccessCount(nextCount);
+  }, [loadLocalDailyUsage]);
 
   const createTrackedObjectUrl = useCallback((blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -528,6 +586,10 @@ export default function Home() {
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
   }, []);
+
+  useEffect(() => {
+    loadLocalDailyUsage();
+  }, [loadLocalDailyUsage]);
 
   /** 画面表示用に残り回数を取得（APIは消費しない） */
   const fetchRemainingQuota = useCallback(async () => {
@@ -701,6 +763,10 @@ export default function Home() {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       setCameraError(tx('imageFileOnly'));
+      return;
+    }
+    if (!hasLocalDailyQuota()) {
+      setCameraError(tx('dailyFreeLimitReached'));
       return;
     }
 
@@ -888,9 +954,14 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
+            incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
             maybeShowManualGuideOnce();
+          }
+          if (lastResult.found && lastResult.plates && Array.isArray(lastResult.plates) && lastResult.plates.length > 0) {
+            const hasAnyValidPlate = lastResult.plates.some((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4);
+            if (hasAnyValidPlate) incrementLocalDailyUsageOnSuccess();
           }
         }
       } finally {
@@ -916,11 +987,15 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, getMessageByErrorType, maybeShowManualGuideOnce, revokeTrackedObjectUrl]);
+  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, maybeShowManualGuideOnce, revokeTrackedObjectUrl, tx]);
 
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
+    if (!hasLocalDailyQuota()) {
+      setCameraError(tx('dailyFreeLimitReached'));
+      return;
+    }
     activeDetectControllerRef.current?.abort();
     activeDetectControllerRef.current = null;
     const requestId = activeDetectRequestIdRef.current + 1;
@@ -1148,6 +1223,7 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
+            incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
             maybeShowManualGuideOnce();
@@ -1160,6 +1236,7 @@ export default function Home() {
           setEditLogoScale(1);
           setEditLogoRotation(0);
           setDetectionFailed(false);
+          incrementLocalDailyUsageOnSuccess();
         } else {
           setToastMessage(tx('autoDetectFailedManual'));
           maybeShowManualGuideOnce();
@@ -1269,7 +1346,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, getMessageByErrorType, maybeShowManualGuideOnce]);
+  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, maybeShowManualGuideOnce, tx]);
 
   const retake = useCallback(() => {
     if (previewImageUrl) revokeTrackedObjectUrl(previewImageUrl);
@@ -1855,6 +1932,9 @@ export default function Home() {
               <p className="mt-1 text-white/70 text-xs font-light">
                 {text.cameraDailyNote}
               </p>
+              <p className="mt-1 text-white/60 text-[11px] font-light">
+                {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
+              </p>
             </div>
           </div>
             <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-black/30 backdrop-blur-xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-44 landscape:py-4">
@@ -1915,6 +1995,9 @@ export default function Home() {
           )}
           <p className="text-white/60 text-xs font-light mt-4 text-center max-w-xs">
             {text.dailyNote}
+          </p>
+          <p className="text-white/60 text-xs font-light mt-1 text-center max-w-xs">
+            {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
           </p>
         </main>
       )}
