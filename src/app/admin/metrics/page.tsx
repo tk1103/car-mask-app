@@ -11,6 +11,7 @@ type MetricsResponse = {
   storage: 'kv' | 'memory';
   kvConfigured?: boolean;
   missingEnvVars?: string[];
+  kvError?: string;
 };
 
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
@@ -132,6 +133,11 @@ export default function AdminMetricsPage() {
                   いまは一時保存（Memory）です。Vercelに以下の環境変数を追加すると、数字が永続化されます。
                 </p>
                 <p className="text-amber-100/90 text-xs">不足: {(data.missingEnvVars ?? []).join(', ') || 'なし'}</p>
+                {data.kvError && (
+                  <p className="text-amber-100/90 text-xs break-all">
+                    KV接続エラー: {data.kvError}
+                  </p>
+                )}
                 <p className="text-amber-100/90 text-xs">
                   設定後は再デプロイしてからこの画面を更新してください。
                 </p>

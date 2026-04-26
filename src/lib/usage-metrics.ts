@@ -11,6 +11,7 @@ type UsageSummary = {
   storage: 'kv' | 'memory';
   kvConfigured: boolean;
   missingEnvVars: string[];
+  kvError?: string;
 };
 
 const MEMORY_STORE = {
@@ -56,17 +57,21 @@ function normalizeUserId(userId: string): string {
 export async function trackUsageEvent(userId: string, event: UsageEvent, date = getTodayDateStringJst()): Promise<void> {
   const normalizedUserId = normalizeUserId(userId);
   if (isKvConfigured()) {
-    const setKey = getSetKey(date);
-    const counterKey = getCounterKey(date);
-    const ttlSeconds = 60 * 60 * 24 * 8;
-    const counterField = event === 'detect_attempt' ? 'detectAttempts' : event === 'detect_success' ? 'detectSuccess' : 'detectFailure';
-    await Promise.all([
-      kv.sadd(setKey, normalizedUserId),
-      kv.expire(setKey, ttlSeconds),
-      kv.hincrby(counterKey, counterField, 1),
-      kv.expire(counterKey, ttlSeconds),
-    ]);
-    return;
+    try {
+      const setKey = getSetKey(date);
+      const counterKey = getCounterKey(date);
+      const ttlSeconds = 60 * 60 * 24 * 8;
+      const counterField = event === 'detect_attempt' ? 'detectAttempts' : event === 'detect_success' ? 'detectSuccess' : 'detectFailure';
+      await Promise.all([
+        kv.sadd(setKey, normalizedUserId),
+        kv.expire(setKey, ttlSeconds),
+        kv.hincrby(counterKey, counterField, 1),
+        kv.expire(counterKey, ttlSeconds),
+      ]);
+      return;
+    } catch (error) {
+      console.error('[usage-metrics] KV write failed. Falling back to memory.', error);
+    }
   }
 
   const users = MEMORY_STORE.usersByDate.get(date) ?? new Set<string>();
@@ -81,24 +86,38 @@ export async function trackUsageEvent(userId: string, event: UsageEvent, date = 
 
 export async function getUsageSummary(date = getTodayDateStringJst()): Promise<UsageSummary> {
   if (isKvConfigured()) {
-    const [uniqueUsersRaw, countersRaw] = await Promise.all([
-      kv.scard(getSetKey(date)),
-      kv.hgetall<Record<string, string | number>>(getCounterKey(date)),
-    ]);
-    const uniqueUsers = Number(uniqueUsersRaw || 0);
-    const detectAttempts = Number(countersRaw?.detectAttempts || 0);
-    const detectSuccess = Number(countersRaw?.detectSuccess || 0);
-    const detectFailure = Number(countersRaw?.detectFailure || 0);
-    return {
-      date,
-      uniqueUsers,
-      detectAttempts,
-      detectSuccess,
-      detectFailure,
-      storage: 'kv',
-      kvConfigured: true,
-      missingEnvVars: [],
-    };
+    try {
+      const [uniqueUsersRaw, countersRaw] = await Promise.all([
+        kv.scard(getSetKey(date)),
+        kv.hgetall<Record<string, string | number>>(getCounterKey(date)),
+      ]);
+      const uniqueUsers = Number(uniqueUsersRaw || 0);
+      const detectAttempts = Number(countersRaw?.detectAttempts || 0);
+      const detectSuccess = Number(countersRaw?.detectSuccess || 0);
+      const detectFailure = Number(countersRaw?.detectFailure || 0);
+      return {
+        date,
+        uniqueUsers,
+        detectAttempts,
+        detectSuccess,
+        detectFailure,
+        storage: 'kv',
+        kvConfigured: true,
+        missingEnvVars: [],
+      };
+    } catch (error) {
+      return {
+        date,
+        uniqueUsers: 0,
+        detectAttempts: 0,
+        detectSuccess: 0,
+        detectFailure: 0,
+        storage: 'memory',
+        kvConfigured: false,
+        missingEnvVars: [],
+        kvError: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   const users = MEMORY_STORE.usersByDate.get(date) ?? new Set<string>();
