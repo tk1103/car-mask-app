@@ -227,6 +227,33 @@ function drawImageWarpedToQuad(
   ctx.restore();
 }
 
+function mapUvToQuad(quad: QuadPx, u: number, v: number): { x: number; y: number } {
+  const [tl, tr, br, bl] = quad;
+  const oneMinusU = 1 - u;
+  const oneMinusV = 1 - v;
+  return {
+    x:
+      oneMinusU * oneMinusV * tl.x +
+      u * oneMinusV * tr.x +
+      u * v * br.x +
+      oneMinusU * v * bl.x,
+    y:
+      oneMinusU * oneMinusV * tl.y +
+      u * oneMinusV * tr.y +
+      u * v * br.y +
+      oneMinusU * v * bl.y,
+  };
+}
+
+function buildInnerQuadFromRect(quad: QuadPx, x0: number, y0: number, x1: number, y1: number): QuadPx {
+  return [
+    mapUvToQuad(quad, x0, y0),
+    mapUvToQuad(quad, x1, y0),
+    mapUvToQuad(quad, x1, y1),
+    mapUvToQuad(quad, x0, y1),
+  ];
+}
+
 // 黒マスクの真ん中に Carkus ロゴを配置（座標系の原点 0,0 が中央）
 function drawCarkusLogoAtOrigin(
   ctx: CanvasRenderingContext2D,
@@ -1222,7 +1249,7 @@ export default function Home() {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0);
 
-    if (!isProcessing && detectedCorners.length > 0 && (maskImage?.complete || true)) {
+    if (!isProcessing && detectedCorners.length > 0) {
       const scale = editLogoScale;
 
       // 複数プレート対応: 各検出座標に対して fillQuad とロゴ描画を一括適用
@@ -1244,7 +1271,9 @@ export default function Home() {
         const cf = Math.cos(finalRotation);
         const sf = Math.sin(finalRotation);
 
-        const plateWidth = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
+        const plateWidthTop = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
+        const plateWidthBottom = Math.hypot((scaled[2].x - scaled[3].x) * w, (scaled[2].y - scaled[3].y) * h);
+        const plateWidth = (plateWidthTop + plateWidthBottom) / 2;
         const plateHeightLeft = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
         const plateHeightRight = Math.hypot((scaled[2].x - scaled[1].x) * w, (scaled[2].y - scaled[1].y) * h);
         const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
@@ -1265,35 +1294,61 @@ export default function Home() {
           };
         }) as QuadPx;
 
-        // 黒マスク + その上に白で Carkus / carkus.net（iPhone URL 風）
+        // 1段目: プレート全体を黒塗り
         fillQuad(ctx, quadPx, '#000000');
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        if (maskImage && maskImage.complete && maskImage.naturalWidth) {
-          drawImageWarpedToQuad(ctx, maskImage, quadPx, maskImage.naturalWidth, maskImage.naturalHeight);
+
+        // 2段目: ロゴは比率維持 + 中央配置（多形状プレート対応）
+        const plateAspect = plateWidth / Math.max(1, plateHeight);
+        const isLogoImageReady = Boolean(
+          carkusLogoImage &&
+          carkusLogoImage.naturalWidth > 0 &&
+          carkusLogoImage.naturalHeight > 0
+        );
+        // naturalWidth が 0 のロード中はフォールバック比率を使い、ゼロ除算を防ぐ。
+        const logoAspect = isLogoImageReady
+          ? carkusLogoImage!.naturalWidth / carkusLogoImage!.naturalHeight
+          : 3.2;
+        const insetRatio = Math.min(0.1, Math.max(0.05, plateAspect > 4 ? 0.1 : 0.06));
+        const availableW = Math.max(0.1, 1 - insetRatio * 2);
+        const availableH = Math.max(0.1, 1 - insetRatio * 2);
+        const availableAspect = availableW / availableH;
+
+        let logoNormW = availableW;
+        let logoNormH = availableH;
+        if (availableAspect > logoAspect) {
+          logoNormW = availableH * logoAspect;
         } else {
-          const Lw = LOGO_CANVAS_WIDTH;
-          const Lh = Math.max(40, Math.round(Lw * (plateHeight / plateWidth)));
-          let logoCanvas = logoCanvasRef.current;
-          if (!logoCanvas) {
-            logoCanvas = document.createElement('canvas');
-            logoCanvasRef.current = logoCanvas;
-          }
-          logoCanvas.width = Lw;
-          logoCanvas.height = Lh;
-          const lctx = logoCanvas.getContext('2d');
-          if (lctx) {
-            lctx.clearRect(0, 0, Lw, Lh);
-            lctx.save();
-            lctx.translate(Lw / 2, Lh / 2);
-            drawCarkusLogoAtOrigin(lctx, Lw * 1.2, Lh * 1.2, undefined, carkusLogoImage);
-            lctx.restore();
-          }
-          drawImageWarpedToQuad(ctx, logoCanvas, quadPx, Lw, Lh);
+          logoNormH = availableW / logoAspect;
         }
+        const x0 = (1 - logoNormW) / 2;
+        const y0 = (1 - logoNormH) / 2;
+        const x1 = x0 + logoNormW;
+        const y1 = y0 + logoNormH;
+        const logoQuad = buildInnerQuadFromRect(quadPx, x0, y0, x1, y1);
+
+        const Lh = 220;
+        const Lw = Math.max(120, Math.round(Lh * logoAspect));
+        let logoCanvas = logoCanvasRef.current;
+        if (!logoCanvas) {
+          logoCanvas = document.createElement('canvas');
+          logoCanvasRef.current = logoCanvas;
+        }
+        logoCanvas.width = Lw;
+        logoCanvas.height = Lh;
+        const lctx = logoCanvas.getContext('2d');
+        if (lctx) {
+          lctx.clearRect(0, 0, Lw, Lh);
+          lctx.save();
+          lctx.translate(Lw / 2, Lh / 2);
+          drawCarkusLogoAtOrigin(lctx, Lw * 0.92, Lh * 0.92, undefined, carkusLogoImage);
+          lctx.restore();
+        }
+        drawImageWarpedToQuad(ctx, logoCanvas, logoQuad, Lw, Lh);
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, maskImage, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
+  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
