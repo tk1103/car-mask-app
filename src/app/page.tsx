@@ -47,7 +47,6 @@ type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRig
 
 const DEVICE_ID_KEY = 'carkus_device_id';
 const CARKUS_DOWNLOAD_COUNT_KEY = 'carkus_download_count';
-const MANUAL_GUIDE_SHOWN_KEY = 'carkus_manual_guide_shown';
 
 type DetectErrorType =
   | 'rate_limited'
@@ -345,7 +344,19 @@ const t = {
     pickPhoto: '写真を選択',
     capture: '撮影する',
     processing: '解析中',
-    processingHint: '解析中... 位置は調整できます',
+    processingDurationHint: '目安は10〜40秒です。混雑時は1分前後かかることがあります',
+    processingElapsed: '経過 {sec} 秒',
+    processingWaitMore: 'まだ解析中です。このままお待ちください。',
+    processingRetakeIfSlow: '20秒以上かかる場合は、通信混雑の可能性があります。下の「撮り直し」で明るい所・至近距離からやり直せます。',
+    processingSidebarHint: '枠の調整は解析の完了後に行えます。今は解析の終了をお待ちください。',
+    manualGuideTitle: '手動で枠を合わせる',
+    manualGuideWhy:
+      '自動でナンバープレート上の枠位置を特定できませんでした（明るさ・距離・反射などの影響で起こり得ます）。次の3ステップで同じ品質に仕上げられます。',
+    manualStep1: '「サイズ」で枠（ロゴ）の大きさをプレート幅に合わせる',
+    manualStep2: '写真上を指でドラッグして、枠をプレートの上に乗せる',
+    manualStep3: '必要なら「角度」で回転を整える',
+    guideClose: 'この説明を閉じる',
+    serverRetrying: 'サーバー混雑のため {sec} 秒後に再試行します（{cur}/{max}）',
     saveSuccess: '保存しました',
     saveThanks: 'ご利用ありがとうございます',
     retake: '撮り直す',
@@ -388,7 +399,19 @@ const t = {
     pickPhoto: 'Pick Photo',
     capture: 'Capture',
     processing: 'Processing',
-    processingHint: 'Processing... You can still adjust position.',
+    processingDurationHint: 'Usually 10–40s; when busy, about a minute is possible.',
+    processingElapsed: '{sec}s elapsed',
+    processingWaitMore: 'Still analyzing. Please keep waiting.',
+    processingRetakeIfSlow: 'If this takes 20+ seconds, the line may be busy. Use Retake for a closer, brighter shot.',
+    processingSidebarHint: 'You can move the frame after analysis finishes. Please wait.',
+    manualGuideTitle: 'Align the frame yourself',
+    manualGuideWhy:
+      "We could not find the frame on the license plate (light, distance, or reflections can cause this). Follow these 3 steps for the same result.",
+    manualStep1: "Use 'Size' to match the frame (logo) width to the plate",
+    manualStep2: "Drag on the photo to place the frame on the plate",
+    manualStep3: "Optionally use 'Angle' to fine-tune rotation",
+    guideClose: 'Dismiss this help',
+    serverRetrying: 'Server busy. Retrying in {sec}s ({cur}/{max})',
     saveSuccess: 'Saved',
     saveThanks: 'Thank you for using Carkus',
     retake: 'Retake',
@@ -425,6 +448,10 @@ const t = {
   },
 } as const;
 
+function fillI18nTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : ''));
+}
+
 function getJstDateString(): string {
   const now = new Date();
   const jstMs = now.getTime() + 9 * 60 * 60 * 1000;
@@ -441,6 +468,7 @@ export default function Home() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingElapsedSec, setProcessingElapsedSec] = useState(0);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
 
@@ -627,15 +655,9 @@ export default function Home() {
     }
   }, [deferredPrompt]);
 
-  const maybeShowManualGuideOnce = useCallback(() => {
+  const showManualHelpAfterFailure = useCallback(() => {
     setDetectionFailed(true);
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    try {
-      const shown = window.localStorage.getItem(MANUAL_GUIDE_SHOWN_KEY);
-      if (shown === '1') return;
-      window.localStorage.setItem(MANUAL_GUIDE_SHOWN_KEY, '1');
-      setShowManualGuide(true);
-    } catch (_) {}
+    setShowManualGuide(true);
   }, []);
 
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, retryAfterSeconds?: number) => {
@@ -919,7 +941,13 @@ export default function Home() {
           const baseBackoffMs = 1500 * Math.pow(2, attempt);
           const jitterMs = Math.floor(Math.random() * 700);
           const backoffMs = Math.max(baseBackoffMs + jitterMs, serverSuggestedSeconds * 1000);
-          setRetryStatusText(`サーバー混雑のため ${Math.ceil(backoffMs / 1000)}秒後に再試行します（${attempt + 1}/${maxRetryCount + 1}）`);
+          setRetryStatusText(
+            fillI18nTemplate(tx('serverRetrying'), {
+              sec: Math.ceil(backoffMs / 1000),
+              cur: attempt + 1,
+              max: maxRetryCount + 1,
+            })
+          );
           await wait(backoffMs);
         }
 
@@ -930,7 +958,7 @@ export default function Home() {
             const errPayload = lastResult.error;
             const msg = typeof errPayload === 'string' ? errPayload : lastResult.userMessage || tx('autoDetectFailedManual');
             setToastMessage(getMessageByErrorType(lastResult.errorType, msg, lastResult.retryAfterSeconds));
-            maybeShowManualGuideOnce();
+            showManualHelpAfterFailure();
           } else if (lastResult.found && lastResult.plates && Array.isArray(lastResult.plates) && lastResult.plates.length > 0) {
             const platesCorners: Corners[] = lastResult.plates
               .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
@@ -944,7 +972,7 @@ export default function Home() {
               setDetectionFailed(false);
             } else {
               setToastMessage(tx('autoDetectFailedManual'));
-              maybeShowManualGuideOnce();
+              showManualHelpAfterFailure();
             }
           } else if (lastResult.found && lastResult.corners && Array.isArray(lastResult.corners) && lastResult.corners.length === 4) {
             const single = normalizeCornersOrder(apiCornersToClient({ corners: lastResult.corners }));
@@ -957,7 +985,7 @@ export default function Home() {
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
-            maybeShowManualGuideOnce();
+            showManualHelpAfterFailure();
           }
           if (lastResult.found && lastResult.plates && Array.isArray(lastResult.plates) && lastResult.plates.length > 0) {
             const hasAnyValidPlate = lastResult.plates.some((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4);
@@ -983,11 +1011,11 @@ export default function Home() {
       setEditLogoRotation(0);
       setScreenMode('preview_edit');
       setToastMessage(`画像の解析に失敗しました。手動で位置を合わせてください。${err instanceof Error ? ` (${err.message})` : ''}`);
-      maybeShowManualGuideOnce();
+      showManualHelpAfterFailure();
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, maybeShowManualGuideOnce, revokeTrackedObjectUrl, tx]);
+  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
 
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
@@ -1209,7 +1237,7 @@ export default function Home() {
           const retryAfterSeconds = result.retryAfterSeconds;
           const message = getMessageByErrorType(result.errorType, backendMessage || rawMessage, retryAfterSeconds);
           setToastMessage(`${message} [${errorCode}]`);
-          maybeShowManualGuideOnce();
+          showManualHelpAfterFailure();
           return;
         }
         if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
@@ -1226,7 +1254,7 @@ export default function Home() {
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
-            maybeShowManualGuideOnce();
+            showManualHelpAfterFailure();
           }
         } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
           const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
@@ -1239,7 +1267,7 @@ export default function Home() {
           incrementLocalDailyUsageOnSuccess();
         } else {
           setToastMessage(tx('autoDetectFailedManual'));
-          maybeShowManualGuideOnce();
+          showManualHelpAfterFailure();
         }
       };
 
@@ -1294,7 +1322,13 @@ export default function Home() {
             const baseBackoffMs = 1500 * Math.pow(2, attempt);
             const jitterMs = Math.floor(Math.random() * 700);
             const backoffMs = Math.max(baseBackoffMs + jitterMs, serverSuggestedSeconds * 1000);
-            setRetryStatusText(`サーバー混雑のため ${Math.ceil(backoffMs / 1000)}秒後に再試行します（${attempt + 1}/${maxRetryCount + 1}）`);
+            setRetryStatusText(
+              fillI18nTemplate(tx('serverRetrying'), {
+                sec: Math.ceil(backoffMs / 1000),
+                cur: attempt + 1,
+                max: maxRetryCount + 1,
+              })
+            );
             await wait(backoffMs);
           }
 
@@ -1316,7 +1350,7 @@ export default function Home() {
               ? `自動検出がタイムアウトしました: ${fetchErrMessage}`
               : `自動検出に失敗しました: ${fetchErrMessage}`
           );
-          maybeShowManualGuideOnce();
+          showManualHelpAfterFailure();
         } finally {
           clearTimeout(timeoutId);
           if (activeDetectControllerRef.current === controller) {
@@ -1342,11 +1376,11 @@ export default function Home() {
       setEditLogoScale(1);
       setEditLogoRotation(0);
       setToastMessage(tx('autoDetectFailedManual'));
-      maybeShowManualGuideOnce();
+      showManualHelpAfterFailure();
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, maybeShowManualGuideOnce, tx]);
+  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, showManualHelpAfterFailure, tx]);
 
   const retake = useCallback(() => {
     if (previewImageUrl) revokeTrackedObjectUrl(previewImageUrl);
@@ -1381,14 +1415,26 @@ export default function Home() {
   }, [previewImageUrl, revokeTrackedObjectUrl]);
 
   useEffect(() => {
+    if (!isProcessing) {
+      setProcessingElapsedSec(0);
+      return;
+    }
+    setProcessingElapsedSec(0);
+    const id = window.setInterval(() => {
+      setProcessingElapsedSec((n) => n + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isProcessing]);
+
+  useEffect(() => {
     if (!isProcessing || screenMode !== 'preview_edit') return;
     const t = setTimeout(() => {
       setIsProcessing(false);
       setToastMessage(tx('timeoutManual'));
-      maybeShowManualGuideOnce();
+      showManualHelpAfterFailure();
     }, 50_000);
     return () => clearTimeout(t);
-  }, [isProcessing, screenMode, maybeShowManualGuideOnce]);
+  }, [isProcessing, screenMode, showManualHelpAfterFailure]);
 
   useEffect(() => {
     if (!previewImageUrl) {
@@ -1910,7 +1956,23 @@ export default function Home() {
               <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex flex-col items-center justify-center z-10 px-4">
                 <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
                 <p className="text-white font-light text-sm mt-4">{text.processing}...</p>
-                <p className="text-white/80 text-xs font-extralight text-center max-w-xs mt-1">そのまま位置を調整できます</p>
+                <p className="text-white/90 text-xs font-light text-center max-w-xs mt-2 tabular-nums">
+                  {fillI18nTemplate(text.processingElapsed, { sec: Math.max(0, processingElapsedSec) })}
+                </p>
+                <p className="text-white/65 text-[11px] font-extralight text-center max-w-xs mt-1.5 leading-relaxed">
+                  {text.processingDurationHint}
+                </p>
+                {processingElapsedSec >= 8 && (
+                  <p className="text-amber-200/90 text-xs font-light text-center max-w-xs mt-2">{text.processingWaitMore}</p>
+                )}
+                {processingElapsedSec >= 20 && (
+                  <p className="text-white/75 text-[11px] font-extralight text-center max-w-xs mt-1.5 leading-relaxed">
+                    {text.processingRetakeIfSlow}
+                  </p>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
+                  <div className="h-full bg-white/80 processing-sweep" />
+                </div>
               </div>
             )}
             <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-black/30 backdrop-blur-xl border-b border-white/20 landscape:right-0 landscape:border-b-0 landscape:border-r landscape:border-white/20">
@@ -2057,21 +2119,45 @@ export default function Home() {
                 style={{ touchAction: 'none' }}
               />
               {isProcessing && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="relative w-24 h-24 flex items-center justify-center">
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/25">
+                  <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
                     <div className="absolute inset-0 rounded-full border border-white/40 border-t-white animate-spin-slow" />
                     <div className="w-16 h-16 rounded-full bg-black/70 flex items-center justify-center animate-pulse-mask">
                       <span className="text-white text-xs font-light tracking-wide">{text.processing}</span>
                     </div>
+                  </div>
+                  <p className="text-white/90 text-xs font-light mt-4 text-center max-w-[min(100%,20rem)] px-3 tabular-nums">
+                    {fillI18nTemplate(text.processingElapsed, { sec: Math.max(0, processingElapsedSec) })}
+                  </p>
+                  <p className="text-white/65 text-[11px] font-extralight text-center max-w-[min(100%,20rem)] px-3 mt-1.5 leading-relaxed">
+                    {text.processingDurationHint}
+                  </p>
+                  {processingElapsedSec >= 8 && (
+                    <p className="text-amber-200/90 text-xs font-light text-center max-w-[min(100%,20rem)] px-3 mt-2">
+                      {text.processingWaitMore}
+                    </p>
+                  )}
+                  {processingElapsedSec >= 20 && (
+                    <p className="text-white/75 text-[11px] font-extralight text-center max-w-[min(100%,20rem)] px-3 mt-1.5 leading-relaxed">
+                      {text.processingRetakeIfSlow}
+                    </p>
+                  )}
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
+                    <div className="h-full bg-white/80 processing-sweep" />
                   </div>
                 </div>
               )}
             </div>
             <div className="shrink-0 bg-black/40 backdrop-blur-2xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
             {isProcessing && (
-              <div className="mb-3 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-amber-500/20 border border-amber-400/30">
-                <Loader2 className="animate-spin text-amber-400" size={16} strokeWidth={2} />
-                <span className="text-amber-200 text-xs font-light">{text.processingHint}</span>
+              <div className="mb-3 space-y-1.5 py-2 px-3 rounded-lg bg-amber-500/20 border border-amber-400/30">
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="animate-spin text-amber-400 shrink-0" size={16} strokeWidth={2} />
+                  <span className="text-amber-100 text-xs font-light leading-snug">{text.processingSidebarHint}</span>
+                </div>
+                <p className="text-amber-200/80 text-[11px] font-extralight text-center leading-relaxed">
+                  {fillI18nTemplate(text.processingElapsed, { sec: Math.max(0, processingElapsedSec) })} · {text.processingDurationHint}
+                </p>
               </div>
             )}
             {retryStatusText && (
@@ -2080,17 +2166,20 @@ export default function Home() {
               </div>
             )}
             {detectionFailed && showManualGuide && (
-              <div className="mb-3 px-3 py-3 rounded-lg bg-white/10 border border-white/20 space-y-2">
-                <p className="text-white text-xs font-light leading-relaxed">
-                  {lang === 'ja'
-                    ? '自動検出が難しい場合は、まず「サイズ」でロゴの幅を合わせてから、画像上をドラッグして位置を合わせてください。'
-                    : 'If auto-detection is difficult, first adjust logo width with Size, then drag on the image to align position.'}
-                </p>
+              <div className="mb-3 px-3 py-3 rounded-xl bg-gradient-to-b from-white/12 to-white/5 border border-white/25 space-y-2.5">
+                <p className="text-white text-sm font-normal tracking-wide">{text.manualGuideTitle}</p>
+                <p className="text-white/80 text-xs font-extralight leading-relaxed">{text.manualGuideWhy}</p>
+                <ol className="list-decimal pl-4 space-y-1.5 text-white/90 text-xs font-light leading-relaxed marker:text-amber-300/90">
+                  <li>{text.manualStep1}</li>
+                  <li>{text.manualStep2}</li>
+                  <li>{text.manualStep3}</li>
+                </ol>
                 <button
+                  type="button"
                   onClick={() => setShowManualGuide(false)}
-                  className="px-3 py-1.5 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors"
+                  className="w-full px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors"
                 >
-                  {lang === 'ja' ? 'ガイドを閉じる' : 'Close guide'}
+                  {text.guideClose}
                 </button>
               </div>
             )}

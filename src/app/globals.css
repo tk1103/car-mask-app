@@ -150,3 +150,18 @@ body {
 .animate-spin-slow {
   animation: spin-slow 1.4s linear infinite;
 }
+
+/* 解析中: 帯状の不確定プログレス */
+@keyframes processing-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.processing-sweep {
+  width: 42%;
+  animation: processing-sweep 1.4s ease-in-out infinite;
+}
