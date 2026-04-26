@@ -375,7 +375,7 @@ export default function Home() {
   const fetchRemainingQuota = useCallback(async () => {
     try {
       const deviceId = getDeviceId();
-      const res = await fetch('/api/detect-plate', {
+      const res = await fetch('/api/detect', {
         headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
       });
       if (res.ok) {
@@ -507,7 +507,7 @@ export default function Home() {
     // 撮影前に残数チェック（UI 上の目安表示用）。サーバー側では日次ブロックは行わない。
     try {
       const deviceId = getDeviceId();
-      const quotaRes = await fetch('/api/detect-plate', {
+      const quotaRes = await fetch('/api/detect', {
         headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
       });
       if (quotaRes.ok) {
@@ -761,7 +761,7 @@ export default function Home() {
 
           for (let attempt = 0; attempt <= maxRetryCount; attempt++) {
             const useSmallImage = attempt > 0; // 再試行は軽量画像で負荷を下げる
-            const res = await fetch('/api/detect-plate', {
+            const res = await fetch('/api/detect', {
               method: 'POST',
               body: createFormData(useSmallImage),
               signal: controller.signal,
