@@ -330,6 +330,7 @@ const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限とは異なる場合があります）
 const LOCAL_DAILY_FREE_LIMIT = 1;
 const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
+const IS_FREE_PLAN = true;
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
@@ -390,6 +391,7 @@ const t = {
     serverBusyRetry: 'サーバーが混み合っています。少し時間をおいて再試行してください。手動調整はそのまま利用できます。',
     dailyFreeLimitReached: '本日の無料枠を使い切りました。',
     freeQuotaLabel: '本日の無料解析',
+    freeWatermarkNote: '無料版の保存画像には Carkus 透かしが入ります。',
   },
   en: {
     beta: 'BETA',
@@ -445,6 +447,7 @@ const t = {
     serverBusyRetry: 'Server is busy. Please retry in a moment. Manual adjustment is available.',
     dailyFreeLimitReached: 'You have used all free attempts for today.',
     freeQuotaLabel: 'Daily free detections',
+    freeWatermarkNote: 'Saved images on Free plan include a Carkus watermark.',
   },
 } as const;
 
@@ -1576,46 +1579,75 @@ export default function Home() {
     }
   }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
 
+  const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
+    const source = previewCanvasRef.current;
+    if (!source) return null;
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = source.width;
+    outCanvas.height = source.height;
+    const outCtx = outCanvas.getContext('2d');
+    if (!outCtx) return null;
+    outCtx.drawImage(source, 0, 0);
+
+    if (IS_FREE_PLAN) {
+      const shortEdge = Math.min(outCanvas.width, outCanvas.height);
+      const padding = Math.max(16, Math.round(shortEdge * 0.03));
+      const fontSize = Math.max(12, Math.round(shortEdge * 0.036));
+      const text = 'Made with Carkus';
+      outCtx.save();
+      outCtx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
+      outCtx.textAlign = 'right';
+      outCtx.textBaseline = 'bottom';
+      outCtx.lineWidth = Math.max(2, Math.round(fontSize * 0.12));
+      outCtx.strokeStyle = 'rgba(0,0,0,0.26)';
+      outCtx.fillStyle = 'rgba(255,255,255,0.34)';
+      outCtx.strokeText(text, outCanvas.width - padding, outCanvas.height - padding);
+      outCtx.fillText(text, outCanvas.width - padding, outCanvas.height - padding);
+      outCtx.restore();
+    }
+
+    return await new Promise<Blob | null>((resolve) => {
+      outCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.99);
+    });
+  }, []);
+
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
     setIsProcessing(true);
     try {
-      previewCanvasRef.current.toBlob(
-        async (blob) => {
-          if (!blob) {
-            setIsProcessing(false);
-            return;
-          }
-          const file = new File([blob], getNextCarkusFilename(), { type: 'image/jpeg' });
-          if (navigator.share && navigator.canShare?.({ files: [file] })) {
-            await navigator.share({ files: [file], title: 'Carkus' });
-            setShowSaveSuccess(true);
-            setTimeout(() => setShowSaveSuccess(false), 2500);
-          } else {
-            const a = document.createElement('a');
-            a.href = createTrackedObjectUrl(blob);
-            a.download = file.name;
-            a.click();
-            revokeTrackedObjectUrl(a.href);
-            setShowSaveSuccess(true);
-            setTimeout(() => setShowSaveSuccess(false), 2500);
-          }
+      (async () => {
+        const blob = await exportPreviewBlob();
+        if (!blob) {
           setIsProcessing(false);
-        },
-        'image/jpeg',
-        0.99
-      );
+          return;
+        }
+        const file = new File([blob], getNextCarkusFilename(), { type: 'image/jpeg' });
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'Carkus' });
+          setShowSaveSuccess(true);
+          setTimeout(() => setShowSaveSuccess(false), 2500);
+        } else {
+          const a = document.createElement('a');
+          a.href = createTrackedObjectUrl(blob);
+          a.download = file.name;
+          a.click();
+          revokeTrackedObjectUrl(a.href);
+          setShowSaveSuccess(true);
+          setTimeout(() => setShowSaveSuccess(false), 2500);
+        }
+        setIsProcessing(false);
+      })();
     } catch (e) {
       setIsProcessing(false);
     }
-  }, [createTrackedObjectUrl, revokeTrackedObjectUrl]);
+  }, [createTrackedObjectUrl, exportPreviewBlob, revokeTrackedObjectUrl]);
 
   const handleShareToSNS = useCallback(async (platform: 'facebook' | 'twitter' | 'instagram') => {
     if (!previewCanvasRef.current) return;
     setIsProcessing(true);
     try {
-      previewCanvasRef.current.toBlob(
-        async (blob) => {
+      (async () => {
+        const blob = await exportPreviewBlob();
           if (!blob) {
             setIsProcessing(false);
             return;
@@ -1712,23 +1744,20 @@ export default function Home() {
             }
           }
           setIsProcessing(false);
-        },
-        'image/jpeg',
-        0.99
-      );
+        })();
     } catch (e) {
       setIsProcessing(false);
       setCameraError('画像の処理に失敗しました');
     }
-  }, [createTrackedObjectUrl, revokeTrackedObjectUrl]);
+  }, [createTrackedObjectUrl, exportPreviewBlob, revokeTrackedObjectUrl]);
 
   /** 端末に保存（ダウンロード or 共有シートで「画像を保存」を選択） */
   const handleSaveToDevice = useCallback(async () => {
     if (!previewCanvasRef.current) return;
     setIsProcessing(true);
     try {
-      previewCanvasRef.current.toBlob(
-        async (blob) => {
+      (async () => {
+        const blob = await exportPreviewBlob();
           if (!blob) {
             setIsProcessing(false);
             return;
@@ -1767,22 +1796,19 @@ export default function Home() {
             setTimeout(() => setShowSaveSuccess(false), 2500);
           }
           setIsProcessing(false);
-        },
-        'image/jpeg',
-        0.99
-      );
+        })();
     } catch (e) {
       setIsProcessing(false);
     }
-  }, [createTrackedObjectUrl, revokeTrackedObjectUrl]);
+  }, [createTrackedObjectUrl, exportPreviewBlob, revokeTrackedObjectUrl]);
 
   /** 近くのPCなどに共有（共有シートに「近くのデバイス」が出る場合あり） */
   const handleShareToNearbyDevice = useCallback(async () => {
     if (!previewCanvasRef.current) return;
     setIsProcessing(true);
     try {
-      previewCanvasRef.current.toBlob(
-        async (blob) => {
+      (async () => {
+        const blob = await exportPreviewBlob();
           if (!blob) {
             setIsProcessing(false);
             return;
@@ -1805,21 +1831,18 @@ export default function Home() {
             setCameraError('お使いの環境では共有シートを利用できません。');
           }
           setIsProcessing(false);
-        },
-        'image/jpeg',
-        0.99
-      );
+        })();
     } catch (e) {
       setIsProcessing(false);
     }
-  }, []);
+  }, [exportPreviewBlob, lang]);
 
   const handleCopyToClipboard = useCallback(async () => {
     if (!previewCanvasRef.current) return;
     setIsProcessing(true);
     try {
-      previewCanvasRef.current.toBlob(
-        async (blob) => {
+      (async () => {
+        const blob = await exportPreviewBlob();
           if (!blob) {
             setIsProcessing(false);
             return;
@@ -1835,14 +1858,11 @@ export default function Home() {
             setCameraError(lang === 'ja' ? 'クリップボードへのコピーに失敗しました' : 'Failed to copy image to clipboard.');
           }
           setIsProcessing(false);
-        },
-        'image/jpeg',
-        0.99
-      );
+        })();
     } catch (e) {
       setIsProcessing(false);
     }
-  }, []);
+  }, [exportPreviewBlob, lang]);
 
   const onPreviewTouchStart = useCallback(
     (e: React.TouchEvent) => {
@@ -1997,6 +2017,11 @@ export default function Home() {
               <p className="mt-1 text-white/60 text-[11px] font-light">
                 {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
               </p>
+              {IS_FREE_PLAN && (
+                <p className="mt-1 text-white/50 text-[10px] font-light">
+                  {text.freeWatermarkNote}
+                </p>
+              )}
             </div>
           </div>
             <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-black/30 backdrop-blur-xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-44 landscape:py-4">
@@ -2061,6 +2086,11 @@ export default function Home() {
           <p className="text-white/60 text-xs font-light mt-1 text-center max-w-xs">
             {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
           </p>
+          {IS_FREE_PLAN && (
+            <p className="text-white/50 text-[11px] font-light mt-1 text-center max-w-xs">
+              {text.freeWatermarkNote}
+            </p>
+          )}
         </main>
       )}
 
