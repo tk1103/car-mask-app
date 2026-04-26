@@ -97,6 +97,20 @@ function normalizeCornersOrder(corners: Corners): Corners {
   return corners;
 }
 
+function getPlateBaseAngle(corners: Corners): number {
+  const topDx = corners[1].x - corners[0].x;
+  const topDy = corners[1].y - corners[0].y;
+  const bottomDx = corners[2].x - corners[3].x;
+  const bottomDy = corners[2].y - corners[3].y;
+  const angleTop = Math.atan2(topDy, topDx);
+  const angleBottom = Math.atan2(bottomDy, bottomDx);
+  let baseAngle = (angleTop + angleBottom) / 2;
+  if (Math.abs(angleTop - angleBottom) > Math.PI) {
+    baseAngle += Math.PI;
+  }
+  return baseAngle;
+}
+
 // 3点対応のアフィン行列を算出（srcTri → dstTri）。setTransform(a,b,c,d,e,f) に渡す配列を返す。
 // Canvas 2D は射影変換を直接サポートしないため、四角を2三角形に分割しそれぞれアフィンで描画してパースを近似する。
 function getAffineFromTri(
@@ -278,6 +292,7 @@ export default function Home() {
 
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [detectedCorners, setDetectedCorners] = useState<Corners[]>([]); // 複数プレート対応
+  const [detectedBaseAngles, setDetectedBaseAngles] = useState<number[]>([]); // 各プレートの初期角度（API検出時）
   const [editLogoOffset, setEditLogoOffset] = useState({ x: 0, y: 0 });
   const [editLogoScale, setEditLogoScale] = useState(1);
   const [editLogoRotation, setEditLogoRotation] = useState(0); // 度（-30〜30）
@@ -403,6 +418,7 @@ export default function Home() {
     setCameraError(null);
     setPreviewImageUrl(null);
     setDetectedCorners([]);
+    setDetectedBaseAngles([]);
     setEditLogoOffset({ x: 0, y: 0 });
     setEditLogoScale(1);
     setEditLogoRotation(0);
@@ -550,7 +566,7 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      // API送信: 1回目は長辺1024（品質とタイムアウトのバランス）、再試行時は512で軽量送信
+      // API送信: 長辺は必ず1024px以下に抑える（Gemini無料枠の負荷軽減）
       const maxApiLongEdge = 1024;
       const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
       const apiW = Math.round(originalW * apiScale);
@@ -592,7 +608,9 @@ export default function Home() {
       // 投機的実行: 即座に編集画面へ移行し、中央にデフォルトロゴを表示。API はバックグラウンドで実行
       setPreviewImageUrl(URL.createObjectURL(fullResBlob));
       setScreenMode('preview_edit');
-      setDetectedCorners([getDefaultCenterCorners()]);
+      const defaultCorners = getDefaultCenterCorners();
+      setDetectedCorners([defaultCorners]);
+      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
       setEditLogoOffset({ x: 0, y: 0 });
       setEditLogoScale(1);
       setEditLogoRotation(0);
@@ -605,31 +623,54 @@ export default function Home() {
         setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
       }, 0);
 
-      const createFormData = () => {
+      const createFormData = (useSmallImage = false) => {
         const fd = new FormData();
-        fd.append('image', apiBlob, 'photo.jpg');
-        fd.append('width', apiW.toString());
-        fd.append('height', apiH.toString());
+        if (useSmallImage) {
+          fd.append('image', apiBlobSmall, 'photo-small.jpg');
+          fd.append('width', apiWSmall.toString());
+          fd.append('height', apiHSmall.toString());
+        } else {
+          fd.append('image', apiBlob, 'photo.jpg');
+          fd.append('width', apiW.toString());
+          fd.append('height', apiH.toString());
+        }
         return fd;
       };
 
       const applyResult = (result: any, res: Response) => {
+        console.group('Carkus API Debug');
+        console.log('status:', res.status);
+        console.log('statusText:', res.statusText);
+        console.log('result:', result);
+        console.groupEnd();
+
         const remaining = (result as { remainingToday?: number }).remainingToday;
         if (remaining !== undefined) setDailyRemaining(remaining);
         if (!res.ok) {
-          const raw = (result.error || '') as string;
-          const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(raw);
+          const errorPayload = (result as { error?: unknown }).error;
+          const detailedError =
+            typeof errorPayload === 'object' && errorPayload !== null
+              ? (errorPayload as { code?: string | number; message?: string; details?: unknown })
+              : {
+                  code: res.status,
+                  message: typeof errorPayload === 'string' ? errorPayload : res.statusText || 'Unknown error',
+                  details: errorPayload,
+                };
+          const rawMessage = String(detailedError?.message ?? '');
+          const rawCode = detailedError?.code ?? res.status;
+          const errorCode = String(rawCode || 'UNKNOWN');
+          const shortMessage = rawMessage.slice(0, 30) || 'No message';
+          const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(rawMessage);
           const backendMessage = (result as { userMessage?: string }).userMessage;
           // 自前の 20回/日 制限は GET の remaining===0 だけで判定する。
           // ここでの 429 は Gemini API やプロジェクト全体の quota の可能性が高いので、バックエンドのメッセージをそのまま表示する。
           setToastMessage(
             backendMessage
-              ? backendMessage
+              ? `${backendMessage} [${errorCode}] ${shortMessage}`
               : isQuota
-                ? 'サーバー側の利用制限に達しました。しばらく時間をおいて再度お試しください。'
-                : '自動検出に失敗しました。手動で位置を合わせてください。'
+                ? `サーバー側の利用制限に達しました。 [${errorCode}] ${shortMessage}`
+                : `自動検出に失敗しました。 [${errorCode}] ${shortMessage}`
           );
-          setIsProcessing(false);
           return;
         }
         if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
@@ -638,6 +679,7 @@ export default function Home() {
             .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
           if (platesCorners.length > 0) {
             setDetectedCorners(platesCorners);
+            setDetectedBaseAngles(platesCorners.map((corners) => getPlateBaseAngle(corners)));
             setEditLogoOffset({ x: 0, y: 0 });
             setEditLogoScale(1);
             setEditLogoRotation(0);
@@ -647,13 +689,13 @@ export default function Home() {
         } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
           const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
           setDetectedCorners([single]);
+          setDetectedBaseAngles([getPlateBaseAngle(single)]);
           setEditLogoOffset({ x: 0, y: 0 });
           setEditLogoScale(1);
           setEditLogoRotation(0);
         } else {
           setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
         }
-        setIsProcessing(false);
       };
 
       (async () => {
@@ -665,24 +707,57 @@ export default function Home() {
         }
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 48_000);
+        const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
         try {
           const deviceId = getDeviceId();
-          const res = await fetch('/api/detect-plate', {
-            method: 'POST',
-            body: createFormData(),
-            signal: controller.signal,
-            headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
-          });
-          clearTimeout(timeoutId);
-          const result = await res.json();
-          applyResult(result, res);
+          const maxRetryCount = 2; // 初回+2回（2秒, 4秒）
+          let lastResponse: Response | null = null;
+          let lastResult: any = null;
+
+          for (let attempt = 0; attempt <= maxRetryCount; attempt++) {
+            const useSmallImage = attempt > 0; // 再試行は軽量画像で負荷を下げる
+            const res = await fetch('/api/detect-plate', {
+              method: 'POST',
+              body: createFormData(useSmallImage),
+              signal: controller.signal,
+              headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+            });
+
+            let result: any = null;
+            try {
+              result = await res.json();
+            } catch (_) {
+              result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
+            }
+
+            lastResponse = res;
+            lastResult = result;
+
+            if (res.status !== 429 || attempt === maxRetryCount) {
+              break;
+            }
+
+            const backoffMs = 2000 * Math.pow(2, attempt); // 2s -> 4s
+            setToastMessage('サーバーが混み合っています。数秒後に自動で再試行します');
+            await wait(backoffMs);
+          }
+
+          if (lastResponse) {
+            applyResult(lastResult, lastResponse);
+          } else {
+            throw new Error('No response from detect-plate API');
+          }
         } catch (fetchErr: unknown) {
-          clearTimeout(timeoutId);
+          console.error('detect-plate fetch failed:', fetchErr);
+          const fetchErrMessage =
+            fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
           setToastMessage(
             fetchErr instanceof Error && fetchErr.name === 'AbortError'
-              ? '自動検出に失敗しました。手動で位置を合わせてください。'
-              : '自動検出に失敗しました。手動で位置を合わせてください。'
+              ? `自動検出がタイムアウトしました: ${fetchErrMessage}`
+              : `自動検出に失敗しました: ${fetchErrMessage}`
           );
+        } finally {
+          clearTimeout(timeoutId);
           setIsProcessing(false);
         }
       })();
@@ -693,7 +768,9 @@ export default function Home() {
           await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
         } catch (_) {}
       }
-      setDetectedCorners([getDefaultCenterCorners()]);
+      const defaultCorners = getDefaultCenterCorners();
+      setDetectedCorners([defaultCorners]);
+      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
       setEditLogoOffset({ x: 0, y: 0 });
       setEditLogoScale(1);
       setEditLogoRotation(0);
@@ -706,6 +783,7 @@ export default function Home() {
     if (previewImageUrl) URL.revokeObjectURL(previewImageUrl);
     setPreviewImageUrl(null);
     setDetectedCorners([]);
+    setDetectedBaseAngles([]);
     setEditLogoOffset({ x: 0, y: 0 });
     setEditLogoScale(1);
     setEditLogoRotation(0);
@@ -781,11 +859,9 @@ export default function Home() {
 
     if (!isProcessing && detectedCorners.length > 0 && (maskImage?.complete || true)) {
       const scale = editLogoScale;
-      const cosR = Math.cos((editLogoRotation * Math.PI) / 180);
-      const sinR = Math.sin((editLogoRotation * Math.PI) / 180);
 
       // 複数プレート対応: 各検出座標に対して fillQuad とロゴ描画を一括適用
-      detectedCorners.forEach((corners) => {
+      detectedCorners.forEach((corners, plateIndex) => {
         // 正規化座標 0-1 をそのまま画像ピクセルにマッピング（portrait/landscape 共通で w,h が画像実寸）
         const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
         const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
@@ -797,17 +873,8 @@ export default function Home() {
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // 上辺(0→1)と下辺(3→2)の角度を平均し、ナンバーに対して平行なロゴ向きを算出（45度傾きでも安定）
-        const topDx = scaled[1].x - scaled[0].x;
-        const topDy = scaled[1].y - scaled[0].y;
-        const bottomDx = scaled[2].x - scaled[3].x;
-        const bottomDy = scaled[2].y - scaled[3].y;
-        const angleTop = Math.atan2(topDy, topDx);
-        const angleBottom = Math.atan2(bottomDy, bottomDx);
-        let baseAngle = (angleTop + angleBottom) / 2;
-        if (Math.abs(angleTop - angleBottom) > Math.PI) {
-          baseAngle += Math.PI;
-        }
+        // 各プレートの初期角度（API検出時）に対して、UI回転値をオフセットとして適用
+        const baseAngle = detectedBaseAngles[plateIndex] ?? getPlateBaseAngle(corners);
         const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
         const cf = Math.cos(finalRotation);
         const sf = Math.sin(finalRotation);
@@ -816,8 +883,8 @@ export default function Home() {
         const plateHeightLeft = Math.hypot((scaled[3].x - scaled[0].x) * w, (scaled[3].y - scaled[0].y) * h);
         const plateHeightRight = Math.hypot((scaled[2].x - scaled[1].x) * w, (scaled[2].y - scaled[1].y) * h);
         const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
-        const logoWidth = plateWidth * 1.1;
-        const logoHeight = plateHeight * 1.1;
+        const logoWidth = plateWidth * 1.05;
+        const logoHeight = plateHeight * 1.05;
         const offsetX = (editLogoOffset.x / 100) * logoWidth;
         const offsetY = (editLogoOffset.y / 100) * logoHeight;
         const offsetPxX = offsetX * cf - offsetY * sf;
@@ -861,7 +928,7 @@ export default function Home() {
         }
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, maskImage, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
+  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, maskImage, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
