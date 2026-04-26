@@ -333,7 +333,94 @@ const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
 
+type Lang = 'ja' | 'en';
+const t = {
+  ja: {
+    beta: 'BETA',
+    close: '閉じる',
+    finish: '終了',
+    launchCamera: 'カメラを起動',
+    pickPhoto: '写真を選択',
+    capture: '撮影する',
+    processing: '解析中',
+    processingHint: '解析中... 位置は調整できます',
+    saveSuccess: '保存しました',
+    saveThanks: 'ご利用ありがとうございます',
+    retake: '撮り直す',
+    angle: '角度',
+    size: 'サイズ',
+    other: 'その他',
+    copy: 'コピー',
+    nearbyPc: '近くのPC',
+    install: 'アプリをインストール',
+    addHomeIOS: 'ホーム画面に追加（iOS）',
+    addHomeAndroid: 'ホーム画面に追加（Android）',
+    addHome: 'ホーム画面に追加',
+    addHomeChrome: 'ホーム画面に追加（Chrome）',
+    cameraLaunchHint: 'カメラを起動して撮影してください',
+    dailyNote: `BETA: このアプリの想定は 1日あたり約${API_DAILY_LIMIT}回ですが、実際の上限はご利用中の Google アカウントの Gemini API 制限に依存します。`,
+    cameraDailyNote: `このアプリの目安は 1日あたり約${API_DAILY_LIMIT}回ですが、実際の上限は Google Gemini API 側の利用制限により前後する場合があります。`,
+    cameraDailyNoteShort: '無料版では Google Gemini API の利用制限により、1日にご利用いただける回数が変動する場合があります。',
+    autoDetectFailedManual: '自動検出に失敗しました。手動で位置を合わせてください。',
+    timeoutManual: '解析がタイムアウトしました。位置を手動で調整してください。',
+    imageFileOnly: '画像ファイルを選択してください。',
+    imageLoadFailed: '画像の読み込みに失敗しました',
+    imageSizeFailed: '画像サイズを取得できませんでした',
+    cameraHttpsRequired: 'カメラを利用するには https でアクセスしてください。',
+    cameraPermissionError: 'カメラの許可をオンにしてください。',
+    cameraStartFailed: 'カメラを起動できませんでした。許可と接続をご確認ください。',
+    networkUnstable: '通信が不安定です。再接続後に再試行するか、手動で位置を合わせてください。',
+    parseFailed: '自動検出の応答を解釈できませんでした。手動で位置を合わせてください。',
+    processingSlow: '解析に時間がかかりすぎました。手動で位置を合わせて保存してください。',
+    configIssue: '現在自動検出の設定に問題があります。手動で位置を合わせてください。',
+    imageReadFailed: '画像の読み取りに失敗しました。撮り直すか、手動で位置を合わせてください。',
+    serverBusyRetry: 'サーバーが混み合っています。少し時間をおいて再試行してください。手動調整はそのまま利用できます。',
+  },
+  en: {
+    beta: 'BETA',
+    close: 'Close',
+    finish: 'Exit',
+    launchCamera: 'Open Camera',
+    pickPhoto: 'Pick Photo',
+    capture: 'Capture',
+    processing: 'Processing',
+    processingHint: 'Processing... You can still adjust position.',
+    saveSuccess: 'Saved',
+    saveThanks: 'Thank you for using Carkus',
+    retake: 'Retake',
+    angle: 'Angle',
+    size: 'Size',
+    other: 'More',
+    copy: 'Copy',
+    nearbyPc: 'Nearby PC',
+    install: 'Install App',
+    addHomeIOS: 'Add to Home Screen (iOS)',
+    addHomeAndroid: 'Add to Home Screen (Android)',
+    addHome: 'Add to Home Screen',
+    addHomeChrome: 'Add to Home Screen (Chrome)',
+    cameraLaunchHint: 'Open camera and take a photo',
+    dailyNote: `BETA: This app targets about ${API_DAILY_LIMIT} uses per day, but actual limits depend on your Google Gemini API quota.`,
+    cameraDailyNote: `This app targets about ${API_DAILY_LIMIT} uses per day, but actual limits may vary by Google Gemini API quota.`,
+    cameraDailyNoteShort: 'On free tier, daily usage may vary due to Google Gemini API limits.',
+    autoDetectFailedManual: 'Auto-detection failed. Please adjust position manually.',
+    timeoutManual: 'Detection timed out. Please adjust position manually.',
+    imageFileOnly: 'Please select an image file.',
+    imageLoadFailed: 'Failed to load image.',
+    imageSizeFailed: 'Failed to read image dimensions.',
+    cameraHttpsRequired: 'Camera access requires HTTPS.',
+    cameraPermissionError: 'Please enable camera permission.',
+    cameraStartFailed: 'Could not start camera. Check permission and connection.',
+    networkUnstable: 'Network looks unstable. Retry or adjust position manually.',
+    parseFailed: 'Could not parse detection response. Please adjust manually.',
+    processingSlow: 'Detection is taking too long. Please adjust manually and save.',
+    configIssue: 'Auto-detection config issue detected. Please adjust manually.',
+    imageReadFailed: 'Failed to read image. Retake or adjust manually.',
+    serverBusyRetry: 'Server is busy. Please retry in a moment. Manual adjustment is available.',
+  },
+} as const;
+
 export default function Home() {
+  const [lang, setLang] = useState<Lang>('ja');
   const [screenMode, setScreenMode] = useState<'idle' | 'camera' | 'preview_edit'>('idle');
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -374,6 +461,11 @@ export default function Home() {
   const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
   const logoCanvasRef = useRef<HTMLCanvasElement | null>(null); // 編集画面でマスク画像が無いときのロゴ用オフスクリーン
+  const langRef = useRef<Lang>('ja');
+
+  const text = t[lang];
+
+  const tx = useCallback((key: keyof typeof t.ja): string => t[langRef.current][key], []);
 
   const createTrackedObjectUrl = useCallback((blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -416,6 +508,15 @@ export default function Home() {
       objectUrlRegistryRef.current.clear();
     };
   }, []);
+
+  useEffect(() => {
+    const detectedLang = navigator.language?.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+    setLang(detectedLang);
+  }, []);
+
+  useEffect(() => {
+    langRef.current = lang;
+  }, [lang]);
 
   useEffect(() => {
     const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -479,26 +580,28 @@ export default function Home() {
     switch (errorType) {
       case 'quota':
       case 'rate_limited':
-        return `サーバーが混み合っています。${retryAfterSeconds ? `${retryAfterSeconds}秒ほど待って` : '少し時間をおいて'}再試行してください。手動調整はそのまま利用できます。`;
+        return retryAfterSeconds
+          ? `${tx('serverBusyRetry')} (${retryAfterSeconds}s)`
+          : tx('serverBusyRetry');
       case 'timeout':
-        return '解析に時間がかかりすぎました。手動で位置を合わせて保存してください。';
+        return tx('processingSlow');
       case 'config':
-        return '現在自動検出の設定に問題があります。手動で位置を合わせてください。';
+        return tx('configIssue');
       case 'network':
-        return '通信が不安定です。再接続後に再試行するか、手動で位置を合わせてください。';
+        return tx('networkUnstable');
       case 'invalid_response':
-        return '自動検出の応答を解釈できませんでした。手動で位置を合わせてください。';
+        return tx('parseFailed');
       case 'bad_request':
-        return '画像の読み取りに失敗しました。撮り直すか、手動で位置を合わせてください。';
+        return tx('imageReadFailed');
       default:
-        return fallbackMessage || '自動検出に失敗しました。手動で位置を合わせてください。';
+        return fallbackMessage || tx('autoDetectFailedManual');
     }
-  }, []);
+  }, [tx]);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError('カメラを利用するには https でアクセスしてください。');
+      setCameraError(tx('cameraHttpsRequired'));
       return;
     }
     try {
@@ -511,9 +614,9 @@ export default function Home() {
       setScreenMode('camera');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setCameraError(msg.includes('Permission') ? 'カメラの許可をオンにしてください。' : 'カメラを起動できませんでした。許可と接続をご確認ください。');
+      setCameraError(msg.includes('Permission') ? tx('cameraPermissionError') : tx('cameraStartFailed'));
     }
-  }, []);
+  }, [tx]);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -597,7 +700,7 @@ export default function Home() {
     e.currentTarget.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      setCameraError('画像ファイルを選択してください。');
+      setCameraError(tx('imageFileOnly'));
       return;
     }
 
@@ -618,14 +721,14 @@ export default function Home() {
       const img = new Image();
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
-        img.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+        img.onerror = () => reject(new Error(tx('imageLoadFailed')));
         img.src = pickedUrl;
       });
       revokeTrackedObjectUrl(pickedUrl);
 
       const originalW = img.naturalWidth || img.width;
       const originalH = img.naturalHeight || img.height;
-      if (!originalW || !originalH) throw new Error('画像サイズを取得できませんでした');
+      if (!originalW || !originalH) throw new Error(tx('imageSizeFailed'));
 
       const fullResCanvas = document.createElement('canvas');
       fullResCanvas.width = originalW;
@@ -759,7 +862,7 @@ export default function Home() {
           if (remaining !== undefined) setDailyRemaining(remaining);
           if (!lastResponse.ok) {
             const errPayload = lastResult.error;
-            const msg = typeof errPayload === 'string' ? errPayload : lastResult.userMessage || '自動検出に失敗しました。手動で位置を合わせてください。';
+            const msg = typeof errPayload === 'string' ? errPayload : lastResult.userMessage || tx('autoDetectFailedManual');
             setToastMessage(getMessageByErrorType(lastResult.errorType, msg, lastResult.retryAfterSeconds));
             maybeShowManualGuideOnce();
           } else if (lastResult.found && lastResult.plates && Array.isArray(lastResult.plates) && lastResult.plates.length > 0) {
@@ -774,7 +877,7 @@ export default function Home() {
               setEditLogoRotation(0);
               setDetectionFailed(false);
             } else {
-              setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+              setToastMessage(tx('autoDetectFailedManual'));
               maybeShowManualGuideOnce();
             }
           } else if (lastResult.found && lastResult.corners && Array.isArray(lastResult.corners) && lastResult.corners.length === 4) {
@@ -786,7 +889,7 @@ export default function Home() {
             setEditLogoRotation(0);
             setDetectionFailed(false);
           } else {
-            setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+            setToastMessage(tx('autoDetectFailedManual'));
             maybeShowManualGuideOnce();
           }
         }
@@ -1046,7 +1149,7 @@ export default function Home() {
             setEditLogoRotation(0);
             setDetectionFailed(false);
           } else {
-            setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+            setToastMessage(tx('autoDetectFailedManual'));
             maybeShowManualGuideOnce();
           }
         } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
@@ -1058,7 +1161,7 @@ export default function Home() {
           setEditLogoRotation(0);
           setDetectionFailed(false);
         } else {
-          setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+          setToastMessage(tx('autoDetectFailedManual'));
           maybeShowManualGuideOnce();
         }
       };
@@ -1161,7 +1264,7 @@ export default function Home() {
       setEditLogoOffset({ x: 0, y: 0 });
       setEditLogoScale(1);
       setEditLogoRotation(0);
-      setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+      setToastMessage(tx('autoDetectFailedManual'));
       maybeShowManualGuideOnce();
       setIsProcessing(false);
       setRetryStatusText(null);
@@ -1204,7 +1307,7 @@ export default function Home() {
     if (!isProcessing || screenMode !== 'preview_edit') return;
     const t = setTimeout(() => {
       setIsProcessing(false);
-      setToastMessage('解析がタイムアウトしました。位置を手動で調整してください。');
+      setToastMessage(tx('timeoutManual'));
       maybeShowManualGuideOnce();
     }, 50_000);
     return () => clearTimeout(t);
@@ -1567,7 +1670,7 @@ export default function Home() {
               await navigator.share({
                 files: [file],
                 title: 'Carkus',
-                text: '近くのPCやデバイスを選択して共有できます。',
+                text: lang === 'ja' ? '近くのPCやデバイスを選択して共有できます。' : 'Choose a nearby PC or device to share.',
               });
               setShowShareMenu(false);
               setShowSaveSuccess(true);
@@ -1606,7 +1709,7 @@ export default function Home() {
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2500);
           } catch (clipboardError) {
-            setCameraError('クリップボードへのコピーに失敗しました');
+            setCameraError(lang === 'ja' ? 'クリップボードへのコピーに失敗しました' : 'Failed to copy image to clipboard.');
           }
           setIsProcessing(false);
         },
@@ -1662,13 +1765,27 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
       <input ref={photoPickerRef} type="file" accept="image/*" onChange={handleImageFileSelected} className="hidden" />
+      <div className="fixed top-3 right-3 z-[120] flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
+        <button
+          onClick={() => setLang('ja')}
+          className={`px-3 py-1.5 text-xs ${lang === 'ja' ? 'bg-white/20 text-white' : 'text-white/70'}`}
+        >
+          JP
+        </button>
+        <button
+          onClick={() => setLang('en')}
+          className={`px-3 py-1.5 text-xs ${lang === 'en' ? 'bg-white/20 text-white' : 'text-white/70'}`}
+        >
+          EN
+        </button>
+      </div>
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-black/40 backdrop-blur-xl border-b border-white/20">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
             <span className="h-6 flex items-center shrink-0 text-white">
               <CarkusLogo className="h-full w-auto text-white" />
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/80 text-[10px] font-medium tracking-widest shrink-0">BETA</span>
+            <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/80 text-[10px] font-medium tracking-widest shrink-0">{text.beta}</span>
             <span className="text-white/50 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
         </header>
@@ -1678,8 +1795,8 @@ export default function Home() {
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
           <div className="bg-black/50 backdrop-blur-2xl border border-white/20 rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
             <CheckCircle className="text-emerald-400" size={40} strokeWidth={2} />
-            <p className="text-white font-light">保存しました</p>
-            <p className="text-white/70 text-xs font-extralight">ご利用ありがとうございます</p>
+            <p className="text-white font-light">{text.saveSuccess}</p>
+            <p className="text-white/70 text-xs font-extralight">{text.saveThanks}</p>
           </div>
         </div>
       )}
@@ -1693,7 +1810,7 @@ export default function Home() {
               onClick={() => setCameraError(null)}
               className="px-6 py-2.5 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20 transition-colors"
             >
-              閉じる
+              {text.close}
             </button>
           </div>
         </div>
@@ -1715,7 +1832,7 @@ export default function Home() {
             {isProcessing && (
               <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex flex-col items-center justify-center z-10 px-4">
                 <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
-                <p className="text-white font-light text-sm mt-4">解析中...</p>
+                <p className="text-white font-light text-sm mt-4">{text.processing}...</p>
                 <p className="text-white/80 text-xs font-extralight text-center max-w-xs mt-1">そのまま位置を調整できます</p>
               </div>
             )}
@@ -1725,18 +1842,18 @@ export default function Home() {
                   <span className="h-5 flex items-center shrink-0 text-white drop-shadow-md">
                     <CarkusLogo className="h-full w-auto text-white" />
                   </span>
-                  <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-[10px] font-medium tracking-widest">BETA</span>
+                  <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-[10px] font-medium tracking-widest">{text.beta}</span>
                 </div>
                 <button
                   onClick={stopCamera}
                   className="py-2 px-4 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20 transition-colors"
                 >
-                  終了
+                  {text.finish}
                 </button>
               </div>
               {cameraError && <p className="mt-2 text-red-200 text-xs font-light">{cameraError}</p>}
               <p className="mt-1 text-white/70 text-xs font-light">
-                このアプリの目安は 1日あたり約{API_DAILY_LIMIT}回ですが、実際の上限は Google Gemini API 側の利用制限により前後する場合があります。
+                {text.cameraDailyNote}
               </p>
             </div>
           </div>
@@ -1749,7 +1866,7 @@ export default function Home() {
               {isProcessing ? (
                 <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
               ) : (
-                <span className="font-light text-sm tracking-wide">撮影する</span>
+                <span className="font-light text-sm tracking-wide">{text.capture}</span>
               )}
             </button>
             <button
@@ -1758,10 +1875,10 @@ export default function Home() {
               className="min-w-[8rem] px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform hover:bg-white/20"
             >
               <ImagePlus size={20} strokeWidth={1.8} />
-              <span className="font-light text-sm tracking-wide">写真を選択</span>
+              <span className="font-light text-sm tracking-wide">{text.pickPhoto}</span>
             </button>
             <p className="text-white/70 text-xs font-light text-center">
-              無料版では Google Gemini API の利用制限により、1日にご利用いただける回数が変動する場合があります。
+              {text.cameraDailyNoteShort}
             </p>
           </div>
         </div>
@@ -1769,20 +1886,20 @@ export default function Home() {
 
       {screenMode === 'idle' && (
         <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-8 px-6">
-          <p className="text-white/70 text-sm font-extralight tracking-wide">カメラを起動して撮影してください</p>
+          <p className="text-white/70 text-sm font-extralight tracking-wide">{text.cameraLaunchHint}</p>
           <button
             onClick={startCamera}
             className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-widest border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
           >
             <Camera size={22} strokeWidth={1.5} />
-            カメラを起動
+            {text.launchCamera}
           </button>
           <button
             onClick={handlePickImageFromDevice}
             className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-widest border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
           >
             <ImagePlus size={22} strokeWidth={1.5} />
-            写真を選択
+            {text.pickPhoto}
           </button>
           {cameraError && (
             <p className="text-red-300 text-xs font-light max-w-xs text-center">{cameraError}</p>
@@ -1793,11 +1910,11 @@ export default function Home() {
               className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white/90 font-light text-xs tracking-wide border border-white/20 hover:bg-white/20 transition-colors"
             >
               <DownloadIcon size={16} strokeWidth={1.5} />
-              {isIOS ? 'ホーム画面に追加（iOS）' : isAndroid ? (deferredPrompt ? 'ホーム画面に追加（Android）' : 'ホーム画面に追加') : deferredPrompt ? 'ホーム画面に追加（Chrome）' : 'アプリをインストール'}
+              {isIOS ? text.addHomeIOS : isAndroid ? (deferredPrompt ? text.addHomeAndroid : text.addHome) : deferredPrompt ? text.addHomeChrome : text.install}
             </button>
           )}
           <p className="text-white/60 text-xs font-light mt-4 text-center max-w-xs">
-            BETA: このアプリの想定は 1日あたり約{API_DAILY_LIMIT}回ですが、実際の上限はご利用中の Google アカウントの Gemini API 制限に依存します。
+            {text.dailyNote}
           </p>
         </main>
       )}
@@ -1806,7 +1923,7 @@ export default function Home() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
           <div className="bg-black/70 backdrop-blur-2xl rounded-2xl px-6 py-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto border border-white/20">
             <div className="flex items-center justify-between">
-              <h2 className="text-white font-light text-lg">ホーム画面に追加</h2>
+              <h2 className="text-white font-light text-lg">{text.addHome}</h2>
               <button onClick={() => setShowInstallGuide(false)} className="text-white/60 hover:text-white">✕</button>
             </div>
             {isIOS ? (
@@ -1822,9 +1939,9 @@ export default function Home() {
                 <p>2. 「追加」をタップ</p>
               </div>
             ) : (
-              <p className="text-white/80 text-sm">ブラウザのメニューから「ホーム画面に追加」を選択してください。</p>
+              <p className="text-white/80 text-sm">{lang === 'ja' ? 'ブラウザのメニューから「ホーム画面に追加」を選択してください。' : 'Please choose "Add to Home Screen" from your browser menu.'}</p>
             )}
-            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20">閉じる</button>
+            <button onClick={() => setShowInstallGuide(false)} className="mt-2 px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20">{text.close}</button>
           </div>
         </div>
       )}
@@ -1839,7 +1956,7 @@ export default function Home() {
           {isBlurWarning && (
             <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-amber-500/20 backdrop-blur-xl border-b border-amber-400/30 landscape:border-b-0 landscape:border-r landscape:border-amber-400/30">
               <p className="text-amber-200 text-sm font-light text-center">
-                写真がぼやけている可能性があります。撮り直すことをお勧めします。
+                {lang === 'ja' ? '写真がぼやけている可能性があります。撮り直すことをお勧めします。' : 'Photo may be blurry. Retaking is recommended.'}
               </p>
             </div>
           )}
@@ -1861,7 +1978,7 @@ export default function Home() {
                   <div className="relative w-24 h-24 flex items-center justify-center">
                     <div className="absolute inset-0 rounded-full border border-white/40 border-t-white animate-spin-slow" />
                     <div className="w-16 h-16 rounded-full bg-black/70 flex items-center justify-center animate-pulse-mask">
-                      <span className="text-white text-xs font-light tracking-wide">解析中</span>
+                      <span className="text-white text-xs font-light tracking-wide">{text.processing}</span>
                     </div>
                   </div>
                 </div>
@@ -1871,7 +1988,7 @@ export default function Home() {
             {isProcessing && (
               <div className="mb-3 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-amber-500/20 border border-amber-400/30">
                 <Loader2 className="animate-spin text-amber-400" size={16} strokeWidth={2} />
-                <span className="text-amber-200 text-xs font-light">解析中… 位置は調整できます</span>
+                <span className="text-amber-200 text-xs font-light">{text.processingHint}</span>
               </div>
             )}
             {retryStatusText && (
@@ -1882,18 +1999,20 @@ export default function Home() {
             {detectionFailed && showManualGuide && (
               <div className="mb-3 px-3 py-3 rounded-lg bg-white/10 border border-white/20 space-y-2">
                 <p className="text-white text-xs font-light leading-relaxed">
-                  自動検出が難しい場合は、まず「サイズ」でロゴの幅を合わせてから、画像上をドラッグして位置を合わせてください。
+                  {lang === 'ja'
+                    ? '自動検出が難しい場合は、まず「サイズ」でロゴの幅を合わせてから、画像上をドラッグして位置を合わせてください。'
+                    : 'If auto-detection is difficult, first adjust logo width with Size, then drag on the image to align position.'}
                 </p>
                 <button
                   onClick={() => setShowManualGuide(false)}
                   className="px-3 py-1.5 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors"
                 >
-                  ガイドを閉じる
+                  {lang === 'ja' ? 'ガイドを閉じる' : 'Close guide'}
                 </button>
               </div>
             )}
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/80 text-xs font-light w-12">角度</span>
+              <span className="text-white/80 text-xs font-light w-12">{text.angle}</span>
               <input
                 type="range"
                 min="-30"
@@ -1906,7 +2025,7 @@ export default function Home() {
               <span className="text-white/80 text-xs tabular-nums w-8">{editLogoRotation}°</span>
             </div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/80 text-xs font-light w-12">サイズ</span>
+              <span className="text-white/80 text-xs font-light w-12">{text.size}</span>
               <input
                 type="range"
                 min="0.3"
@@ -1923,7 +2042,7 @@ export default function Home() {
                 className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-light bg-white/10 backdrop-blur-sm border border-white/20 text-white hover:bg-white/20 transition-colors"
               >
                 <RotateCcw size={18} strokeWidth={2} />
-                撮り直す
+                {text.retake}
               </button>
               <button
                 onClick={handleSaveToDevice}
@@ -1963,13 +2082,13 @@ export default function Home() {
                 className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white text-sm font-light hover:bg-white/20 transition-colors disabled:opacity-50"
               >
                 {isProcessing ? <Loader2 className="animate-spin" size={18} strokeWidth={2} /> : <Share2 size={18} strokeWidth={2} />}
-                {isProcessing ? '解析中' : 'その他'}
+                {isProcessing ? text.processing : text.other}
               </button>
             </div>
             {showShareMenu && (
               <div className="flex flex-wrap justify-center gap-2 mt-3 pt-3 border-t border-white/20">
-                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Monitor size={14} /> 近くのPC</button>
-                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Copy size={14} /> コピー</button>
+                <button onClick={handleShareToNearbyDevice} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Monitor size={14} /> {text.nearbyPc}</button>
+                <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Copy size={14} /> {text.copy}</button>
               </div>
             )}
             <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm border border-white/20">
