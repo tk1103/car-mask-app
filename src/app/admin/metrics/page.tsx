@@ -17,6 +17,7 @@ type MetricsResponse = {
 };
 
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
+const MAX_RANGE_DAYS = 31;
 
 function formatJstDateInput(offsetDays = 0): string {
   const now = new Date();
@@ -27,10 +28,27 @@ function formatJstDateInput(offsetDays = 0): string {
   return `${y}-${m}-${d}`;
 }
 
+function enumerateDates(startDate: string, endDate: string): string[] {
+  if (!startDate || !endDate) return [];
+  const dates: string[] = [];
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+  const cursor = new Date(start);
+  while (cursor <= end && dates.length <= MAX_RANGE_DAYS) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
 export default function AdminMetricsPage() {
   const [token, setToken] = useState('');
   const [date, setDate] = useState('');
+  const [rangeStartDate, setRangeStartDate] = useState('');
+  const [rangeEndDate, setRangeEndDate] = useState('');
   const [data, setData] = useState<MetricsResponse | null>(null);
+  const [rangeSeries, setRangeSeries] = useState<MetricsResponse[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +56,10 @@ export default function AdminMetricsPage() {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
     if (saved) setToken(saved);
-    setDate(formatJstDateInput(0));
+    const today = formatJstDateInput(0);
+    setDate(today);
+    setRangeEndDate(today);
+    setRangeStartDate(formatJstDateInput(-6));
   }, []);
 
   const successRate = useMemo(() => {
@@ -60,6 +81,25 @@ export default function AdminMetricsPage() {
     [data?.deviceTypeCounts]
   );
 
+  const rangeMaxAttempts = useMemo(
+    () => Math.max(1, ...rangeSeries.map((item) => item.detectAttempts)),
+    [rangeSeries]
+  );
+
+  const rangeTotals = useMemo(
+    () =>
+      rangeSeries.reduce(
+        (acc, item) => {
+          acc.detectAttempts += item.detectAttempts;
+          acc.detectSuccess += item.detectSuccess;
+          acc.detectFailure += item.detectFailure;
+          return acc;
+        },
+        { detectAttempts: 0, detectSuccess: 0, detectFailure: 0 }
+      ),
+    [rangeSeries]
+  );
+
   const loadMetrics = useCallback(async () => {
     if (!token.trim()) {
       setError('まず METRICS_ADMIN_TOKEN を入力してください。');
@@ -71,40 +111,52 @@ export default function AdminMetricsPage() {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(TOKEN_STORAGE_KEY, token.trim());
       }
-      const params = new URLSearchParams();
-      if (date) params.set('date', date);
-      const url = `/api/admin/metrics${params.toString() ? `?${params.toString()}` : ''}`;
-      const res = await fetch(url, {
-        headers: { 'x-admin-token': token.trim() },
-      });
-      const rawText = await res.text();
-      let json: any = null;
-      if (rawText) {
-        try {
-          json = JSON.parse(rawText);
-        } catch (_) {
-          json = null;
+      const fetchOne = async (targetDate?: string): Promise<MetricsResponse> => {
+        const params = new URLSearchParams();
+        if (targetDate) params.set('date', targetDate);
+        const url = `/api/admin/metrics${params.toString() ? `?${params.toString()}` : ''}`;
+        const res = await fetch(url, {
+          headers: { 'x-admin-token': token.trim() },
+        });
+        const rawText = await res.text();
+        let json: any = null;
+        if (rawText) {
+          try {
+            json = JSON.parse(rawText);
+          } catch (_) {
+            json = null;
+          }
         }
+        if (!res.ok) {
+          const detail = rawText ? ` / ${rawText.slice(0, 120)}` : '';
+          throw new Error(typeof json?.error === 'string' ? json.error : `取得に失敗しました (${res.status})${detail}`);
+        }
+        if (!json || typeof json !== 'object') {
+          throw new Error('サーバーからの応答形式が不正です。再読み込み後にもう一度お試しください。');
+        }
+        return json as MetricsResponse;
+      };
+
+      const primary = await fetchOne(date || undefined);
+      setData(primary);
+
+      const rangeDates = enumerateDates(rangeStartDate, rangeEndDate);
+      if (rangeDates.length === 0) {
+        setRangeSeries([]);
+      } else if (rangeDates.length > MAX_RANGE_DAYS) {
+        throw new Error(`期間は最大 ${MAX_RANGE_DAYS} 日までにしてください。`);
+      } else {
+        const series = await Promise.all(rangeDates.map((d) => fetchOne(d)));
+        setRangeSeries(series);
       }
-      if (!res.ok) {
-        setData(null);
-        const detail = rawText ? ` / ${rawText.slice(0, 120)}` : '';
-        setError(typeof json?.error === 'string' ? json.error : `取得に失敗しました (${res.status})${detail}`);
-        return;
-      }
-      if (!json || typeof json !== 'object') {
-        setData(null);
-        setError('サーバーからの応答形式が不正です。再読み込み後にもう一度お試しください。');
-        return;
-      }
-      setData(json as MetricsResponse);
     } catch (e) {
       setData(null);
+      setRangeSeries([]);
       setError(`通信エラー: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
-  }, [date, token]);
+  }, [date, rangeEndDate, rangeStartDate, token]);
 
   return (
     <main className="min-h-screen bg-black text-white p-6 md:p-10">
@@ -150,6 +202,45 @@ export default function AdminMetricsPage() {
                 className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 hover:bg-white/20"
               >
                 昨日
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-white/70">期間（日次グラフ / JST, 最大31日）</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                value={rangeStartDate}
+                onChange={(e) => setRangeStartDate(e.target.value)}
+                className="w-full md:w-56 rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
+              />
+              <span className="text-white/60 text-xs">〜</span>
+              <input
+                type="date"
+                value={rangeEndDate}
+                onChange={(e) => setRangeEndDate(e.target.value)}
+                className="w-full md:w-56 rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setRangeEndDate(formatJstDateInput(0));
+                  setRangeStartDate(formatJstDateInput(-6));
+                }}
+                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 hover:bg-white/20"
+              >
+                直近7日
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRangeEndDate(formatJstDateInput(0));
+                  setRangeStartDate(formatJstDateInput(-29));
+                }}
+                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 hover:bg-white/20"
+              >
+                直近30日
               </button>
             </div>
           </div>
@@ -219,6 +310,34 @@ export default function AdminMetricsPage() {
                   </div>
                 )}
               </div>
+            </section>
+            <section className="rounded-2xl border border-white/20 bg-white/5 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-white/70">期間グラフ（日次）</p>
+                <p className="text-xs text-white/60">
+                  合計: 試行 {rangeTotals.detectAttempts} / 成功 {rangeTotals.detectSuccess} / 失敗 {rangeTotals.detectFailure}
+                </p>
+              </div>
+              {rangeSeries.length === 0 ? (
+                <p className="text-sm text-white/60">期間を指定して「更新」を押すとグラフ表示します。</p>
+              ) : (
+                <div className="space-y-2">
+                  {rangeSeries.map((item) => (
+                    <div key={item.date} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs text-white/70">
+                        <span>{item.date}</span>
+                        <span>試行 {item.detectAttempts} / 成功 {item.detectSuccess} / 失敗 {item.detectFailure}</span>
+                      </div>
+                      <div className="h-3 rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full bg-sky-400/80"
+                          style={{ width: `${Math.max(4, (item.detectAttempts / rangeMaxAttempts) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           </>
         )}
