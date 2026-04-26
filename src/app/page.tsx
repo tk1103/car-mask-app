@@ -47,6 +47,30 @@ type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRig
 
 const DEVICE_ID_KEY = 'carkus_device_id';
 const CARKUS_DOWNLOAD_COUNT_KEY = 'carkus_download_count';
+const MANUAL_GUIDE_SHOWN_KEY = 'carkus_manual_guide_shown';
+
+type DetectErrorType =
+  | 'rate_limited'
+  | 'bad_request'
+  | 'config'
+  | 'quota'
+  | 'upstream'
+  | 'timeout'
+  | 'network'
+  | 'invalid_response'
+  | 'unknown';
+
+type DetectApiResponse = {
+  found?: boolean;
+  plates?: Array<{ corners?: Array<{ x: number; y: number }> }>;
+  corners?: Array<{ x: number; y: number }>;
+  error?: unknown;
+  userMessage?: string;
+  errorType?: DetectErrorType;
+  requestId?: string;
+  retryAfterSeconds?: number;
+  remainingToday?: number;
+};
 
 /** ダウンロードファイル名用の連番を取得しインクリメント。Carkus-001.jpg, Carkus-002.jpg ... */
 function getNextCarkusFilename(): string {
@@ -301,6 +325,8 @@ export default function Home() {
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
   const [isBlurWarning, setIsBlurWarning] = useState(false);
   const [detectionFailed, setDetectionFailed] = useState(false); // 編集画面では常に「編集モード」として扱い、トーストのみ表示
+  const [showManualGuide, setShowManualGuide] = useState(false);
+  const [retryStatusText, setRetryStatusText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
   const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
@@ -409,6 +435,37 @@ export default function Home() {
       setShowInstallGuide(true);
     }
   }, [deferredPrompt]);
+
+  const maybeShowManualGuideOnce = useCallback(() => {
+    setDetectionFailed(true);
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const shown = window.localStorage.getItem(MANUAL_GUIDE_SHOWN_KEY);
+      if (shown === '1') return;
+      window.localStorage.setItem(MANUAL_GUIDE_SHOWN_KEY, '1');
+      setShowManualGuide(true);
+    } catch (_) {}
+  }, []);
+
+  const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, retryAfterSeconds?: number) => {
+    switch (errorType) {
+      case 'quota':
+      case 'rate_limited':
+        return `サーバーが混み合っています。${retryAfterSeconds ? `${retryAfterSeconds}秒ほど待って` : '少し時間をおいて'}再試行してください。手動調整はそのまま利用できます。`;
+      case 'timeout':
+        return '解析に時間がかかりすぎました。手動で位置を合わせて保存してください。';
+      case 'config':
+        return '現在自動検出の設定に問題があります。手動で位置を合わせてください。';
+      case 'network':
+        return '通信が不安定です。再接続後に再試行するか、手動で位置を合わせてください。';
+      case 'invalid_response':
+        return '自動検出の応答を解釈できませんでした。手動で位置を合わせてください。';
+      case 'bad_request':
+        return '画像の読み取りに失敗しました。撮り直すか、手動で位置を合わせてください。';
+      default:
+        return fallbackMessage || '自動検出に失敗しました。手動で位置を合わせてください。';
+    }
+  }, []);
 
   const startCamera = useCallback(async () => {
     setCameraError(null);
@@ -560,6 +617,9 @@ export default function Home() {
 
     setIsProcessing(true);
     setCameraError(null);
+    setDetectionFailed(false);
+    setShowManualGuide(false);
+    setRetryStatusText(null);
 
     try {
       const originalW = video.videoWidth;
@@ -690,17 +750,17 @@ export default function Home() {
         return fd;
       };
 
-      const applyResult = (result: any, res: Response) => {
+      const applyResult = (result: DetectApiResponse, res: Response) => {
         console.group('Carkus API Debug');
         console.log('status:', res.status);
         console.log('statusText:', res.statusText);
         console.log('result:', result);
         console.groupEnd();
 
-        const remaining = (result as { remainingToday?: number }).remainingToday;
+        const remaining = result.remainingToday;
         if (remaining !== undefined) setDailyRemaining(remaining);
         if (!res.ok) {
-          const errorPayload = (result as { error?: unknown }).error;
+          const errorPayload = result.error;
           const detailedError =
             typeof errorPayload === 'object' && errorPayload !== null
               ? (errorPayload as { code?: string | number; message?: string; details?: unknown })
@@ -712,18 +772,11 @@ export default function Home() {
           const rawMessage = String(detailedError?.message ?? '');
           const rawCode = detailedError?.code ?? res.status;
           const errorCode = String(rawCode || 'UNKNOWN');
-          const shortMessage = rawMessage.slice(0, 30) || 'No message';
-          const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(rawMessage);
-          const backendMessage = (result as { userMessage?: string }).userMessage;
-          // 自前の 20回/日 制限は GET の remaining===0 だけで判定する。
-          // ここでの 429 は Gemini API やプロジェクト全体の quota の可能性が高いので、バックエンドのメッセージをそのまま表示する。
-          setToastMessage(
-            backendMessage
-              ? `${backendMessage} [${errorCode}] ${shortMessage}`
-              : isQuota
-                ? `サーバー側の利用制限に達しました。 [${errorCode}] ${shortMessage}`
-                : `自動検出に失敗しました。 [${errorCode}] ${shortMessage}`
-          );
+          const backendMessage = result.userMessage;
+          const retryAfterSeconds = result.retryAfterSeconds;
+          const message = getMessageByErrorType(result.errorType, backendMessage || rawMessage, retryAfterSeconds);
+          setToastMessage(`${message} [${errorCode}]`);
+          maybeShowManualGuideOnce();
           return;
         }
         if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
@@ -736,8 +789,10 @@ export default function Home() {
             setEditLogoOffset({ x: 0, y: 0 });
             setEditLogoScale(1);
             setEditLogoRotation(0);
+            setDetectionFailed(false);
           } else {
             setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+            maybeShowManualGuideOnce();
           }
         } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
           const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
@@ -746,8 +801,10 @@ export default function Home() {
           setEditLogoOffset({ x: 0, y: 0 });
           setEditLogoScale(1);
           setEditLogoRotation(0);
+          setDetectionFailed(false);
         } else {
           setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+          maybeShowManualGuideOnce();
         }
       };
 
@@ -764,9 +821,9 @@ export default function Home() {
         const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
         try {
           const deviceId = getDeviceId();
-          const maxRetryCount = 2; // 初回+2回（2秒, 4秒）
+          const maxRetryCount = 2; // 初回+2回
           let lastResponse: Response | null = null;
-          let lastResult: any = null;
+          let lastResult: DetectApiResponse | null = null;
 
           for (let attempt = 0; attempt <= maxRetryCount; attempt++) {
             const useSmallImage = attempt > 0; // 再試行は軽量画像で負荷を下げる
@@ -777,7 +834,7 @@ export default function Home() {
               headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
             });
 
-            let result: any = null;
+            let result: DetectApiResponse = {};
             try {
               result = await res.json();
             } catch (_) {
@@ -791,12 +848,22 @@ export default function Home() {
               break;
             }
 
-            const backoffMs = 2000 * Math.pow(2, attempt); // 2s -> 4s
-            setToastMessage('サーバーが混み合っています。数秒後に自動で再試行します');
+            const retryAfterHeader = res.headers.get('retry-after');
+            const retryAfterFromHeader = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN;
+            const retryAfterFromBody = typeof result.retryAfterSeconds === 'number' ? result.retryAfterSeconds : NaN;
+            const serverSuggestedSeconds = Number.isFinite(retryAfterFromBody)
+              ? retryAfterFromBody
+              : Number.isFinite(retryAfterFromHeader)
+                ? retryAfterFromHeader
+                : 0;
+            const baseBackoffMs = 1500 * Math.pow(2, attempt);
+            const jitterMs = Math.floor(Math.random() * 700);
+            const backoffMs = Math.max(baseBackoffMs + jitterMs, serverSuggestedSeconds * 1000);
+            setRetryStatusText(`サーバー混雑のため ${Math.ceil(backoffMs / 1000)}秒後に再試行します（${attempt + 1}/${maxRetryCount + 1}）`);
             await wait(backoffMs);
           }
 
-          if (lastResponse && isLatestRequest()) {
+          if (lastResponse && lastResult && isLatestRequest()) {
             applyResult(lastResult, lastResponse);
           } else if (!lastResponse) {
             throw new Error('No response from detect-plate API');
@@ -814,6 +881,7 @@ export default function Home() {
               ? `自動検出がタイムアウトしました: ${fetchErrMessage}`
               : `自動検出に失敗しました: ${fetchErrMessage}`
           );
+          maybeShowManualGuideOnce();
         } finally {
           clearTimeout(timeoutId);
           if (activeDetectControllerRef.current === controller) {
@@ -821,6 +889,7 @@ export default function Home() {
           }
           if (isLatestRequest()) {
             setIsProcessing(false);
+            setRetryStatusText(null);
           }
         }
       })();
@@ -838,9 +907,11 @@ export default function Home() {
       setEditLogoScale(1);
       setEditLogoRotation(0);
       setToastMessage('自動検出に失敗しました。手動で位置を合わせてください。');
+      maybeShowManualGuideOnce();
       setIsProcessing(false);
+      setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl]);
+  }, [createTrackedObjectUrl, getMessageByErrorType, maybeShowManualGuideOnce]);
 
   const retake = useCallback(() => {
     if (previewImageUrl) revokeTrackedObjectUrl(previewImageUrl);
@@ -853,8 +924,10 @@ export default function Home() {
     setPreviewImageLoaded(false);
     setCameraError(null);
     setToastMessage(null);
+    setRetryStatusText(null);
     setIsBlurWarning(false);
     setDetectionFailed(false);
+    setShowManualGuide(false);
     setScreenMode('camera');
     // ストリーム再設定は screenMode の useEffect で行う（video は再マウント後のため、ここでは ref がまだ更新されていない場合がある）
     // フォールバック: DOM 更新後に再設定を試みる
@@ -877,9 +950,10 @@ export default function Home() {
     const t = setTimeout(() => {
       setIsProcessing(false);
       setToastMessage('解析がタイムアウトしました。位置を手動で調整してください。');
+      maybeShowManualGuideOnce();
     }, 50_000);
     return () => clearTimeout(t);
-  }, [isProcessing, screenMode]);
+  }, [isProcessing, screenMode, maybeShowManualGuideOnce]);
 
   useEffect(() => {
     if (!previewImageUrl) {
@@ -1499,6 +1573,24 @@ export default function Home() {
               <div className="mb-3 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-amber-500/20 border border-amber-400/30">
                 <Loader2 className="animate-spin text-amber-400" size={16} strokeWidth={2} />
                 <span className="text-amber-200 text-xs font-light">解析中… 位置は調整できます</span>
+              </div>
+            )}
+            {retryStatusText && (
+              <div className="mb-3 px-3 py-2 rounded-lg bg-sky-500/15 border border-sky-300/30">
+                <span className="text-sky-100 text-xs font-light">{retryStatusText}</span>
+              </div>
+            )}
+            {detectionFailed && showManualGuide && (
+              <div className="mb-3 px-3 py-3 rounded-lg bg-white/10 border border-white/20 space-y-2">
+                <p className="text-white text-xs font-light leading-relaxed">
+                  自動検出が難しい場合は、まず「サイズ」でロゴの幅を合わせてから、画像上をドラッグして位置を合わせてください。
+                </p>
+                <button
+                  onClick={() => setShowManualGuide(false)}
+                  className="px-3 py-1.5 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors"
+                >
+                  ガイドを閉じる
+                </button>
               </div>
             )}
             <div className="flex items-center gap-3 mb-2">

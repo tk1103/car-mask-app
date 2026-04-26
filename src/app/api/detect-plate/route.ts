@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { trackUsageEvent } from '../../../lib/usage-metrics';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
@@ -14,6 +15,38 @@ const DAILY_LIMIT_PER_CLIENT = 20;
 
 const rateLimitStore = new Map<string, number[]>();
 const dailyLimitStore = new Map<string, { count: number; date: string }>();
+
+type DetectErrorType =
+  | 'rate_limited'
+  | 'bad_request'
+  | 'config'
+  | 'quota'
+  | 'upstream'
+  | 'timeout'
+  | 'network'
+  | 'invalid_response'
+  | 'unknown';
+
+function createRequestId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch (_) {
+    return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+function logStructured(level: 'info' | 'warn' | 'error', event: string, payload: Record<string, unknown>) {
+  const body = JSON.stringify({ event, ...payload });
+  if (level === 'error') {
+    console.error(body);
+    return;
+  }
+  if (level === 'warn') {
+    console.warn(body);
+    return;
+  }
+  console.log(body);
+}
 
 /** デバイスID（UUID または d- プレフィックスならデバイス単位で制限）。無効な場合はIPで識別（レート制限用） */
 function getClientId(request: NextRequest): string {
@@ -260,15 +293,21 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const requestId = createRequestId();
     const clientId = getClientId(request);
     const quotaId = getQuotaId(request);
+    await trackUsageEvent(clientId, 'detect_attempt');
 
     if (isRateLimited(clientId)) {
+      await trackUsageEvent(clientId, 'detect_failure');
       return NextResponse.json(
         {
           found: false,
           error: 'リクエストが多すぎます',
           userMessage: 'しばらく待ってからもう一度お試しください。（1分間に5回まで）',
+          errorType: 'rate_limited' as DetectErrorType,
+          retryAfterSeconds: 60,
+          requestId,
           status: 429,
           remainingToday: getDailyRemaining(clientId),
         },
@@ -284,21 +323,30 @@ export async function POST(request: NextRequest) {
     const imageWidth = parseInt(formData.get('width') as string) || 0;
     const imageHeight = parseInt(formData.get('height') as string) || 0;
 
-    console.log(`[detect-plate] Request received: size=${imageFile?.size || 0} bytes, dimensions=${imageWidth}x${imageHeight}`);
+    logStructured('info', 'detect.request_received', {
+      requestId,
+      sizeBytes: imageFile?.size || 0,
+      imageWidth,
+      imageHeight,
+      hasQuotaId: Boolean(quotaId),
+    });
 
     if (!imageFile) {
-      console.error(`[detect-plate] No image file received`);
-      return NextResponse.json({ error: '画像が送信されませんでした' }, { status: 400 });
+      logStructured('error', 'detect.bad_request.no_image', { requestId });
+      await trackUsageEvent(clientId, 'detect_failure');
+      return NextResponse.json({ error: '画像が送信されませんでした', errorType: 'bad_request', requestId }, { status: 400 });
     }
     if (!imageWidth || !imageHeight) {
-      console.error(`[detect-plate] Invalid dimensions: ${imageWidth}x${imageHeight}`);
-      return NextResponse.json({ error: '画像サイズが送信されませんでした' }, { status: 400 });
+      logStructured('error', 'detect.bad_request.invalid_dimensions', { requestId, imageWidth, imageHeight });
+      await trackUsageEvent(clientId, 'detect_failure');
+      return NextResponse.json({ error: '画像サイズが送信されませんでした', errorType: 'bad_request', requestId }, { status: 400 });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.error(`[detect-plate] GEMINI_API_KEY not set`);
-      return NextResponse.json({ error: 'GEMINI_API_KEYが設定されていません' }, { status: 500 });
+      logStructured('error', 'detect.config.missing_api_key', { requestId });
+      await trackUsageEvent(clientId, 'detect_failure');
+      return NextResponse.json({ error: 'GEMINI_API_KEYが設定されていません', errorType: 'config', requestId }, { status: 500 });
     }
 
     const arrayBufferStart = Date.now();
@@ -306,7 +354,13 @@ export async function POST(request: NextRequest) {
     const base64Start = Date.now();
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const mimeType = imageFile.type || 'image/jpeg';
-    console.log(`[detect-plate] Image processed: arrayBuffer=${base64Start - arrayBufferStart}ms, base64=${Date.now() - base64Start}ms, total=${Date.now() - requestStart}ms`);
+    logStructured('info', 'detect.image_processed', {
+      requestId,
+      arrayBufferMs: base64Start - arrayBufferStart,
+      base64Ms: Date.now() - base64Start,
+      requestElapsedMs: Date.now() - requestStart,
+      mimeType,
+    });
 
     const prompt = [
       'You are a precise license plate detector. Detect the 4 corners of the license plate.',
@@ -366,7 +420,12 @@ export async function POST(request: NextRequest) {
           const errJson: any = (() => { try { return JSON.parse(lastErrorBody); } catch { return null; } })();
           lastErrorMessage = errJson?.error?.message ?? errJson?.error ?? lastErrorBody;
           if (res.status === 404 || res.status === 400) {
-            console.warn(`[detect-plate] Model ${modelName} returned ${res.status}, trying next.`, lastErrorMessage?.substring(0, 200));
+            logStructured('warn', 'detect.model_try_next', {
+              requestId,
+              modelName,
+              status: res.status,
+              reason: String(lastErrorMessage || '').substring(0, 200),
+            });
             continue;
           }
           const isQuota = res.status === 429 || /quota|rate limit|exceeded/i.test(String(lastErrorMessage));
@@ -375,8 +434,28 @@ export async function POST(request: NextRequest) {
             : res.status === 403 || res.status === 404
               ? 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。'
               : '解析中にエラーが発生しました。位置を手動で調整してください。';
+          const retryAfterHeader = res.headers.get('retry-after');
+          const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined;
+          const errorType: DetectErrorType = isQuota ? 'quota' : res.status === 403 || res.status === 404 ? 'config' : 'upstream';
+          logStructured('error', 'detect.upstream_error', {
+            requestId,
+            modelName,
+            status: res.status,
+            errorType,
+            retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null,
+            message: String(lastErrorMessage || '').substring(0, 300),
+          });
+          await trackUsageEvent(clientId, 'detect_failure');
           return NextResponse.json(
-            { found: false, error: userMessage, userMessage, remainingToday: getDailyRemaining(clientId) },
+            {
+              found: false,
+              error: userMessage,
+              userMessage,
+              errorType,
+              retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined,
+              requestId,
+              remainingToday: getDailyRemaining(clientId),
+            },
             { status: res.status === 429 ? 429 : 500 }
           );
         }
@@ -385,13 +464,13 @@ export async function POST(request: NextRequest) {
         try {
           geminiJson = await res.json();
         } catch {
-          console.warn(`[detect-plate] Model ${modelName}: response body parse failed, trying next`);
+          logStructured('warn', 'detect.model_invalid_json', { requestId, modelName });
           continue;
         }
 
         const candidate = geminiJson.candidates?.[0];
         if (!candidate?.content) {
-          console.warn(`[detect-plate] Model ${modelName}: no candidate content, trying next`);
+          logStructured('warn', 'detect.model_empty_content', { requestId, modelName });
           continue;
         }
 
@@ -411,33 +490,59 @@ export async function POST(request: NextRequest) {
         const parsed = tryParsePlateResponse(parts, text);
         if (parsed) {
           (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
-          console.log(`[detect-plate] Success (${modelName}): found=${parsed.found}, plates=${(parsed.plates as unknown[])?.length || 0}, elapsed=${Date.now() - startTime}ms`);
+          (parsed as { requestId?: string }).requestId = requestId;
+          await trackUsageEvent(clientId, 'detect_success');
+          logStructured('info', 'detect.success', {
+            requestId,
+            modelName,
+            found: Boolean(parsed.found),
+            platesCount: (parsed.plates as unknown[])?.length || 0,
+            elapsedMs: Date.now() - startTime,
+          });
           return NextResponse.json(parsed);
         }
 
         lastRawText = text;
-        console.warn(`[detect-plate] Model ${modelName}: coordinate parse failed, trying next. Raw (500 chars):`, text.substring(0, 500));
+        logStructured('warn', 'detect.model_parse_failed', {
+          requestId,
+          modelName,
+          rawSnippet: text.substring(0, 500),
+        });
       } catch (fetchErr: unknown) {
         clearTimeout(timeoutId);
         if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-          console.error(`[detect-plate] Gemini API timeout (model ${modelName}) after ${Date.now() - startTime}ms`);
+          logStructured('error', 'detect.timeout', {
+            requestId,
+            modelName,
+            elapsedMs: Date.now() - startTime,
+          });
+          await trackUsageEvent(clientId, 'detect_failure');
           return NextResponse.json(
             {
               found: false,
               error: '解析がタイムアウトしました',
               userMessage: '解析に時間がかかりすぎました。位置を手動で調整してください。',
+              errorType: 'timeout',
+              requestId,
               status: 504,
               remainingToday: getDailyRemaining(clientId),
             },
             { status: 504 }
           );
         }
-        console.error(`[detect-plate] Gemini API fetch error (model ${modelName}):`, fetchErr);
+        logStructured('error', 'detect.network_error', {
+          requestId,
+          modelName,
+          message: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+        });
+        await trackUsageEvent(clientId, 'detect_failure');
         return NextResponse.json(
           {
             found: false,
             error: '通信エラー',
             userMessage: '通信エラーです。位置を手動で調整してください。',
+            errorType: 'network',
+            requestId,
             remainingToday: getDailyRemaining(clientId),
           },
           { status: 500 }
@@ -446,27 +551,46 @@ export async function POST(request: NextRequest) {
     }
 
     if (!lastRawText && (lastStatus === 404 || lastStatus === 400)) {
+      logStructured('error', 'detect.config_invalid_model_or_key', { requestId, lastStatus });
+      await trackUsageEvent(clientId, 'detect_failure');
       return NextResponse.json({
         found: false,
         error: 'APIキーまたはモデル設定を確認してください',
         userMessage: 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。',
+        errorType: 'config',
+        requestId,
         remainingToday: getDailyRemaining(clientId),
       }, { status: 500 });
     }
-    console.error(`[detect-plate] All models failed. Last raw text:`, (lastRawText || '').substring(0, 1000));
+    logStructured('error', 'detect.invalid_response_all_models_failed', {
+      requestId,
+      lastStatus,
+      rawSnippet: (lastRawText || '').substring(0, 1000),
+    });
+    await trackUsageEvent(clientId, 'detect_failure');
     return NextResponse.json({
       found: false,
       error: '座標の解析に失敗しました',
       userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
+      errorType: 'invalid_response',
+      requestId,
       remainingToday: getDailyRemaining(clientId),
       rawResponse: (lastRawText || '').substring(0, 500),
     }, { status: 500 });
   } catch (error) {
-    console.error('[detect-plate] Unexpected error:', error);
+    const requestId = createRequestId();
+    const clientId = getClientId(request);
+    await trackUsageEvent(clientId, 'detect_failure');
+    logStructured('error', 'detect.unexpected_error', {
+      requestId,
+      message: error instanceof Error ? error.message : String(error),
+    });
     return NextResponse.json(
       {
         error: 'ナンバープレートの検出に失敗しました',
         userMessage: 'ナンバープレートの検出に失敗しました。しばらく経ってから再度お試しください。',
+        errorType: 'unknown',
+        requestId,
         details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
