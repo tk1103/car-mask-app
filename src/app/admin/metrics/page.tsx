@@ -100,6 +100,27 @@ export default function AdminMetricsPage() {
     [rangeSeries]
   );
 
+  const successRateSeries = useMemo(
+    () =>
+      rangeSeries.map((item) => ({
+        date: item.date,
+        rate: item.detectAttempts > 0 ? Math.round((item.detectSuccess / item.detectAttempts) * 100) : 0,
+      })),
+    [rangeSeries]
+  );
+
+  const successRatePolylinePoints = useMemo(() => {
+    if (successRateSeries.length === 0) return '';
+    if (successRateSeries.length === 1) return '0,100';
+    return successRateSeries
+      .map((item, index) => {
+        const x = (index / (successRateSeries.length - 1)) * 100;
+        const y = 100 - item.rate;
+        return `${x},${y}`;
+      })
+      .join(' ');
+  }, [successRateSeries]);
+
   const loadMetrics = useCallback(async () => {
     if (!token.trim()) {
       setError('まず METRICS_ADMIN_TOKEN を入力してください。');
@@ -337,6 +358,46 @@ export default function AdminMetricsPage() {
                     </div>
                   ))}
                 </div>
+              )}
+            </section>
+            <section className="rounded-2xl border border-white/20 bg-white/5 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-white/70">成功率の折れ線グラフ（日次）</p>
+                <p className="text-xs text-white/60">縦軸: 成功率(%) / 横軸: 日付</p>
+              </div>
+              {successRateSeries.length === 0 ? (
+                <p className="text-sm text-white/60">期間を指定して「更新」を押すと折れ線グラフ表示します。</p>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-white/15 bg-black/30 p-3">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-48">
+                      <line x1="0" y1="100" x2="100" y2="100" stroke="rgba(255,255,255,0.25)" strokeWidth="0.6" />
+                      <line x1="0" y1="50" x2="100" y2="50" stroke="rgba(255,255,255,0.18)" strokeWidth="0.4" />
+                      <line x1="0" y1="0" x2="100" y2="0" stroke="rgba(255,255,255,0.12)" strokeWidth="0.3" />
+                      <polyline
+                        fill="none"
+                        stroke="rgba(56,189,248,0.95)"
+                        strokeWidth="1.8"
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        points={successRatePolylinePoints}
+                      />
+                      {successRateSeries.map((item, index) => {
+                        const x = successRateSeries.length === 1 ? 0 : (index / (successRateSeries.length - 1)) * 100;
+                        const y = 100 - item.rate;
+                        return <circle key={`${item.date}-dot`} cx={x} cy={y} r="1.6" fill="rgba(125,211,252,1)" />;
+                      })}
+                    </svg>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {successRateSeries.map((item) => (
+                      <div key={`${item.date}-label`} className="rounded-lg bg-white/5 border border-white/10 px-2 py-1.5">
+                        <p className="text-[11px] text-white/60">{item.date}</p>
+                        <p className="text-sm text-white/90">{item.rate}%</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </section>
           </>
