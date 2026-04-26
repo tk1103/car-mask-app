@@ -12,9 +12,20 @@ type MetricsResponse = {
   kvConfigured?: boolean;
   missingEnvVars?: string[];
   kvError?: string;
+  countryCounts?: Record<string, number>;
+  deviceTypeCounts?: Record<string, number>;
 };
 
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
+
+function formatJstDateInput(offsetDays = 0): string {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000 + offsetDays * 24 * 60 * 60 * 1000);
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(jst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 export default function AdminMetricsPage() {
   const [token, setToken] = useState('');
@@ -27,12 +38,27 @@ export default function AdminMetricsPage() {
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
     if (saved) setToken(saved);
+    setDate(formatJstDateInput(0));
   }, []);
 
   const successRate = useMemo(() => {
     if (!data || data.detectAttempts === 0) return 0;
     return Math.round((data.detectSuccess / data.detectAttempts) * 100);
   }, [data]);
+
+  const topCountries = useMemo(
+    () =>
+      Object.entries(data?.countryCounts ?? {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5),
+    [data?.countryCounts]
+  );
+
+  const deviceEntries = useMemo(
+    () =>
+      Object.entries(data?.deviceTypeCounts ?? {}).sort((a, b) => b[1] - a[1]),
+    [data?.deviceTypeCounts]
+  );
 
   const loadMetrics = useCallback(async () => {
     if (!token.trim()) {
@@ -104,12 +130,28 @@ export default function AdminMetricsPage() {
 
           <div className="space-y-2">
             <label className="text-xs text-white/70">日付（任意 / JST）</label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full md:w-64 rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full md:w-64 rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
+              />
+              <button
+                type="button"
+                onClick={() => setDate(formatJstDateInput(0))}
+                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 hover:bg-white/20"
+              >
+                今日
+              </button>
+              <button
+                type="button"
+                onClick={() => setDate(formatJstDateInput(-1))}
+                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 hover:bg-white/20"
+              >
+                昨日
+              </button>
+            </div>
           </div>
 
           <button
@@ -151,6 +193,32 @@ export default function AdminMetricsPage() {
               <MetricCard label="成功数" value={`${data.detectSuccess}`} />
               <MetricCard label="失敗数" value={`${data.detectFailure}`} />
               <MetricCard label="成功率" value={`${successRate}%`} />
+            </section>
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-white/20 bg-white/5 p-4">
+                <p className="text-xs text-white/70 mb-2">地域（上位5 / 検出試行数）</p>
+                {topCountries.length === 0 ? (
+                  <p className="text-sm text-white/60">データなし</p>
+                ) : (
+                  <div className="space-y-1">
+                    {topCountries.map(([country, count]) => (
+                      <p key={country} className="text-sm text-white/90">{country}: {count}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="rounded-2xl border border-white/20 bg-white/5 p-4">
+                <p className="text-xs text-white/70 mb-2">端末種別（検出試行数）</p>
+                {deviceEntries.length === 0 ? (
+                  <p className="text-sm text-white/60">データなし</p>
+                ) : (
+                  <div className="space-y-1">
+                    {deviceEntries.map(([deviceType, count]) => (
+                      <p key={deviceType} className="text-sm text-white/90">{deviceType}: {count}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
           </>
         )}

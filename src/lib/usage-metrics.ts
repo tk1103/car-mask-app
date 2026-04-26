@@ -12,11 +12,15 @@ type UsageSummary = {
   kvConfigured: boolean;
   missingEnvVars: string[];
   kvError?: string;
+  countryCounts?: Record<string, number>;
+  deviceTypeCounts?: Record<string, number>;
 };
 
 const MEMORY_STORE = {
   usersByDate: new Map<string, Set<string>>(),
   countersByDate: new Map<string, { detectAttempts: number; detectSuccess: number; detectFailure: number }>(),
+  countryCountsByDate: new Map<string, Record<string, number>>(),
+  deviceCountsByDate: new Map<string, Record<string, number>>(),
 };
 
 function getTodayDateStringJst(): string {
@@ -48,18 +52,51 @@ function getCounterKey(date: string): string {
   return `metrics:${date}:counters`;
 }
 
+function getCountryCounterKey(date: string): string {
+  return `metrics:${date}:country_counts`;
+}
+
+function getDeviceCounterKey(date: string): string {
+  return `metrics:${date}:device_counts`;
+}
+
 function normalizeUserId(userId: string): string {
   if (userId.startsWith('device:')) return userId;
   if (!userId) return 'anonymous';
   return `ip:${userId}`;
 }
 
-export async function trackUsageEvent(userId: string, event: UsageEvent, date = getTodayDateStringJst()): Promise<void> {
+function normalizeCountry(country?: string): string {
+  const value = (country || 'unknown').trim().toUpperCase();
+  return value || 'UNKNOWN';
+}
+
+function normalizeDeviceType(deviceType?: string): string {
+  const value = (deviceType || 'unknown').trim().toLowerCase();
+  if (value === 'mobile' || value === 'desktop' || value === 'tablet' || value === 'bot') return value;
+  return 'unknown';
+}
+
+type TrackUsageMeta = {
+  country?: string;
+  deviceType?: string;
+};
+
+export async function trackUsageEvent(
+  userId: string,
+  event: UsageEvent,
+  date = getTodayDateStringJst(),
+  meta?: TrackUsageMeta
+): Promise<void> {
   const normalizedUserId = normalizeUserId(userId);
+  const country = normalizeCountry(meta?.country);
+  const deviceType = normalizeDeviceType(meta?.deviceType);
   if (isKvConfigured()) {
     try {
       const setKey = getSetKey(date);
       const counterKey = getCounterKey(date);
+      const countryCounterKey = getCountryCounterKey(date);
+      const deviceCounterKey = getDeviceCounterKey(date);
       const ttlSeconds = 60 * 60 * 24 * 8;
       const counterField = event === 'detect_attempt' ? 'detectAttempts' : event === 'detect_success' ? 'detectSuccess' : 'detectFailure';
       await Promise.all([
@@ -67,6 +104,10 @@ export async function trackUsageEvent(userId: string, event: UsageEvent, date = 
         kv.expire(setKey, ttlSeconds),
         kv.hincrby(counterKey, counterField, 1),
         kv.expire(counterKey, ttlSeconds),
+        event === 'detect_attempt' ? kv.hincrby(countryCounterKey, country, 1) : Promise.resolve(0),
+        event === 'detect_attempt' ? kv.expire(countryCounterKey, ttlSeconds) : Promise.resolve(0),
+        event === 'detect_attempt' ? kv.hincrby(deviceCounterKey, deviceType, 1) : Promise.resolve(0),
+        event === 'detect_attempt' ? kv.expire(deviceCounterKey, ttlSeconds) : Promise.resolve(0),
       ]);
       return;
     } catch (error) {
@@ -82,19 +123,36 @@ export async function trackUsageEvent(userId: string, event: UsageEvent, date = 
   if (event === 'detect_success') counters.detectSuccess += 1;
   if (event === 'detect_failure') counters.detectFailure += 1;
   MEMORY_STORE.countersByDate.set(date, counters);
+  if (event === 'detect_attempt') {
+    const countryMap = MEMORY_STORE.countryCountsByDate.get(date) ?? {};
+    countryMap[country] = (countryMap[country] ?? 0) + 1;
+    MEMORY_STORE.countryCountsByDate.set(date, countryMap);
+
+    const deviceMap = MEMORY_STORE.deviceCountsByDate.get(date) ?? {};
+    deviceMap[deviceType] = (deviceMap[deviceType] ?? 0) + 1;
+    MEMORY_STORE.deviceCountsByDate.set(date, deviceMap);
+  }
 }
 
 export async function getUsageSummary(date = getTodayDateStringJst()): Promise<UsageSummary> {
   if (isKvConfigured()) {
     try {
-      const [uniqueUsersRaw, countersRaw] = await Promise.all([
+      const [uniqueUsersRaw, countersRaw, countryCountsRaw, deviceTypeCountsRaw] = await Promise.all([
         kv.scard(getSetKey(date)),
         kv.hgetall<Record<string, string | number>>(getCounterKey(date)),
+        kv.hgetall<Record<string, string | number>>(getCountryCounterKey(date)),
+        kv.hgetall<Record<string, string | number>>(getDeviceCounterKey(date)),
       ]);
       const uniqueUsers = Number(uniqueUsersRaw || 0);
       const detectAttempts = Number(countersRaw?.detectAttempts || 0);
       const detectSuccess = Number(countersRaw?.detectSuccess || 0);
       const detectFailure = Number(countersRaw?.detectFailure || 0);
+      const countryCounts = Object.fromEntries(
+        Object.entries(countryCountsRaw ?? {}).map(([k, v]) => [k, Number(v || 0)])
+      );
+      const deviceTypeCounts = Object.fromEntries(
+        Object.entries(deviceTypeCountsRaw ?? {}).map(([k, v]) => [k, Number(v || 0)])
+      );
       return {
         date,
         uniqueUsers,
@@ -104,6 +162,8 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
         storage: 'kv',
         kvConfigured: true,
         missingEnvVars: [],
+        countryCounts,
+        deviceTypeCounts,
       };
     } catch (error) {
       return {
@@ -122,6 +182,8 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
 
   const users = MEMORY_STORE.usersByDate.get(date) ?? new Set<string>();
   const counters = MEMORY_STORE.countersByDate.get(date) ?? { detectAttempts: 0, detectSuccess: 0, detectFailure: 0 };
+  const countryCounts = MEMORY_STORE.countryCountsByDate.get(date) ?? {};
+  const deviceTypeCounts = MEMORY_STORE.deviceCountsByDate.get(date) ?? {};
   return {
     date,
     uniqueUsers: users.size,
@@ -131,5 +193,7 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
     storage: 'memory',
     kvConfigured: false,
     missingEnvVars: getMissingKvEnvVars(),
+    countryCounts,
+    deviceTypeCounts,
   };
 }

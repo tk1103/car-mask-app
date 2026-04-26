@@ -62,6 +62,23 @@ function getClientId(request: NextRequest): string {
   return 'anonymous';
 }
 
+function getCountryCode(request: NextRequest): string {
+  const country = request.headers.get('x-vercel-ip-country')?.trim();
+  if (country) return country.toUpperCase();
+  const cloudflareCountry = request.headers.get('cf-ipcountry')?.trim();
+  if (cloudflareCountry) return cloudflareCountry.toUpperCase();
+  return 'UNKNOWN';
+}
+
+function getDeviceType(request: NextRequest): 'mobile' | 'tablet' | 'desktop' | 'bot' | 'unknown' {
+  const ua = (request.headers.get('user-agent') || '').toLowerCase();
+  if (!ua) return 'unknown';
+  if (/bot|crawler|spider|slurp/.test(ua)) return 'bot';
+  if (/ipad|tablet|playbook|silk/.test(ua)) return 'tablet';
+  if (/mobi|iphone|android/.test(ua)) return 'mobile';
+  return 'desktop';
+}
+
 /** 日次利用回数の制限は「デバイスID がある場合のみ」適用（IP 共有による誤検知を避ける）。
  *  現状は UI 用の残数表示のみに利用し、サーバー側でブロックはしない。 */
 function getQuotaId(request: NextRequest): string | null {
@@ -296,10 +313,14 @@ export async function POST(request: NextRequest) {
     const requestId = createRequestId();
     const clientId = getClientId(request);
     const quotaId = getQuotaId(request);
-    await trackUsageEvent(clientId, 'detect_attempt');
+    const usageMeta = {
+      country: getCountryCode(request),
+      deviceType: getDeviceType(request),
+    };
+    await trackUsageEvent(clientId, 'detect_attempt', undefined, usageMeta);
 
     if (isRateLimited(clientId)) {
-      await trackUsageEvent(clientId, 'detect_failure');
+      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
       return NextResponse.json(
         {
           found: false,
@@ -333,19 +354,19 @@ export async function POST(request: NextRequest) {
 
     if (!imageFile) {
       logStructured('error', 'detect.bad_request.no_image', { requestId });
-      await trackUsageEvent(clientId, 'detect_failure');
+      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
       return NextResponse.json({ error: '画像が送信されませんでした', errorType: 'bad_request', requestId }, { status: 400 });
     }
     if (!imageWidth || !imageHeight) {
       logStructured('error', 'detect.bad_request.invalid_dimensions', { requestId, imageWidth, imageHeight });
-      await trackUsageEvent(clientId, 'detect_failure');
+      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
       return NextResponse.json({ error: '画像サイズが送信されませんでした', errorType: 'bad_request', requestId }, { status: 400 });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       logStructured('error', 'detect.config.missing_api_key', { requestId });
-      await trackUsageEvent(clientId, 'detect_failure');
+      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
       return NextResponse.json({ error: 'GEMINI_API_KEYが設定されていません', errorType: 'config', requestId }, { status: 500 });
     }
 
@@ -445,7 +466,7 @@ export async function POST(request: NextRequest) {
             retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null,
             message: String(lastErrorMessage || '').substring(0, 300),
           });
-          await trackUsageEvent(clientId, 'detect_failure');
+          await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
           return NextResponse.json(
             {
               found: false,
@@ -491,7 +512,7 @@ export async function POST(request: NextRequest) {
         if (parsed) {
           (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
           (parsed as { requestId?: string }).requestId = requestId;
-          await trackUsageEvent(clientId, 'detect_success');
+          await trackUsageEvent(clientId, 'detect_success', undefined, usageMeta);
           logStructured('info', 'detect.success', {
             requestId,
             modelName,
@@ -516,7 +537,7 @@ export async function POST(request: NextRequest) {
             modelName,
             elapsedMs: Date.now() - startTime,
           });
-          await trackUsageEvent(clientId, 'detect_failure');
+          await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
           return NextResponse.json(
             {
               found: false,
@@ -535,7 +556,7 @@ export async function POST(request: NextRequest) {
           modelName,
           message: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
         });
-        await trackUsageEvent(clientId, 'detect_failure');
+        await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
         return NextResponse.json(
           {
             found: false,
@@ -552,7 +573,7 @@ export async function POST(request: NextRequest) {
 
     if (!lastRawText && (lastStatus === 404 || lastStatus === 400)) {
       logStructured('error', 'detect.config_invalid_model_or_key', { requestId, lastStatus });
-      await trackUsageEvent(clientId, 'detect_failure');
+      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
       return NextResponse.json({
         found: false,
         error: 'APIキーまたはモデル設定を確認してください',
@@ -567,7 +588,7 @@ export async function POST(request: NextRequest) {
       lastStatus,
       rawSnippet: (lastRawText || '').substring(0, 1000),
     });
-    await trackUsageEvent(clientId, 'detect_failure');
+    await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
     return NextResponse.json({
       found: false,
       error: '座標の解析に失敗しました',
@@ -580,7 +601,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const requestId = createRequestId();
     const clientId = getClientId(request);
-    await trackUsageEvent(clientId, 'detect_failure');
+    await trackUsageEvent(clientId, 'detect_failure', undefined, {
+      country: getCountryCode(request),
+      deviceType: getDeviceType(request),
+    });
     logStructured('error', 'detect.unexpected_error', {
       requestId,
       message: error instanceof Error ? error.message : String(error),
