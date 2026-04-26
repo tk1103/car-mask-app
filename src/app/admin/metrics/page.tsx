@@ -16,6 +16,16 @@ type MetricsResponse = {
   deviceTypeCounts?: Record<string, number>;
 };
 
+type PreflightResponse = {
+  ok: boolean;
+  mode: 'beta';
+  checks: Array<{
+    id: 'admin_token' | 'kv_env' | 'metrics_read';
+    ok: boolean;
+    message: string;
+  }>;
+};
+
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
 const MAX_RANGE_DAYS = 31;
 
@@ -49,8 +59,10 @@ export default function AdminMetricsPage() {
   const [rangeEndDate, setRangeEndDate] = useState('');
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [rangeSeries, setRangeSeries] = useState<MetricsResponse[]>([]);
+  const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [preflightLoading, setPreflightLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -179,6 +191,41 @@ export default function AdminMetricsPage() {
     }
   }, [date, rangeEndDate, rangeStartDate, token]);
 
+  const runPreflight = useCallback(async () => {
+    if (!token.trim()) {
+      setError('まず METRICS_ADMIN_TOKEN を入力してください。');
+      return;
+    }
+    setPreflightLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/metrics?preflight=1', {
+        headers: { 'x-admin-token': token.trim() },
+      });
+      const rawText = await res.text();
+      let json: any = null;
+      if (rawText) {
+        try {
+          json = JSON.parse(rawText);
+        } catch (_) {
+          json = null;
+        }
+      }
+      if (!res.ok) {
+        throw new Error(typeof json?.error === 'string' ? json.error : `公開前チェックに失敗しました (${res.status})`);
+      }
+      if (!json || typeof json !== 'object' || !Array.isArray(json.checks)) {
+        throw new Error('公開前チェックの応答形式が不正です。');
+      }
+      setPreflight(json as PreflightResponse);
+    } catch (e) {
+      setPreflight(null);
+      setError(`通信エラー: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPreflightLoading(false);
+    }
+  }, [token]);
+
   return (
     <main className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto space-y-6">
@@ -273,11 +320,44 @@ export default function AdminMetricsPage() {
           >
             {loading ? '取得中...' : '更新'}
           </button>
+          <button
+            onClick={runPreflight}
+            disabled={preflightLoading}
+            className="ml-2 px-5 py-2.5 rounded-full bg-sky-500/15 border border-sky-300/30 text-sm hover:bg-sky-500/25 transition-colors disabled:opacity-60"
+          >
+            {preflightLoading ? 'チェック中...' : '公開前チェック（ベータ）'}
+          </button>
 
           {error && (
             <p className="text-red-200 text-sm">{error}</p>
           )}
         </section>
+
+        {preflight && (
+          <section className="rounded-2xl border border-white/20 bg-white/5 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-white/90">公開前チェック（ベータ運用向け）</p>
+              <span className={`text-xs px-2 py-1 rounded-full border ${preflight.ok ? 'bg-emerald-500/20 border-emerald-300/30 text-emerald-100' : 'bg-amber-500/20 border-amber-300/30 text-amber-100'}`}>
+                {preflight.ok ? '公開OK（ベータ）' : '要確認'}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {preflight.checks.map((check) => (
+                <div key={check.id} className="rounded-lg border border-white/15 bg-black/20 px-3 py-2">
+                  <p className={`text-xs ${check.ok ? 'text-emerald-200' : 'text-amber-200'}`}>
+                    {check.ok ? 'OK' : 'NG'} / {check.id}
+                  </p>
+                  <p className="text-xs text-white/80 mt-1">{check.message}</p>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-lg border border-white/15 bg-black/20 px-3 py-2 space-y-1">
+              <p className="text-xs text-white/80">実機スモーク（最終確認）</p>
+              <p className="text-xs text-white/60">- iPhone/Android で 撮影 → 解析 → 手動調整 → 保存 を各1回</p>
+              <p className="text-xs text-white/60">- 20秒以上待機時に案内文が表示されること</p>
+            </div>
+          </section>
+        )}
 
         {data && (
           <>
