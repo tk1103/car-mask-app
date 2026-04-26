@@ -50,10 +50,24 @@ export default function AdminMetricsPage() {
       const res = await fetch(url, {
         headers: { 'x-admin-token': token.trim() },
       });
-      const json = await res.json();
+      const rawText = await res.text();
+      let json: any = null;
+      if (rawText) {
+        try {
+          json = JSON.parse(rawText);
+        } catch (_) {
+          json = null;
+        }
+      }
       if (!res.ok) {
         setData(null);
-        setError(typeof json?.error === 'string' ? json.error : `取得に失敗しました (${res.status})`);
+        const detail = rawText ? ` / ${rawText.slice(0, 120)}` : '';
+        setError(typeof json?.error === 'string' ? json.error : `取得に失敗しました (${res.status})${detail}`);
+        return;
+      }
+      if (!json || typeof json !== 'object') {
+        setData(null);
+        setError('サーバーからの応答形式が不正です。再読み込み後にもう一度お試しください。');
         return;
       }
       setData(json as MetricsResponse);

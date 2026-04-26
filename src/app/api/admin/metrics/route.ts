@@ -13,20 +13,28 @@ function isAuthorized(request: NextRequest): boolean {
 }
 
 export async function GET(request: NextRequest) {
-  if (!process.env.METRICS_ADMIN_TOKEN) {
-    return NextResponse.json(
-      { error: 'METRICS_ADMIN_TOKEN is not configured' },
-      { status: 503 }
-    );
-  }
-  if (!isAuthorized(request)) {
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    );
-  }
+  try {
+    if (!process.env.METRICS_ADMIN_TOKEN) {
+      return NextResponse.json(
+        { error: 'METRICS_ADMIN_TOKEN is not configured' },
+        { status: 503 }
+      );
+    }
+    if (!isAuthorized(request)) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
 
-  const date = request.nextUrl.searchParams.get('date') || undefined;
-  const summary = await getUsageSummary(date);
-  return NextResponse.json(summary);
+    const date = request.nextUrl.searchParams.get('date') || undefined;
+    const summary = await getUsageSummary(date);
+    return NextResponse.json(summary);
+  } catch (error) {
+    console.error('[admin/metrics] failed to load summary:', error);
+    return NextResponse.json(
+      { error: 'Failed to load metrics' },
+      { status: 500 }
+    );
+  }
 }
