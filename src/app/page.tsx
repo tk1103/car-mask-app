@@ -602,9 +602,36 @@ export default function Home() {
       apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
       apiCtx.filter = 'none';
 
-      const apiBlob = await new Promise<Blob>((resolve, reject) => {
-        apiCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.88);
-      });
+      const MAX_VERCEL_BODY_BYTES = Math.floor(4.5 * 1024 * 1024); // 4.5MB
+      const encodeCanvasToJpeg = (canvas: HTMLCanvasElement, quality: number) =>
+        new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', quality);
+        });
+
+      const compressCanvasToLimit = async (
+        canvas: HTMLCanvasElement,
+        initialQuality: number,
+        minQuality = 0.45,
+        qualityStep = 0.08
+      ): Promise<Blob> => {
+        const tryCompress = async (quality: number): Promise<Blob> => {
+          const blob = await encodeCanvasToJpeg(canvas, quality);
+          if (blob.size <= MAX_VERCEL_BODY_BYTES || quality <= minQuality) {
+            if (blob.size > MAX_VERCEL_BODY_BYTES) {
+              console.warn('Image still exceeds Vercel payload limit at minimum quality.', {
+                size: blob.size,
+                quality,
+                limit: MAX_VERCEL_BODY_BYTES,
+              });
+            }
+            return blob;
+          }
+          return tryCompress(Math.max(minQuality, quality - qualityStep));
+        };
+        return tryCompress(initialQuality);
+      };
+
+      const apiBlob = await compressCanvasToLimit(apiCanvas, 0.88);
 
       const maxApiLongEdgeSmall = 512;
       const apiScaleSmall = Math.min(maxApiLongEdgeSmall / Math.max(originalW, originalH), 1);
@@ -621,9 +648,7 @@ export default function Home() {
         apiCtxSmall.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiWSmall, apiHSmall);
         apiCtxSmall.filter = 'none';
       }
-      const apiBlobSmall = await new Promise<Blob>((resolve, reject) => {
-        apiCanvasSmall.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.85);
-      });
+      const apiBlobSmall = await compressCanvasToLimit(apiCanvasSmall, 0.85);
 
       // 投機的実行: 即座に編集画面へ移行し、中央にデフォルトロゴを表示。API はバックグラウンドで実行
       setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
