@@ -5,6 +5,11 @@ import { useCallback, useEffect, useState } from 'react';
 type MetricsResponse = {
   date: string;
   uniqueUsers: number;
+  detectAttempts?: number;
+  detectSuccess?: number;
+  detectFailure?: number;
+  countryCounts?: Record<string, number>;
+  deviceTypeCounts?: Record<string, number>;
   storage: 'kv' | 'memory';
   upgradeClick?: number;
   featureBlockedByPlan?: number;
@@ -89,7 +94,7 @@ export default function AdminMetricsPage() {
         <header className="space-y-2">
           <h1 className="text-2xl md:text-3xl font-light tracking-wide">Carkus Metrics</h1>
           <p className="text-white/70 text-sm">
-            管理画面はシンプルに、日次の利用人数（ユニーク端末数）を中心に表示します。
+            日次の利用状況を確認できます（ユニーク端末 / 検出数 / 国別 / 端末別）。
           </p>
         </header>
 
@@ -145,11 +150,48 @@ export default function AdminMetricsPage() {
         </section>
 
         {data && (
-          <section className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <MetricCard label="日付" value={data.date} />
             <MetricCard label="利用人数（ユニーク端末）" value={`${data.uniqueUsers}`} />
+            <MetricCard label="検出リクエスト" value={`${data.detectAttempts ?? 0}`} />
+            <MetricCard label="保存方式" value={data.storage === 'kv' ? 'KV（永続）' : 'Memory（一時）'} />
+          </section>
+        )}
+
+        {data && (
+          <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <MetricCard label="検出成功" value={`${data.detectSuccess ?? 0}`} />
+            <MetricCard label="検出失敗" value={`${data.detectFailure ?? 0}`} />
             <MetricCard label="feature_blocked_by_plan" value={`${data.featureBlockedByPlan ?? 0}`} />
             <MetricCard label="upgrade_click" value={`${data.upgradeClick ?? 0}`} />
+          </section>
+        )}
+
+        {data && (
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <MetricListCard
+              label="国別（detect_attempt）"
+              entries={Object.entries(data.countryCounts ?? {}).sort((a, b) => b[1] - a[1])}
+              emptyLabel="データなし"
+            />
+            <MetricListCard
+              label="端末別（detect_attempt）"
+              entries={Object.entries(data.deviceTypeCounts ?? {}).sort((a, b) => b[1] - a[1])}
+              emptyLabel="データなし"
+            />
+          </section>
+        )}
+
+        {data && (
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <MetricCard
+              label="成功率"
+              value={`${data.detectAttempts ? Math.round(((data.detectSuccess ?? 0) / data.detectAttempts) * 100) : 0}%`}
+            />
+            <MetricCard
+              label="失敗率"
+              value={`${data.detectAttempts ? Math.round(((data.detectFailure ?? 0) / data.detectAttempts) * 100) : 0}%`}
+            />
             <MetricCard label="保存方式" value={data.storage === 'kv' ? 'KV（永続）' : 'Memory（一時）'} />
           </section>
         )}
@@ -163,6 +205,34 @@ function MetricCard({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl border border-white/20 bg-white/5 p-4">
       <p className="text-xs text-white/70 mb-1">{label}</p>
       <p className="text-xl font-light">{value}</p>
+    </div>
+  );
+}
+
+function MetricListCard({
+  label,
+  entries,
+  emptyLabel,
+}: {
+  label: string;
+  entries: Array<[string, number]>;
+  emptyLabel: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/20 bg-white/5 p-4">
+      <p className="text-xs text-white/70 mb-2">{label}</p>
+      {entries.length === 0 ? (
+        <p className="text-sm text-white/50">{emptyLabel}</p>
+      ) : (
+        <ul className="space-y-1">
+          {entries.map(([name, count]) => (
+            <li key={name} className="flex items-center justify-between text-sm">
+              <span className="text-white/80">{name}</span>
+              <span className="text-white">{count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
