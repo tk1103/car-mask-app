@@ -268,10 +268,19 @@ function drawCarkusLogoAtOrigin(
 
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-    const size = Math.min(logoWidth * 1.2, logoHeight * 1.2);
-    const drawW = svgAspect >= 1 ? size : size * svgAspect;
-    const drawH = svgAspect >= 1 ? size / svgAspect : size;
-    const offsetX = drawW * 0.12;
+    const maxW = Math.max(1, logoWidth * 0.9);
+    const maxH = Math.max(1, logoHeight * 0.8);
+    let drawW = maxW;
+    let drawH = drawW / svgAspect;
+    if (drawH > maxH) {
+      drawH = maxH;
+      drawW = drawH * svgAspect;
+    }
+    // 視認性向上: 余白の大きいSVGでもロゴが小さく見えないよう少しだけ増幅
+    const boost = 1.12;
+    drawW = Math.min(maxW, drawW * boost);
+    drawH = Math.min(maxH, drawH * boost);
+    const offsetX = drawW * 0.1;
     ctx.save();
     ctx.filter = 'brightness(0) invert(1)';
     ctx.drawImage(logoImage, -drawW / 2 + offsetX, -drawH / 2, drawW, drawH);
@@ -2255,9 +2264,9 @@ export default function Home() {
             )}
             {detectionFailed && showManualGuide && (
               <div className="mb-3 px-3 py-3 rounded-xl bg-gradient-to-b from-white/12 to-white/5 border border-white/25 space-y-2.5">
-                <p className="text-white text-sm font-normal tracking-wide">{text.manualGuideTitle}</p>
-                <p className="text-white/80 text-xs font-extralight leading-relaxed">{text.manualGuideWhy}</p>
-                <ol className="list-decimal pl-4 space-y-1.5 text-white/90 text-xs font-light leading-relaxed marker:text-amber-300/90">
+                <p className="text-white text-base font-medium tracking-wide">{text.manualGuideTitle}</p>
+                <p className="text-white/85 text-sm font-light leading-relaxed">{text.manualGuideWhy}</p>
+                <ol className="list-decimal pl-5 space-y-2 text-white/95 text-sm font-light leading-relaxed marker:text-amber-300/90">
                   <li>{text.manualStep1}</li>
                   <li>{text.manualStep2}</li>
                   <li>{text.manualStep3}</li>
@@ -2265,14 +2274,14 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowManualGuide(false)}
-                  className="w-full px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors"
+                  className="w-full px-3 py-2.5 rounded-full text-sm bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors"
                 >
                   {text.guideClose}
                 </button>
               </div>
             )}
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/80 text-xs font-light w-12">{text.angle}</span>
+              <span className="text-white/85 text-sm font-light w-12">{text.angle}</span>
               <input
                 type="range"
                 min="-30"
@@ -2282,10 +2291,10 @@ export default function Home() {
                 onChange={(e) => setEditLogoRotation(Number(e.target.value))}
                 className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
-              <span className="text-white/80 text-xs tabular-nums w-8">{editLogoRotation}°</span>
+              <span className="text-white/85 text-sm tabular-nums w-10 text-right">{editLogoRotation}°</span>
             </div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/80 text-xs font-light w-12">{text.size}</span>
+              <span className="text-white/85 text-sm font-light w-12">{text.size}</span>
               <input
                 type="range"
                 min="0.3"
