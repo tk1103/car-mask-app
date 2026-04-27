@@ -1632,12 +1632,15 @@ export default function Home() {
           lctx.restore();
         }
 
+        const quadCenterX = (quadPx[0].x + quadPx[1].x + quadPx[2].x + quadPx[3].x) / 4;
+        const quadCenterY = (quadPx[0].y + quadPx[1].y + quadPx[2].y + quadPx[3].y) / 4;
+
         const logoCenterX =
-          centerX +
+          quadCenterX +
           axisUx * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
           axisVx * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
         const logoCenterY =
-          centerY +
+          quadCenterY +
           axisUy * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
           axisVy * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
         const logoAngle = Math.atan2(axisUy, axisUx);
