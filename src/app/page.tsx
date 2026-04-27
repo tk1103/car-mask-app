@@ -341,6 +341,8 @@ const LOCAL_DAILY_FREE_LIMIT = 1;
 const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
 const PLAN_STORAGE_KEY = 'carkus_plan';
 const FREE_DAILY_LIMIT_DISABLED = true; // 検証期間は無料版の日次回数制限を解除
+const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
+const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
@@ -1570,8 +1572,7 @@ export default function Home() {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
 
-        // 2段目: ロゴは比率維持 + 中央配置（多形状プレート対応）
-        const plateAspect = plateWidth / Math.max(1, plateHeight);
+        // 2段目: ロゴは非歪みで中央配置（内接矩形方式）
         const isLogoImageReady = Boolean(
           carkusLogoImage &&
           carkusLogoImage.naturalWidth > 0 &&
@@ -1581,23 +1582,37 @@ export default function Home() {
         const logoAspect = isLogoImageReady
           ? carkusLogoImage!.naturalWidth / carkusLogoImage!.naturalHeight
           : 3.2;
-        const insetRatio = Math.min(0.1, Math.max(0.05, plateAspect > 4 ? 0.1 : 0.06));
-        const availableW = Math.max(0.1, 1 - insetRatio * 2);
-        const availableH = Math.max(0.1, 1 - insetRatio * 2);
-        const availableAspect = availableW / availableH;
 
-        let logoNormW = availableW;
-        let logoNormH = availableH;
-        if (availableAspect > logoAspect) {
-          logoNormW = availableH * logoAspect;
-        } else {
-          logoNormH = availableW / logoAspect;
+        const midLeft = { x: (quadPx[0].x + quadPx[3].x) / 2, y: (quadPx[0].y + quadPx[3].y) / 2 };
+        const midRight = { x: (quadPx[1].x + quadPx[2].x) / 2, y: (quadPx[1].y + quadPx[2].y) / 2 };
+        const midTop = { x: (quadPx[0].x + quadPx[1].x) / 2, y: (quadPx[0].y + quadPx[1].y) / 2 };
+        const midBottom = { x: (quadPx[2].x + quadPx[3].x) / 2, y: (quadPx[2].y + quadPx[3].y) / 2 };
+        const axisUxRaw = midRight.x - midLeft.x;
+        const axisUyRaw = midRight.y - midLeft.y;
+        const axisULen = Math.max(1e-6, Math.hypot(axisUxRaw, axisUyRaw));
+        const axisUx = axisUxRaw / axisULen;
+        const axisUy = axisUyRaw / axisULen;
+        let axisVx = -axisUy;
+        let axisVy = axisUx;
+        const topBottomVecX = midBottom.x - midTop.x;
+        const topBottomVecY = midBottom.y - midTop.y;
+        if (axisVx * topBottomVecX + axisVy * topBottomVecY < 0) {
+          axisVx *= -1;
+          axisVy *= -1;
         }
-        const x0 = (1 - logoNormW) / 2;
-        const y0 = (1 - logoNormH) / 2;
-        const x1 = x0 + logoNormW;
-        const y1 = y0 + logoNormH;
-        const logoQuad = buildInnerQuadFromRect(quadPx, x0, y0, x1, y1);
+
+        const plateWidthPx = Math.max(1, Math.hypot(midRight.x - midLeft.x, midRight.y - midLeft.y));
+        const plateHeightPx = Math.max(1, Math.abs(topBottomVecX * axisVx + topBottomVecY * axisVy));
+        const insetPx = Math.max(1, plateHeightPx * LOGO_INSET_RATIO_BY_PLATE_HEIGHT);
+        const availableW = Math.max(1, plateWidthPx - insetPx * 2);
+        const availableH = Math.max(1, plateHeightPx - insetPx * 2);
+
+        let logoDrawW = availableW;
+        let logoDrawH = logoDrawW / Math.max(0.01, logoAspect);
+        if (logoDrawH > availableH) {
+          logoDrawH = availableH;
+          logoDrawW = logoDrawH * logoAspect;
+        }
 
         const Lh = 220;
         const Lw = Math.max(120, Math.round(Lh * logoAspect));
@@ -1616,7 +1631,21 @@ export default function Home() {
           drawCarkusLogoAtOrigin(lctx, Lw * 0.92, Lh * 0.92, undefined, carkusLogoImage);
           lctx.restore();
         }
-        drawImageWarpedToQuad(ctx, logoCanvas, logoQuad, Lw, Lh);
+
+        const logoCenterX =
+          centerX +
+          axisUx * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
+          axisVx * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
+        const logoCenterY =
+          centerY +
+          axisUy * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
+          axisVy * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
+        const logoAngle = Math.atan2(axisUy, axisUx);
+        ctx.save();
+        ctx.translate(logoCenterX, logoCenterY);
+        ctx.rotate(logoAngle);
+        ctx.drawImage(logoCanvas, -logoDrawW / 2, -logoDrawH / 2, logoDrawW, logoDrawH);
+        ctx.restore();
       });
     }
   }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
