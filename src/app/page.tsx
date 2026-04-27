@@ -164,6 +164,7 @@ function getAffineFromTri(
 }
 
 type QuadPx = [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ];
+const imageVisualBoundsCache = new WeakMap<HTMLImageElement, { sx: number; sy: number; sw: number; sh: number }>();
 
 // 四角形を黒で塗りつぶし（マスク）
 function fillQuad(ctx: CanvasRenderingContext2D, quad: QuadPx, fillStyle: string) {
@@ -267,6 +268,50 @@ function drawCarkusLogoAtOrigin(
   ctx.textBaseline = 'middle';
 
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
+    let visual = imageVisualBoundsCache.get(logoImage);
+    if (!visual) {
+      const probeW = Math.min(1024, logoImage.naturalWidth);
+      const probeH = Math.max(1, Math.round(probeW * (logoImage.naturalHeight / logoImage.naturalWidth)));
+      const probe = document.createElement('canvas');
+      probe.width = probeW;
+      probe.height = probeH;
+      const pctx = probe.getContext('2d', { willReadFrequently: true });
+      if (pctx) {
+        pctx.clearRect(0, 0, probeW, probeH);
+        pctx.drawImage(logoImage, 0, 0, probeW, probeH);
+        const data = pctx.getImageData(0, 0, probeW, probeH).data;
+        let minX = probeW;
+        let minY = probeH;
+        let maxX = -1;
+        let maxY = -1;
+        for (let y = 0; y < probeH; y++) {
+          for (let x = 0; x < probeW; x++) {
+            const a = data[(y * probeW + x) * 4 + 3];
+            if (a < 10) continue;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+        if (maxX >= minX && maxY >= minY) {
+          const scaleX = logoImage.naturalWidth / probeW;
+          const scaleY = logoImage.naturalHeight / probeH;
+          visual = {
+            sx: minX * scaleX,
+            sy: minY * scaleY,
+            sw: Math.max(1, (maxX - minX + 1) * scaleX),
+            sh: Math.max(1, (maxY - minY + 1) * scaleY),
+          };
+        } else {
+          visual = { sx: 0, sy: 0, sw: logoImage.naturalWidth, sh: logoImage.naturalHeight };
+        }
+      } else {
+        visual = { sx: 0, sy: 0, sw: logoImage.naturalWidth, sh: logoImage.naturalHeight };
+      }
+      imageVisualBoundsCache.set(logoImage, visual);
+    }
+
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
     // マスクに対して約80%を基準にしつつ、SVG余白を見越して見た目を補正する
     const targetW = Math.max(1, logoWidth * 0.8);
@@ -283,7 +328,17 @@ function drawCarkusLogoAtOrigin(
     drawH = Math.min(logoHeight * 0.98, drawW / svgAspect);
     ctx.save();
     ctx.filter = 'brightness(0) invert(1)';
-    ctx.drawImage(logoImage, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.drawImage(
+      logoImage,
+      visual.sx,
+      visual.sy,
+      visual.sw,
+      visual.sh,
+      -drawW / 2,
+      -drawH / 2,
+      drawW,
+      drawH
+    );
     ctx.restore();
   } else {
     const trialSize = Math.min(logoWidth * 0.42, logoHeight * 0.84, 44);
