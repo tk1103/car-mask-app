@@ -401,6 +401,7 @@ const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限とは異なる場合があります）
 const LOCAL_DAILY_FREE_LIMIT = 1;
 const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
+const CUSTOM_LOGO_STORAGE_KEY = 'carkus_custom_logo_data_url';
 const FREE_DAILY_LIMIT_DISABLED = true; // 検証期間は無料版の日次回数制限を解除
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
 const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
@@ -472,6 +473,14 @@ const t = {
     pro: '課金版',
     proUnlimitedHint: '課金版は日次無料枠の制限対象外です。',
     planLoading: '判定中',
+    customLogo: '独自ロゴ',
+    resetLogo: '標準ロゴに戻す',
+    resetLogoSuccess: '標準ロゴに戻しました。',
+    proOnlyLogo: '独自ロゴは課金版で利用できます。',
+    logoUploadSuccess: '独自ロゴを適用しました。',
+    logoUploadFailed: '独自ロゴの読み込みに失敗しました。',
+    logoTypeError: 'PNG または SVG を選択してください。',
+    logoTooLarge: 'ロゴ画像は 5MB 以下にしてください。',
   },
   en: {
     beta: 'BETA',
@@ -534,6 +543,14 @@ const t = {
     pro: 'Pro',
     proUnlimitedHint: 'Pro is not limited by the daily free quota.',
     planLoading: 'Loading',
+    customLogo: 'Custom logo',
+    resetLogo: 'Reset to default',
+    resetLogoSuccess: 'Reset to default logo.',
+    proOnlyLogo: 'Custom logo is available on Pro plan.',
+    logoUploadSuccess: 'Custom logo applied.',
+    logoUploadFailed: 'Failed to load custom logo.',
+    logoTypeError: 'Please select PNG or SVG.',
+    logoTooLarge: 'Logo image must be 5MB or smaller.',
   },
 } as const;
 
@@ -578,6 +595,7 @@ export default function Home() {
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
   const [localDailySuccessCount, setLocalDailySuccessCount] = useState(0);
   const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
+  const [customLogoSrc, setCustomLogoSrc] = useState<string | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [isAndroid, setIsAndroid] = useState(false);
@@ -587,6 +605,7 @@ export default function Home() {
   const [planResolved, setPlanResolved] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const photoPickerRef = useRef<HTMLInputElement>(null);
+  const customLogoPickerRef = useRef<HTMLInputElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const activeDetectControllerRef = useRef<AbortController | null>(null);
@@ -669,12 +688,20 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const saved = window.localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY);
+      if (saved) setCustomLogoSrc(saved);
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => setCarkusLogoImage(img);
     img.onerror = () => setCarkusLogoImage(null);
-    img.src = '/Carkus.svg';
-  }, []);
+    img.src = customLogoSrc || '/Carkus.svg';
+  }, [customLogoSrc]);
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -896,6 +923,66 @@ export default function Home() {
   const handlePickImageFromDevice = useCallback(() => {
     photoPickerRef.current?.click();
   }, []);
+
+  const handlePickCustomLogo = useCallback(() => {
+    if (isFreePlan) {
+      setToastMessage(tx('proOnlyLogo'));
+      return;
+    }
+    customLogoPickerRef.current?.click();
+  }, [isFreePlan, tx]);
+
+  const handleCustomLogoSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.currentTarget.value = '';
+    if (!file) return;
+    const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+    const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+    if (!isSvg && !isPng) {
+      setToastMessage(tx('logoTypeError'));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setToastMessage(tx('logoTooLarge'));
+      return;
+    }
+    try {
+      const toDataUrl = () =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('reader_failed'));
+          reader.readAsDataURL(file);
+        });
+      const dataUrl = await toDataUrl();
+      const test = new Image();
+      await new Promise<void>((resolve, reject) => {
+        test.onload = () => resolve();
+        test.onerror = () => reject(new Error('image_invalid'));
+        test.src = dataUrl;
+      });
+      if (!test.naturalWidth || !test.naturalHeight) throw new Error('image_invalid');
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.setItem(CUSTOM_LOGO_STORAGE_KEY, dataUrl);
+        } catch (_) {}
+      }
+      setCustomLogoSrc(dataUrl);
+      setToastMessage(tx('logoUploadSuccess'));
+    } catch (_) {
+      setToastMessage(tx('logoUploadFailed'));
+    }
+  }, [tx]);
+
+  const handleResetCustomLogo = useCallback(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.removeItem(CUSTOM_LOGO_STORAGE_KEY);
+      } catch (_) {}
+    }
+    setCustomLogoSrc(null);
+    setToastMessage(tx('resetLogoSuccess'));
+  }, [tx]);
 
   const handleImageFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2054,6 +2141,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
       <input ref={photoPickerRef} type="file" accept="image/*" onChange={handleImageFileSelected} className="hidden" />
+      <input ref={customLogoPickerRef} type="file" accept=".png,.svg,image/png,image/svg+xml" onChange={handleCustomLogoSelected} className="hidden" />
       <div className="fixed top-3 right-3 z-[120] flex flex-col items-end gap-2">
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
           <button
@@ -2424,6 +2512,22 @@ export default function Home() {
                 onChange={(e) => setEditLogoScale(Number(e.target.value))}
                 className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
+            </div>
+            <div className="flex items-center justify-center gap-2 mb-3">
+              <button
+                onClick={handlePickCustomLogo}
+                disabled={isProcessing}
+                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors disabled:opacity-50"
+              >
+                {text.customLogo}
+              </button>
+              <button
+                onClick={handleResetCustomLogo}
+                disabled={isProcessing}
+                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/80 hover:bg-white/20 transition-colors disabled:opacity-50"
+              >
+                {text.resetLogo}
+              </button>
             </div>
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
