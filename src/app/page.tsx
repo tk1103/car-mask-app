@@ -481,8 +481,6 @@ const t = {
     logoUploadFailed: '独自ロゴの読み込みに失敗しました。',
     logoTypeError: 'PNG または SVG を選択してください。',
     logoTooLarge: 'ロゴ画像は 5MB 以下にしてください。',
-    logoCopyrightNotice:
-      '注意: 著作権・商標権などの権利を侵害しない画像のみ使用してください。第三者権利の侵害に関する責任は利用者が負います。',
     logoCopyrightConfirm:
       '著作権・商標権など第三者の権利を侵害しない画像のみアップロードしてください。権利侵害に関する責任は利用者が負います。続行しますか？',
   },
@@ -555,8 +553,6 @@ const t = {
     logoUploadFailed: 'Failed to load custom logo.',
     logoTypeError: 'Please select PNG or SVG.',
     logoTooLarge: 'Logo image must be 5MB or smaller.',
-    logoCopyrightNotice:
-      'Notice: Use only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for any rights violations.',
     logoCopyrightConfirm:
       'Upload only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for rights violations. Continue?',
   },
@@ -2168,7 +2164,6 @@ export default function Home() {
           </button>
         </div>
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
-          <span className="px-2 text-[10px] text-white/60">{text.plan}</span>
           {!planResolved ? (
             <span className="px-3 py-1.5 text-xs text-white/80">{text.planLoading}</span>
           ) : (
@@ -2498,50 +2493,53 @@ export default function Home() {
                 </button>
               </div>
             )}
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/85 text-sm font-light w-12">{text.angle}</span>
-              <input
-                type="range"
-                min="-30"
-                max="30"
-                step="1"
-                value={editLogoRotation}
-                onChange={(e) => setEditLogoRotation(Number(e.target.value))}
-                className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
-              />
-              <span className="text-white/85 text-sm tabular-nums w-10 text-right">{editLogoRotation}°</span>
-            </div>
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-white/85 text-sm font-light w-12">{text.size}</span>
-              <input
-                type="range"
-                min="0.3"
-                max="2"
-                step="0.05"
-                value={editLogoScale}
-                onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
-              />
-            </div>
-            <div className="flex items-center justify-center gap-2 mb-3">
-              <button
-                onClick={handlePickCustomLogo}
-                disabled={isProcessing}
-                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors disabled:opacity-50"
-              >
-                {text.customLogo}
-              </button>
-              <button
-                onClick={handleResetCustomLogo}
-                disabled={isProcessing}
-                className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/80 hover:bg-white/20 transition-colors disabled:opacity-50"
-              >
-                {text.resetLogo}
-              </button>
-            </div>
-            <p className="mb-3 text-[11px] leading-relaxed text-amber-100/85">
-              {text.logoCopyrightNotice}
-            </p>
+            {!isProcessing && (
+              <>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-white/85 text-sm font-light w-12">{text.angle}</span>
+                  <input
+                    type="range"
+                    min="-30"
+                    max="30"
+                    step="1"
+                    value={editLogoRotation}
+                    onChange={(e) => setEditLogoRotation(Number(e.target.value))}
+                    className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                  />
+                  <span className="text-white/85 text-sm tabular-nums w-10 text-right">{editLogoRotation}°</span>
+                </div>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-white/85 text-sm font-light w-12">{text.size}</span>
+                  <input
+                    type="range"
+                    min="0.3"
+                    max="2"
+                    step="0.05"
+                    value={editLogoScale}
+                    onChange={(e) => setEditLogoScale(Number(e.target.value))}
+                    className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                  />
+                </div>
+              </>
+            )}
+            {!isProcessing && (
+              <div className="flex items-center justify-center gap-2 mb-3">
+                <button
+                  onClick={handlePickCustomLogo}
+                  disabled={isProcessing}
+                  className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors disabled:opacity-50"
+                >
+                  {text.customLogo}
+                </button>
+                <button
+                  onClick={handleResetCustomLogo}
+                  disabled={isProcessing}
+                  className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/80 hover:bg-white/20 transition-colors disabled:opacity-50"
+                >
+                  {text.resetLogo}
+                </button>
+              </div>
+            )}
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
                 onClick={retake}
