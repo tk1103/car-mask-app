@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-type MetricsResponse = {
+type MetricsSingleResponse = {
+  mode: 'single';
   date: string;
   uniqueUsers: number;
   detectAttempts?: number;
@@ -14,6 +15,31 @@ type MetricsResponse = {
   upgradeClick?: number;
   featureBlockedByPlan?: number;
 };
+type MetricsRangeResponse = {
+  mode: 'range';
+  from: string;
+  to: string;
+  days: number;
+  storage: 'kv' | 'memory';
+  totals: {
+    uniqueUsers: number;
+    detectAttempts: number;
+    detectSuccess: number;
+    detectFailure: number;
+    upgradeClick: number;
+    featureBlockedByPlan: number;
+  };
+  series: Array<{
+    date: string;
+    uniqueUsers: number;
+    detectAttempts: number;
+    detectSuccess: number;
+    detectFailure: number;
+    upgradeClick: number;
+    featureBlockedByPlan: number;
+  }>;
+};
+type MetricsResponse = MetricsSingleResponse | MetricsRangeResponse;
 
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
 
@@ -28,7 +54,8 @@ function formatJstDateInput(offsetDays = 0): string {
 
 export default function AdminMetricsPage() {
   const [token, setToken] = useState('');
-  const [date, setDate] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,7 +65,8 @@ export default function AdminMetricsPage() {
     const saved = window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
     if (saved) setToken(saved);
     const today = formatJstDateInput(0);
-    setDate(today);
+    setToDate(today);
+    setFromDate(formatJstDateInput(-6));
   }, []);
 
   const loadMetrics = useCallback(async () => {
@@ -52,9 +80,12 @@ export default function AdminMetricsPage() {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(TOKEN_STORAGE_KEY, token.trim());
       }
-      const fetchOne = async (targetDate?: string): Promise<MetricsResponse> => {
+      const fetchOne = async (): Promise<MetricsResponse> => {
         const params = new URLSearchParams();
-        if (targetDate) params.set('date', targetDate);
+        if (fromDate && toDate) {
+          params.set('from', fromDate);
+          params.set('to', toDate);
+        }
         const url = `/api/admin/metrics${params.toString() ? `?${params.toString()}` : ''}`;
         const res = await fetch(url, {
           headers: { 'x-admin-token': token.trim() },
@@ -78,7 +109,7 @@ export default function AdminMetricsPage() {
         return json as MetricsResponse;
       };
 
-      const primary = await fetchOne(date || undefined);
+      const primary = await fetchOne();
       setData(primary);
     } catch (e) {
       setData(null);
@@ -86,7 +117,23 @@ export default function AdminMetricsPage() {
     } finally {
       setLoading(false);
     }
-  }, [date, token]);
+  }, [fromDate, toDate, token]);
+
+  const resolvedSeries = useMemo(() => {
+    if (!data) return [];
+    if (data.mode === 'range') return data.series;
+    return [
+      {
+        date: data.date,
+        uniqueUsers: data.uniqueUsers,
+        detectAttempts: data.detectAttempts ?? 0,
+        detectSuccess: data.detectSuccess ?? 0,
+        detectFailure: data.detectFailure ?? 0,
+        upgradeClick: data.upgradeClick ?? 0,
+        featureBlockedByPlan: data.featureBlockedByPlan ?? 0,
+      },
+    ];
+  }, [data]);
 
   return (
     <main className="min-h-screen bg-black text-white p-6 md:p-10">
@@ -94,7 +141,7 @@ export default function AdminMetricsPage() {
         <header className="space-y-2">
           <h1 className="text-2xl md:text-3xl font-light tracking-wide">Carkus Metrics</h1>
           <p className="text-white/70 text-sm">
-            日次の利用状況を確認できます（ユニーク端末 / 検出数 / 国別 / 端末別）。
+            期間を選んで総数と推移を確認できます（単日表示にも対応）。
           </p>
         </header>
 
@@ -111,27 +158,40 @@ export default function AdminMetricsPage() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs text-white/70">日付（任意 / JST）</label>
+            <label className="text-xs text-white/70">期間（JST）</label>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full md:w-64 rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="w-full md:w-52 rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
+              />
+              <span className="text-white/60 text-xs">〜</span>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="w-full md:w-52 rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
               />
               <button
                 type="button"
-                onClick={() => setDate(formatJstDateInput(0))}
+                onClick={() => {
+                  setToDate(formatJstDateInput(0));
+                  setFromDate(formatJstDateInput(-6));
+                }}
                 className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 hover:bg-white/20"
               >
-                今日
+                直近7日
               </button>
               <button
                 type="button"
-                onClick={() => setDate(formatJstDateInput(-1))}
+                onClick={() => {
+                  setToDate(formatJstDateInput(0));
+                  setFromDate(formatJstDateInput(-29));
+                }}
                 className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 hover:bg-white/20"
               >
-                昨日
+                直近30日
               </button>
             </div>
           </div>
@@ -151,23 +211,44 @@ export default function AdminMetricsPage() {
 
         {data && (
           <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <MetricCard label="日付" value={data.date} />
-            <MetricCard label="利用人数（ユニーク端末）" value={`${data.uniqueUsers}`} />
-            <MetricCard label="検出リクエスト" value={`${data.detectAttempts ?? 0}`} />
+            <MetricCard
+              label={data.mode === 'range' ? '期間' : '日付'}
+              value={data.mode === 'range' ? `${data.from} 〜 ${data.to}` : data.date}
+            />
+            <MetricCard
+              label="利用人数（合計）"
+              value={`${data.mode === 'range' ? data.totals.uniqueUsers : data.uniqueUsers}`}
+            />
+            <MetricCard
+              label="検出リクエスト（合計）"
+              value={`${data.mode === 'range' ? data.totals.detectAttempts : data.detectAttempts ?? 0}`}
+            />
             <MetricCard label="保存方式" value={data.storage === 'kv' ? 'KV（永続）' : 'Memory（一時）'} />
           </section>
         )}
 
         {data && (
           <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <MetricCard label="検出成功" value={`${data.detectSuccess ?? 0}`} />
-            <MetricCard label="検出失敗" value={`${data.detectFailure ?? 0}`} />
-            <MetricCard label="feature_blocked_by_plan" value={`${data.featureBlockedByPlan ?? 0}`} />
-            <MetricCard label="upgrade_click" value={`${data.upgradeClick ?? 0}`} />
+            <MetricCard
+              label="検出成功（合計）"
+              value={`${data.mode === 'range' ? data.totals.detectSuccess : data.detectSuccess ?? 0}`}
+            />
+            <MetricCard
+              label="検出失敗（合計）"
+              value={`${data.mode === 'range' ? data.totals.detectFailure : data.detectFailure ?? 0}`}
+            />
+            <MetricCard
+              label="feature_blocked_by_plan"
+              value={`${data.mode === 'range' ? data.totals.featureBlockedByPlan : data.featureBlockedByPlan ?? 0}`}
+            />
+            <MetricCard
+              label="upgrade_click"
+              value={`${data.mode === 'range' ? data.totals.upgradeClick : data.upgradeClick ?? 0}`}
+            />
           </section>
         )}
 
-        {data && (
+        {data && data.mode === 'single' && (
           <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <MetricListCard
               label="国別（detect_attempt）"
@@ -183,16 +264,39 @@ export default function AdminMetricsPage() {
         )}
 
         {data && (
+          <section className="rounded-2xl border border-white/20 bg-white/5 p-4">
+            <p className="text-xs text-white/70 mb-3">折れ線グラフ（日次）</p>
+            <LineChart series={resolvedSeries} />
+          </section>
+        )}
+
+        {data && (
           <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <MetricCard
               label="成功率"
-              value={`${data.detectAttempts ? Math.round(((data.detectSuccess ?? 0) / data.detectAttempts) * 100) : 0}%`}
+              value={`${
+                (data.mode === 'range' ? data.totals.detectAttempts : data.detectAttempts ?? 0) > 0
+                  ? Math.round(
+                      ((data.mode === 'range' ? data.totals.detectSuccess : data.detectSuccess ?? 0) /
+                        (data.mode === 'range' ? data.totals.detectAttempts : data.detectAttempts ?? 0)) *
+                        100
+                    )
+                  : 0
+              }%`}
             />
             <MetricCard
               label="失敗率"
-              value={`${data.detectAttempts ? Math.round(((data.detectFailure ?? 0) / data.detectAttempts) * 100) : 0}%`}
+              value={`${
+                (data.mode === 'range' ? data.totals.detectAttempts : data.detectAttempts ?? 0) > 0
+                  ? Math.round(
+                      ((data.mode === 'range' ? data.totals.detectFailure : data.detectFailure ?? 0) /
+                        (data.mode === 'range' ? data.totals.detectAttempts : data.detectAttempts ?? 0)) *
+                        100
+                    )
+                  : 0
+              }%`}
             />
-            <MetricCard label="保存方式" value={data.storage === 'kv' ? 'KV（永続）' : 'Memory（一時）'} />
+            <MetricCard label="データ点数" value={`${resolvedSeries.length}`} />
           </section>
         )}
       </div>
@@ -205,6 +309,54 @@ function MetricCard({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl border border-white/20 bg-white/5 p-4">
       <p className="text-xs text-white/70 mb-1">{label}</p>
       <p className="text-xl font-light">{value}</p>
+    </div>
+  );
+}
+
+function LineChart({
+  series,
+}: {
+  series: Array<{ date: string; uniqueUsers: number; detectAttempts: number }>;
+}) {
+  if (series.length === 0) {
+    return <p className="text-sm text-white/50">データなし</p>;
+  }
+  const w = 900;
+  const h = 260;
+  const pad = 26;
+  const maxY = Math.max(
+    1,
+    ...series.map((s) => s.uniqueUsers),
+    ...series.map((s) => s.detectAttempts)
+  );
+  const x = (i: number) => (series.length <= 1 ? w / 2 : pad + (i * (w - pad * 2)) / (series.length - 1));
+  const y = (v: number) => h - pad - (v / maxY) * (h - pad * 2);
+  const usersPoints = series.map((s, i) => `${x(i)},${y(s.uniqueUsers)}`).join(' ');
+  const attemptsPoints = series.map((s, i) => `${x(i)},${y(s.detectAttempts)}`).join(' ');
+  const ticks = [0, Math.round(maxY / 2), maxY];
+
+  return (
+    <div className="space-y-2">
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-52 md:h-64">
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={pad} y1={y(t)} x2={w - pad} y2={y(t)} stroke="rgba(255,255,255,0.15)" strokeDasharray="3 3" />
+            <text x={4} y={y(t) + 4} fill="rgba(255,255,255,0.55)" fontSize="12">
+              {t}
+            </text>
+          </g>
+        ))}
+        <polyline fill="none" stroke="rgb(56 189 248)" strokeWidth="3" points={usersPoints} />
+        <polyline fill="none" stroke="rgb(251 191 36)" strokeWidth="3" points={attemptsPoints} />
+      </svg>
+      <div className="flex flex-wrap gap-4 text-xs text-white/75">
+        <span>■ ユニーク端末（日次）</span>
+        <span className="text-amber-200">■ 検出リクエスト（日次）</span>
+      </div>
+      <div className="flex justify-between text-[11px] text-white/50">
+        <span>{series[0]?.date}</span>
+        <span>{series[series.length - 1]?.date}</span>
+      </div>
     </div>
   );
 }

@@ -9,6 +9,42 @@ type PreflightCheck = {
   message: string;
 };
 
+type DailyPoint = {
+  date: string;
+  uniqueUsers: number;
+  detectAttempts: number;
+  detectSuccess: number;
+  detectFailure: number;
+  upgradeClick: number;
+  featureBlockedByPlan: number;
+};
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function toUtcDate(date: string): Date {
+  return new Date(`${date}T00:00:00Z`);
+}
+
+function toIsoDateUTC(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function listDatesInclusive(from: string, to: string): string[] {
+  const out: string[] = [];
+  let cur = toUtcDate(from);
+  const end = toUtcDate(to);
+  while (cur.getTime() <= end.getTime()) {
+    out.push(toIsoDateUTC(cur));
+    cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return out;
+}
+
 function isAuthorized(request: NextRequest): boolean {
   const expected = process.env.METRICS_ADMIN_TOKEN;
   if (!expected) return false;
@@ -114,9 +150,65 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const from = request.nextUrl.searchParams.get('from')?.trim() ?? '';
+    const to = request.nextUrl.searchParams.get('to')?.trim() ?? '';
+    if (from || to) {
+      if (!from || !to || !isIsoDate(from) || !isIsoDate(to) || from > to) {
+        return NextResponse.json(
+          { error: 'Invalid from/to. Use YYYY-MM-DD and from <= to.' },
+          { status: 400 }
+        );
+      }
+      const dates = listDatesInclusive(from, to);
+      if (dates.length > 120) {
+        return NextResponse.json(
+          { error: 'Date range is too large. Please use 120 days or fewer.' },
+          { status: 400 }
+        );
+      }
+      const summaries = await Promise.all(dates.map((d) => getUsageSummary(d)));
+      const series: DailyPoint[] = summaries.map((s) => ({
+        date: s.date,
+        uniqueUsers: s.uniqueUsers,
+        detectAttempts: s.detectAttempts,
+        detectSuccess: s.detectSuccess,
+        detectFailure: s.detectFailure,
+        upgradeClick: s.upgradeClick,
+        featureBlockedByPlan: s.featureBlockedByPlan,
+      }));
+      const totals = series.reduce(
+        (acc, row) => {
+          acc.uniqueUsers += row.uniqueUsers;
+          acc.detectAttempts += row.detectAttempts;
+          acc.detectSuccess += row.detectSuccess;
+          acc.detectFailure += row.detectFailure;
+          acc.upgradeClick += row.upgradeClick;
+          acc.featureBlockedByPlan += row.featureBlockedByPlan;
+          return acc;
+        },
+        {
+          uniqueUsers: 0,
+          detectAttempts: 0,
+          detectSuccess: 0,
+          detectFailure: 0,
+          upgradeClick: 0,
+          featureBlockedByPlan: 0,
+        }
+      );
+      return NextResponse.json({
+        mode: 'range',
+        from,
+        to,
+        days: dates.length,
+        storage: summaries.some((s) => s.storage === 'memory') ? 'memory' : 'kv',
+        totals,
+        series,
+      });
+    }
+
     const date = request.nextUrl.searchParams.get('date') || undefined;
     const summary = await getUsageSummary(date);
-    return NextResponse.json(summary);
+    return NextResponse.json({ mode: 'single', ...summary });
   } catch (error) {
     console.error('[admin/metrics] failed to load summary:', error);
     return NextResponse.json(
