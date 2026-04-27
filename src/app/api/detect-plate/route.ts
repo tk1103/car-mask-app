@@ -425,7 +425,7 @@ export async function POST(request: NextRequest) {
 
     for (const modelName of MODEL_NAMES) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45_000);
+      const timeoutId = setTimeout(() => controller.abort(), 20_000);
       try {
         const res = await fetch(urlTemplate(modelName), {
           method: 'POST',

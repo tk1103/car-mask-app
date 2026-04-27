@@ -424,6 +424,8 @@ const t = {
     processingElapsed: '経過 {sec} 秒',
     processingWaitMore: 'まだ解析中です。このままお待ちください。',
     processingRetakeIfSlow: '20秒以上かかる場合は、通信混雑の可能性があります。下の「撮り直し」で明るい所・至近距離からやり直せます。',
+    processingManualHint:
+      "It's taking a while. You can also place the logo manually!（解析に時間がかかっています。手動でロゴを配置することも可能です）",
     processingSidebarHint: '枠の調整は解析の完了後に行えます。今は解析の終了をお待ちください。',
     manualGuideTitle: '手動で枠を合わせる',
     manualGuideWhy:
@@ -483,6 +485,7 @@ const t = {
     logoTooLarge: 'ロゴ画像は 5MB 以下にしてください。',
     logoCopyrightConfirm:
       '著作権・商標権など第三者の権利を侵害しない画像のみアップロードしてください。権利侵害に関する責任は利用者が負います。続行しますか？',
+    editManually: '手動で編集',
   },
   en: {
     beta: 'BETA',
@@ -496,6 +499,8 @@ const t = {
     processingElapsed: '{sec}s elapsed',
     processingWaitMore: 'Still analyzing. Please keep waiting.',
     processingRetakeIfSlow: 'If this takes 20+ seconds, the line may be busy. Use Retake for a closer, brighter shot.',
+    processingManualHint:
+      "It's taking a while. You can also place the logo manually!（解析に時間がかかっています。手動でロゴを配置することも可能です）",
     processingSidebarHint: 'You can move the frame after analysis finishes. Please wait.',
     manualGuideTitle: 'Align the frame yourself',
     manualGuideWhy:
@@ -555,6 +560,7 @@ const t = {
     logoTooLarge: 'Logo image must be 5MB or smaller.',
     logoCopyrightConfirm:
       'Upload only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for rights violations. Continue?',
+    editManually: 'Edit Manually',
   },
 } as const;
 
@@ -807,6 +813,12 @@ export default function Home() {
   const showManualHelpAfterFailure = useCallback(() => {
     setDetectionFailed(true);
     setShowManualGuide(true);
+  }, []);
+
+  const handleEditManually = useCallback(() => {
+    setDetectionFailed(true);
+    setShowManualGuide(true);
+    setToastMessage(null);
   }, []);
 
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, retryAfterSeconds?: number) => {
@@ -1119,11 +1131,11 @@ export default function Home() {
 
       const controller = new AbortController();
       activeDetectControllerRef.current = controller;
-      const timeoutId = setTimeout(() => controller.abort(), 48_000);
+      const timeoutId = setTimeout(() => controller.abort(), 25_000);
       const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       try {
         const deviceId = getDeviceId();
-        const maxRetryCount = 2;
+        const maxRetryCount = 1;
         let lastResponse: Response | null = null;
         let lastResult: DetectApiResponse | null = null;
 
@@ -1491,11 +1503,11 @@ export default function Home() {
         }
         const controller = new AbortController();
         activeDetectControllerRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 48_000);
+        const timeoutId = setTimeout(() => controller.abort(), 25_000);
         const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
         try {
           const deviceId = getDeviceId();
-          const maxRetryCount = 2; // 初回+2回
+          const maxRetryCount = 1; // 初回+1回
           let lastResponse: Response | null = null;
           let lastResult: DetectApiResponse | null = null;
 
@@ -1552,7 +1564,11 @@ export default function Home() {
           }
         } catch (fetchErr: unknown) {
           if (!isLatestRequest()) return;
-          if (fetchErr instanceof Error && fetchErr.name === 'AbortError') return;
+          if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+            setToastMessage(tx('processingSlow'));
+            showManualHelpAfterFailure();
+            return;
+          }
           console.error('detect-plate fetch failed:', fetchErr);
           const fetchErrMessage =
             fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
@@ -2241,6 +2257,11 @@ export default function Home() {
                 {processingElapsedSec >= 8 && (
                   <p className="text-amber-200/90 text-xs font-light text-center max-w-xs mt-2">{text.processingWaitMore}</p>
                 )}
+                  {processingElapsedSec >= 15 && (
+                    <p className="text-amber-100/90 text-xs font-light text-center max-w-xs mt-2 leading-relaxed">
+                      {text.processingManualHint}
+                    </p>
+                  )}
                 {processingElapsedSec >= 20 && (
                   <p className="text-white/75 text-[11px] font-extralight text-center max-w-xs mt-1.5 leading-relaxed">
                     {text.processingRetakeIfSlow}
@@ -2447,6 +2468,11 @@ export default function Home() {
                       {text.processingWaitMore}
                     </p>
                   )}
+                  {processingElapsedSec >= 15 && (
+                    <p className="text-amber-100/90 text-xs font-light text-center max-w-[min(100%,20rem)] px-3 mt-2 leading-relaxed">
+                      {text.processingManualHint}
+                    </p>
+                  )}
                   {processingElapsedSec >= 20 && (
                     <p className="text-white/75 text-[11px] font-extralight text-center max-w-[min(100%,20rem)] px-3 mt-1.5 leading-relaxed">
                       {text.processingRetakeIfSlow}
@@ -2474,6 +2500,15 @@ export default function Home() {
               <div className="mb-3 px-3 py-2 rounded-lg bg-sky-500/15 border border-sky-300/30">
                 <span className="text-sky-100 text-xs font-light">{retryStatusText}</span>
               </div>
+            )}
+            {detectionFailed && !isProcessing && (
+              <button
+                type="button"
+                onClick={handleEditManually}
+                className="mb-3 w-full px-4 py-3 rounded-full text-sm font-medium bg-amber-400/90 text-black hover:bg-amber-300 transition-colors shadow-[0_0_0_1px_rgba(255,255,255,0.25)]"
+              >
+                {text.editManually}
+              </button>
             )}
             {detectionFailed && showManualGuide && (
               <div className="mb-3 px-3 py-3 rounded-xl bg-gradient-to-b from-white/12 to-white/5 border border-white/25 space-y-2.5">
