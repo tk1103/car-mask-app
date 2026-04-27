@@ -1,6 +1,11 @@
 import { kv } from '@vercel/kv';
 
-type UsageEvent = 'detect_attempt' | 'detect_success' | 'detect_failure';
+type UsageEvent =
+  | 'detect_attempt'
+  | 'detect_success'
+  | 'detect_failure'
+  | 'upgrade_click'
+  | 'feature_blocked_by_plan';
 
 type UsageSummary = {
   date: string;
@@ -8,6 +13,8 @@ type UsageSummary = {
   detectAttempts: number;
   detectSuccess: number;
   detectFailure: number;
+  upgradeClick: number;
+  featureBlockedByPlan: number;
   storage: 'kv' | 'memory';
   kvConfigured: boolean;
   missingEnvVars: string[];
@@ -18,7 +25,16 @@ type UsageSummary = {
 
 const MEMORY_STORE = {
   usersByDate: new Map<string, Set<string>>(),
-  countersByDate: new Map<string, { detectAttempts: number; detectSuccess: number; detectFailure: number }>(),
+  countersByDate: new Map<
+    string,
+    {
+      detectAttempts: number;
+      detectSuccess: number;
+      detectFailure: number;
+      upgradeClick: number;
+      featureBlockedByPlan: number;
+    }
+  >(),
   countryCountsByDate: new Map<string, Record<string, number>>(),
   deviceCountsByDate: new Map<string, Record<string, number>>(),
 };
@@ -98,7 +114,16 @@ export async function trackUsageEvent(
       const countryCounterKey = getCountryCounterKey(date);
       const deviceCounterKey = getDeviceCounterKey(date);
       const ttlSeconds = 60 * 60 * 24 * 8;
-      const counterField = event === 'detect_attempt' ? 'detectAttempts' : event === 'detect_success' ? 'detectSuccess' : 'detectFailure';
+      const counterField =
+        event === 'detect_attempt'
+          ? 'detectAttempts'
+          : event === 'detect_success'
+            ? 'detectSuccess'
+            : event === 'detect_failure'
+              ? 'detectFailure'
+              : event === 'upgrade_click'
+                ? 'upgradeClick'
+                : 'featureBlockedByPlan';
       await Promise.all([
         kv.sadd(setKey, normalizedUserId),
         kv.expire(setKey, ttlSeconds),
@@ -118,10 +143,18 @@ export async function trackUsageEvent(
   const users = MEMORY_STORE.usersByDate.get(date) ?? new Set<string>();
   users.add(normalizedUserId);
   MEMORY_STORE.usersByDate.set(date, users);
-  const counters = MEMORY_STORE.countersByDate.get(date) ?? { detectAttempts: 0, detectSuccess: 0, detectFailure: 0 };
+  const counters = MEMORY_STORE.countersByDate.get(date) ?? {
+    detectAttempts: 0,
+    detectSuccess: 0,
+    detectFailure: 0,
+    upgradeClick: 0,
+    featureBlockedByPlan: 0,
+  };
   if (event === 'detect_attempt') counters.detectAttempts += 1;
   if (event === 'detect_success') counters.detectSuccess += 1;
   if (event === 'detect_failure') counters.detectFailure += 1;
+  if (event === 'upgrade_click') counters.upgradeClick += 1;
+  if (event === 'feature_blocked_by_plan') counters.featureBlockedByPlan += 1;
   MEMORY_STORE.countersByDate.set(date, counters);
   if (event === 'detect_attempt') {
     const countryMap = MEMORY_STORE.countryCountsByDate.get(date) ?? {};
@@ -147,6 +180,8 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
       const detectAttempts = Number(countersRaw?.detectAttempts || 0);
       const detectSuccess = Number(countersRaw?.detectSuccess || 0);
       const detectFailure = Number(countersRaw?.detectFailure || 0);
+      const upgradeClick = Number(countersRaw?.upgradeClick || 0);
+      const featureBlockedByPlan = Number(countersRaw?.featureBlockedByPlan || 0);
       const countryCounts = Object.fromEntries(
         Object.entries(countryCountsRaw ?? {}).map(([k, v]) => [k, Number(v || 0)])
       );
@@ -159,6 +194,8 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
         detectAttempts,
         detectSuccess,
         detectFailure,
+        upgradeClick,
+        featureBlockedByPlan,
         storage: 'kv',
         kvConfigured: true,
         missingEnvVars: [],
@@ -172,6 +209,8 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
         detectAttempts: 0,
         detectSuccess: 0,
         detectFailure: 0,
+        upgradeClick: 0,
+        featureBlockedByPlan: 0,
         storage: 'memory',
         kvConfigured: false,
         missingEnvVars: [],
@@ -181,7 +220,13 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
   }
 
   const users = MEMORY_STORE.usersByDate.get(date) ?? new Set<string>();
-  const counters = MEMORY_STORE.countersByDate.get(date) ?? { detectAttempts: 0, detectSuccess: 0, detectFailure: 0 };
+  const counters = MEMORY_STORE.countersByDate.get(date) ?? {
+    detectAttempts: 0,
+    detectSuccess: 0,
+    detectFailure: 0,
+    upgradeClick: 0,
+    featureBlockedByPlan: 0,
+  };
   const countryCounts = MEMORY_STORE.countryCountsByDate.get(date) ?? {};
   const deviceTypeCounts = MEMORY_STORE.deviceCountsByDate.get(date) ?? {};
   return {
@@ -190,6 +235,8 @@ export async function getUsageSummary(date = getTodayDateStringJst()): Promise<U
     detectAttempts: counters.detectAttempts,
     detectSuccess: counters.detectSuccess,
     detectFailure: counters.detectFailure,
+    upgradeClick: counters.upgradeClick,
+    featureBlockedByPlan: counters.featureBlockedByPlan,
     storage: 'memory',
     kvConfigured: false,
     missingEnvVars: getMissingKvEnvVars(),

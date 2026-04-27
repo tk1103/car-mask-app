@@ -491,6 +491,14 @@ const t = {
     logoCopyrightConfirm:
       '著作権・商標権など第三者の権利を侵害しない画像のみアップロードしてください。権利侵害に関する責任は利用者が負います。続行しますか？',
     editManually: '手動で編集',
+    upsellTitle: '課金版で使える機能です',
+    upsellBody: '無料版ではこの機能は利用できません。課金版で以下が解放されます。',
+    upsellLocked1: '独自ロゴのアップロード（PNG / SVG）',
+    upsellLocked2: '保存画像から透かしを削除',
+    upsellLocked3: '日次制限の対象外',
+    upgradeNow: 'アップグレード',
+    maybeLater: 'あとで',
+    upgradeLinkMissing: 'アップグレード導線は準備中です。',
   },
   en: {
     beta: 'BETA',
@@ -570,6 +578,14 @@ const t = {
     logoCopyrightConfirm:
       'Upload only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for rights violations. Continue?',
     editManually: 'Edit Manually',
+    upsellTitle: 'Available on Pro plan',
+    upsellBody: 'This feature is not available on Free. Pro unlocks:',
+    upsellLocked1: 'Custom logo upload (PNG / SVG)',
+    upsellLocked2: 'No watermark on saved images',
+    upsellLocked3: 'No daily free-limit restriction',
+    upgradeNow: 'Upgrade',
+    maybeLater: 'Maybe later',
+    upgradeLinkMissing: 'Upgrade link is not configured yet.',
   },
 } as const;
 
@@ -621,6 +637,7 @@ export default function Home() {
   const [isAndroid, setIsAndroid] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [showUpsell, setShowUpsell] = useState(false);
   const [plan, setPlan] = useState<Plan>('free');
   const [planResolved, setPlanResolved] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -642,6 +659,19 @@ export default function Home() {
   const isFreePlan = plan === 'free';
 
   const tx = useCallback((key: keyof typeof t.ja): string => t[langRef.current][key], []);
+  const upgradeUrl = process.env.NEXT_PUBLIC_UPGRADE_URL || '';
+
+  const trackPlanEvent = useCallback((event: 'upgrade_click' | 'feature_blocked_by_plan') => {
+    const deviceId = getDeviceId();
+    fetch('/api/metrics-event', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(deviceId ? { 'X-Device-Id': deviceId } : {}),
+      },
+      body: JSON.stringify({ event }),
+    }).catch(() => {});
+  }, []);
 
   const loadLocalDailyUsage = useCallback(() => {
     if (typeof window === 'undefined' || !window.localStorage) {
@@ -952,13 +982,24 @@ export default function Home() {
 
   const handlePickCustomLogo = useCallback(() => {
     if (isFreePlan) {
-      setToastMessage(tx('proOnlyLogo'));
+      trackPlanEvent('feature_blocked_by_plan');
+      setShowUpsell(true);
       return;
     }
     const accepted = typeof window !== 'undefined' ? window.confirm(tx('logoCopyrightConfirm')) : true;
     if (!accepted) return;
     customLogoPickerRef.current?.click();
-  }, [isFreePlan, tx]);
+  }, [isFreePlan, tx, trackPlanEvent]);
+
+  const handleUpgradeClick = useCallback(() => {
+    trackPlanEvent('upgrade_click');
+    setShowUpsell(false);
+    if (!upgradeUrl) {
+      setToastMessage(tx('upgradeLinkMissing'));
+      return;
+    }
+    window.open(upgradeUrl, '_blank', 'noopener,noreferrer');
+  }, [trackPlanEvent, upgradeUrl, tx]);
 
   const handleCustomLogoSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2243,6 +2284,36 @@ export default function Home() {
             >
               {text.close}
             </button>
+          </div>
+        </div>
+      )}
+
+      {showUpsell && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/65 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-2xl border border-white/20 bg-black/80 px-5 py-5 shadow-2xl">
+            <h3 className="text-white text-base font-medium">{text.upsellTitle}</h3>
+            <p className="mt-2 text-white/80 text-sm font-light leading-relaxed">{text.upsellBody}</p>
+            <ul className="mt-3 space-y-1.5 text-white/90 text-sm font-light">
+              <li>• {text.upsellLocked1}</li>
+              <li>• {text.upsellLocked2}</li>
+              <li>• {text.upsellLocked3}</li>
+            </ul>
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleUpgradeClick}
+                className="flex-1 px-4 py-2.5 rounded-full bg-amber-300 text-black text-sm font-medium hover:bg-amber-200 transition-colors"
+              >
+                {text.upgradeNow}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowUpsell(false)}
+                className="px-4 py-2.5 rounded-full bg-white/10 border border-white/20 text-white/85 text-sm font-light hover:bg-white/20 transition-colors"
+              >
+                {text.maybeLater}
+              </button>
+            </div>
           </div>
         </div>
       )}
