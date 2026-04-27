@@ -401,7 +401,6 @@ const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限とは異なる場合があります）
 const LOCAL_DAILY_FREE_LIMIT = 1;
 const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
-const PLAN_STORAGE_KEY = 'carkus_plan';
 const FREE_DAILY_LIMIT_DISABLED = true; // 検証期間は無料版の日次回数制限を解除
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
 const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
@@ -693,21 +692,25 @@ export default function Home() {
     setLang(detectedLang);
   }, []);
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.localStorage) return;
+  const fetchPlan = useCallback(async () => {
     try {
-      const saved = window.localStorage.getItem(PLAN_STORAGE_KEY);
-      if (saved === 'free' || saved === 'pro') setPlan(saved);
-    } catch (_) {}
+      const deviceId = getDeviceId();
+      const res = await fetch('/api/plan', {
+        headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.plan === 'pro' || data?.plan === 'free') {
+        setPlan(data.plan);
+      }
+    } catch (_) {
+      // フェイルセーフ: free のまま継続
+    }
   }, []);
 
-  const updatePlan = useCallback((next: Plan) => {
-    setPlan(next);
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    try {
-      window.localStorage.setItem(PLAN_STORAGE_KEY, next);
-    } catch (_) {}
-  }, []);
+  useEffect(() => {
+    fetchPlan();
+  }, [fetchPlan]);
 
   useEffect(() => {
     langRef.current = lang;
@@ -2062,18 +2065,12 @@ export default function Home() {
         </div>
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
           <span className="px-2 text-[10px] text-white/60">{text.plan}</span>
-          <button
-            onClick={() => updatePlan('free')}
-            className={`px-3 py-1.5 text-xs ${plan === 'free' ? 'bg-white/20 text-white' : 'text-white/70'}`}
-          >
+          <span className={`px-3 py-1.5 text-xs ${plan === 'free' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
             {text.free}
-          </button>
-          <button
-            onClick={() => updatePlan('pro')}
-            className={`px-3 py-1.5 text-xs ${plan === 'pro' ? 'bg-white/20 text-white' : 'text-white/70'}`}
-          >
+          </span>
+          <span className={`px-3 py-1.5 text-xs ${plan === 'pro' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
             {text.pro}
-          </button>
+          </span>
         </div>
       </div>
       {screenMode === 'idle' && (
