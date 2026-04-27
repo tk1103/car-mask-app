@@ -268,18 +268,15 @@ function drawCarkusLogoAtOrigin(
 
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-    const maxW = Math.max(1, logoWidth * 0.9);
-    const maxH = Math.max(1, logoHeight * 0.8);
-    let drawW = maxW;
+    // マスクに対して「約80%」を目標サイズにする
+    const targetW = Math.max(1, logoWidth * 0.8);
+    const targetH = Math.max(1, logoHeight * 0.8);
+    let drawW = targetW;
     let drawH = drawW / svgAspect;
-    if (drawH > maxH) {
-      drawH = maxH;
+    if (drawH > targetH) {
+      drawH = targetH;
       drawW = drawH * svgAspect;
     }
-    // 視認性向上: 余白の大きいSVGでもロゴが小さく見えないよう少しだけ増幅
-    const boost = 1.12;
-    drawW = Math.min(maxW, drawW * boost);
-    drawH = Math.min(maxH, drawH * boost);
     const offsetX = drawW * 0.1;
     ctx.save();
     ctx.filter = 'brightness(0) invert(1)';
@@ -2289,7 +2286,7 @@ export default function Home() {
                 step="1"
                 value={editLogoRotation}
                 onChange={(e) => setEditLogoRotation(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
               <span className="text-white/85 text-sm tabular-nums w-10 text-right">{editLogoRotation}°</span>
             </div>
@@ -2302,7 +2299,7 @@ export default function Home() {
                 step="0.05"
                 value={editLogoScale}
                 onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
               />
             </div>
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
