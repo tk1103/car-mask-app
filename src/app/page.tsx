@@ -411,6 +411,7 @@ const LOGO_CANVAS_WIDTH = 400;
 
 type Lang = 'ja' | 'en';
 type Plan = 'free' | 'pro';
+type MaskTemplate = 'fit' | 'centered' | 'badge';
 const t = {
   ja: {
     beta: 'BETA',
@@ -440,6 +441,10 @@ const t = {
     retake: '撮り直す',
     angle: '角度',
     size: 'サイズ',
+    template: 'テンプレ',
+    templateFit: 'Fit',
+    templateCentered: 'Centered',
+    templateBadge: 'Badge',
     other: 'その他',
     copy: 'コピー',
     nearbyPc: '近くのPC',
@@ -515,6 +520,10 @@ const t = {
     retake: 'Retake',
     angle: 'Angle',
     size: 'Size',
+    template: 'Template',
+    templateFit: 'Fit',
+    templateCentered: 'Centered',
+    templateBadge: 'Badge',
     other: 'More',
     copy: 'Copy',
     nearbyPc: 'Nearby PC',
@@ -594,6 +603,7 @@ export default function Home() {
   const [editLogoOffset, setEditLogoOffset] = useState({ x: 0, y: 0 });
   const [editLogoScale, setEditLogoScale] = useState(1);
   const [editLogoRotation, setEditLogoRotation] = useState(0); // 度（-30〜30）
+  const [maskTemplate, setMaskTemplate] = useState<MaskTemplate>('fit');
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
   const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
@@ -1793,6 +1803,10 @@ export default function Home() {
           logoDrawH = availableH;
           logoDrawW = logoDrawH * logoAspect;
         }
+        const templateScale = maskTemplate === 'fit' ? 1 : maskTemplate === 'centered' ? 0.78 : 0.52;
+        logoDrawW *= templateScale;
+        logoDrawH *= templateScale;
+        const templateShiftU = maskTemplate === 'badge' ? availableW * 0.22 : 0;
 
         const Lh = 220;
         const Lw = Math.max(120, Math.round(Lh * logoAspect));
@@ -1817,10 +1831,12 @@ export default function Home() {
 
         const logoCenterX =
           quadCenterX +
+          axisUx * templateShiftU +
           axisUx * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
           axisVx * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
         const logoCenterY =
           quadCenterY +
+          axisUy * templateShiftU +
           axisUy * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
           axisVy * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
         const logoAngle = Math.atan2(axisUy, axisUx);
@@ -1831,7 +1847,7 @@ export default function Home() {
         ctx.restore();
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation]);
+  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate]);
 
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
@@ -2530,6 +2546,32 @@ export default function Home() {
             )}
             {!isProcessing && (
               <>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-white/85 text-sm font-light w-12">{text.template}</span>
+                  <div className="flex items-center rounded-full border border-white/20 bg-white/5 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setMaskTemplate('fit')}
+                      className={`px-2.5 py-1.5 text-[11px] ${maskTemplate === 'fit' ? 'bg-white/20 text-white' : 'text-white/70 hover:bg-white/10'}`}
+                    >
+                      {text.templateFit}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMaskTemplate('centered')}
+                      className={`px-2.5 py-1.5 text-[11px] ${maskTemplate === 'centered' ? 'bg-white/20 text-white' : 'text-white/70 hover:bg-white/10'}`}
+                    >
+                      {text.templateCentered}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMaskTemplate('badge')}
+                      className={`px-2.5 py-1.5 text-[11px] ${maskTemplate === 'badge' ? 'bg-white/20 text-white' : 'text-white/70 hover:bg-white/10'}`}
+                    >
+                      {text.templateBadge}
+                    </button>
+                  </div>
+                </div>
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-white/85 text-sm font-light w-12">{text.angle}</span>
                   <input
