@@ -481,6 +481,10 @@ const t = {
     logoUploadFailed: '独自ロゴの読み込みに失敗しました。',
     logoTypeError: 'PNG または SVG を選択してください。',
     logoTooLarge: 'ロゴ画像は 5MB 以下にしてください。',
+    logoCopyrightNotice:
+      '注意: 著作権・商標権などの権利を侵害しない画像のみ使用してください。第三者権利の侵害に関する責任は利用者が負います。',
+    logoCopyrightConfirm:
+      '著作権・商標権など第三者の権利を侵害しない画像のみアップロードしてください。権利侵害に関する責任は利用者が負います。続行しますか？',
   },
   en: {
     beta: 'BETA',
@@ -551,6 +555,10 @@ const t = {
     logoUploadFailed: 'Failed to load custom logo.',
     logoTypeError: 'Please select PNG or SVG.',
     logoTooLarge: 'Logo image must be 5MB or smaller.',
+    logoCopyrightNotice:
+      'Notice: Use only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for any rights violations.',
+    logoCopyrightConfirm:
+      'Upload only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for rights violations. Continue?',
   },
 } as const;
 
@@ -929,6 +937,8 @@ export default function Home() {
       setToastMessage(tx('proOnlyLogo'));
       return;
     }
+    const accepted = typeof window !== 'undefined' ? window.confirm(tx('logoCopyrightConfirm')) : true;
+    if (!accepted) return;
     customLogoPickerRef.current?.click();
   }, [isFreePlan, tx]);
 
@@ -2529,6 +2539,9 @@ export default function Home() {
                 {text.resetLogo}
               </button>
             </div>
+            <p className="mb-3 text-[11px] leading-relaxed text-amber-100/85">
+              {text.logoCopyrightNotice}
+            </p>
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
                 onClick={retake}
