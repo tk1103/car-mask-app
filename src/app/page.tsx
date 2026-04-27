@@ -268,7 +268,7 @@ function drawCarkusLogoAtOrigin(
 
   if (logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight) {
     const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-    // マスクに対して「約80%」を目標サイズにする
+    // マスクに対して約80%を基準にしつつ、SVG余白を見越して見た目を補正する
     const targetW = Math.max(1, logoWidth * 0.8);
     const targetH = Math.max(1, logoHeight * 0.8);
     let drawW = targetW;
@@ -277,10 +277,13 @@ function drawCarkusLogoAtOrigin(
       drawH = targetH;
       drawW = drawH * svgAspect;
     }
-    const offsetX = drawW * 0.1;
+    // Carkus.svg は余白が広めなので、見た目サイズを補正
+    const opticalCompensation = 1.38;
+    drawW = Math.min(logoWidth * 0.98, drawW * opticalCompensation);
+    drawH = Math.min(logoHeight * 0.98, drawW / svgAspect);
     ctx.save();
     ctx.filter = 'brightness(0) invert(1)';
-    ctx.drawImage(logoImage, -drawW / 2 + offsetX, -drawH / 2, drawW, drawH);
+    ctx.drawImage(logoImage, -drawW / 2, -drawH / 2, drawW, drawH);
     ctx.restore();
   } else {
     const trialSize = Math.min(logoWidth * 0.42, logoHeight * 0.84, 44);
@@ -1631,6 +1634,7 @@ export default function Home() {
     if (isFreePlan) {
       const shortEdge = Math.min(outCanvas.width, outCanvas.height);
       const padding = Math.max(16, Math.round(shortEdge * 0.03));
+      const liftY = Math.max(22, Math.round(shortEdge * 0.08));
       const fontSize = Math.max(12, Math.round(shortEdge * 0.036));
       const text = 'Made with Carkus';
       outCtx.save();
@@ -1640,8 +1644,8 @@ export default function Home() {
       outCtx.lineWidth = Math.max(2, Math.round(fontSize * 0.12));
       outCtx.strokeStyle = 'rgba(0,0,0,0.26)';
       outCtx.fillStyle = 'rgba(255,255,255,0.34)';
-      outCtx.strokeText(text, outCanvas.width - padding, outCanvas.height - padding);
-      outCtx.fillText(text, outCanvas.width - padding, outCanvas.height - padding);
+      outCtx.strokeText(text, outCanvas.width - padding, outCanvas.height - padding - liftY);
+      outCtx.fillText(text, outCanvas.width - padding, outCanvas.height - padding - liftY);
       outCtx.restore();
     }
 
