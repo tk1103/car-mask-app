@@ -330,12 +330,13 @@ const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限とは異なる場合があります）
 const LOCAL_DAILY_FREE_LIMIT = 1;
 const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
-const IS_FREE_PLAN = true;
+const PLAN_STORAGE_KEY = 'carkus_plan';
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
 
 type Lang = 'ja' | 'en';
+type Plan = 'free' | 'pro';
 const t = {
   ja: {
     beta: 'BETA',
@@ -392,6 +393,10 @@ const t = {
     dailyFreeLimitReached: '本日の無料枠を使い切りました。',
     freeQuotaLabel: '本日の無料解析',
     freeWatermarkNote: '無料版の保存画像には Carkus 透かしが入ります。',
+    plan: 'プラン',
+    free: '無料版',
+    pro: '課金版',
+    proUnlimitedHint: '課金版は日次無料枠の制限対象外です。',
   },
   en: {
     beta: 'BETA',
@@ -448,6 +453,10 @@ const t = {
     dailyFreeLimitReached: 'You have used all free attempts for today.',
     freeQuotaLabel: 'Daily free detections',
     freeWatermarkNote: 'Saved images on Free plan include a Carkus watermark.',
+    plan: 'Plan',
+    free: 'Free',
+    pro: 'Pro',
+    proUnlimitedHint: 'Pro is not limited by the daily free quota.',
   },
 } as const;
 
@@ -497,6 +506,7 @@ export default function Home() {
   const [isAndroid, setIsAndroid] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [plan, setPlan] = useState<Plan>('free');
   const videoRef = useRef<HTMLVideoElement>(null);
   const photoPickerRef = useRef<HTMLInputElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -512,6 +522,7 @@ export default function Home() {
   const langRef = useRef<Lang>('ja');
 
   const text = t[lang];
+  const isFreePlan = plan === 'free';
 
   const tx = useCallback((key: keyof typeof t.ja): string => t[langRef.current][key], []);
 
@@ -541,11 +552,13 @@ export default function Home() {
   }, []);
 
   const hasLocalDailyQuota = useCallback(() => {
+    if (!isFreePlan) return true;
     const usage = loadLocalDailyUsage();
     return usage.count < LOCAL_DAILY_FREE_LIMIT;
-  }, [loadLocalDailyUsage]);
+  }, [isFreePlan, loadLocalDailyUsage]);
 
   const incrementLocalDailyUsageOnSuccess = useCallback(() => {
+    if (!isFreePlan) return;
     if (typeof window === 'undefined' || !window.localStorage) return;
     const today = getJstDateString();
     const usage = loadLocalDailyUsage();
@@ -554,7 +567,7 @@ export default function Home() {
       window.localStorage.setItem(LOCAL_DAILY_SUCCESS_KEY, JSON.stringify({ date: today, count: nextCount }));
     } catch (_) {}
     setLocalDailySuccessCount(nextCount);
-  }, [loadLocalDailyUsage]);
+  }, [isFreePlan, loadLocalDailyUsage]);
 
   const createTrackedObjectUrl = useCallback((blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -601,6 +614,22 @@ export default function Home() {
   useEffect(() => {
     const detectedLang = navigator.language?.toLowerCase().startsWith('ja') ? 'ja' : 'en';
     setLang(detectedLang);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const saved = window.localStorage.getItem(PLAN_STORAGE_KEY);
+      if (saved === 'free' || saved === 'pro') setPlan(saved);
+    } catch (_) {}
+  }, []);
+
+  const updatePlan = useCallback((next: Plan) => {
+    setPlan(next);
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(PLAN_STORAGE_KEY, next);
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -1589,7 +1618,7 @@ export default function Home() {
     if (!outCtx) return null;
     outCtx.drawImage(source, 0, 0);
 
-    if (IS_FREE_PLAN) {
+    if (isFreePlan) {
       const shortEdge = Math.min(outCanvas.width, outCanvas.height);
       const padding = Math.max(16, Math.round(shortEdge * 0.03));
       const fontSize = Math.max(12, Math.round(shortEdge * 0.036));
@@ -1609,7 +1638,7 @@ export default function Home() {
     return await new Promise<Blob | null>((resolve) => {
       outCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.99);
     });
-  }, []);
+  }, [isFreePlan]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
@@ -1908,19 +1937,36 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
       <input ref={photoPickerRef} type="file" accept="image/*" onChange={handleImageFileSelected} className="hidden" />
-      <div className="fixed top-3 right-3 z-[120] flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
-        <button
-          onClick={() => setLang('ja')}
-          className={`px-3 py-1.5 text-xs ${lang === 'ja' ? 'bg-white/20 text-white' : 'text-white/70'}`}
-        >
-          JP
-        </button>
-        <button
-          onClick={() => setLang('en')}
-          className={`px-3 py-1.5 text-xs ${lang === 'en' ? 'bg-white/20 text-white' : 'text-white/70'}`}
-        >
-          EN
-        </button>
+      <div className="fixed top-3 right-3 z-[120] flex flex-col items-end gap-2">
+        <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
+          <button
+            onClick={() => setLang('ja')}
+            className={`px-3 py-1.5 text-xs ${lang === 'ja' ? 'bg-white/20 text-white' : 'text-white/70'}`}
+          >
+            JP
+          </button>
+          <button
+            onClick={() => setLang('en')}
+            className={`px-3 py-1.5 text-xs ${lang === 'en' ? 'bg-white/20 text-white' : 'text-white/70'}`}
+          >
+            EN
+          </button>
+        </div>
+        <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
+          <span className="px-2 text-[10px] text-white/60">{text.plan}</span>
+          <button
+            onClick={() => updatePlan('free')}
+            className={`px-3 py-1.5 text-xs ${plan === 'free' ? 'bg-white/20 text-white' : 'text-white/70'}`}
+          >
+            {text.free}
+          </button>
+          <button
+            onClick={() => updatePlan('pro')}
+            className={`px-3 py-1.5 text-xs ${plan === 'pro' ? 'bg-white/20 text-white' : 'text-white/70'}`}
+          >
+            {text.pro}
+          </button>
+        </div>
       </div>
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-black/40 backdrop-blur-xl border-b border-white/20">
@@ -2014,12 +2060,18 @@ export default function Home() {
               <p className="mt-1 text-white/70 text-xs font-light">
                 {text.cameraDailyNote}
               </p>
-              <p className="mt-1 text-white/60 text-[11px] font-light">
-                {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
-              </p>
-              {IS_FREE_PLAN && (
-                <p className="mt-1 text-white/50 text-[10px] font-light">
-                  {text.freeWatermarkNote}
+              {isFreePlan ? (
+                <>
+                  <p className="mt-1 text-white/60 text-[11px] font-light">
+                    {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
+                  </p>
+                  <p className="mt-1 text-white/50 text-[10px] font-light">
+                    {text.freeWatermarkNote}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-emerald-200/80 text-[11px] font-light">
+                  {text.proUnlimitedHint}
                 </p>
               )}
             </div>
@@ -2083,12 +2135,18 @@ export default function Home() {
           <p className="text-white/60 text-xs font-light mt-4 text-center max-w-xs">
             {text.dailyNote}
           </p>
-          <p className="text-white/60 text-xs font-light mt-1 text-center max-w-xs">
-            {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
-          </p>
-          {IS_FREE_PLAN && (
-            <p className="text-white/50 text-[11px] font-light mt-1 text-center max-w-xs">
-              {text.freeWatermarkNote}
+          {isFreePlan ? (
+            <>
+              <p className="text-white/60 text-xs font-light mt-1 text-center max-w-xs">
+                {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
+              </p>
+              <p className="text-white/50 text-[11px] font-light mt-1 text-center max-w-xs">
+                {text.freeWatermarkNote}
+              </p>
+            </>
+          ) : (
+            <p className="text-emerald-200/80 text-[11px] font-light mt-1 text-center max-w-xs">
+              {text.proUnlimitedHint}
             </p>
           )}
         </main>
