@@ -471,6 +471,7 @@ const t = {
     free: '無料版',
     pro: '課金版',
     proUnlimitedHint: '課金版は日次無料枠の制限対象外です。',
+    planLoading: '判定中',
   },
   en: {
     beta: 'BETA',
@@ -532,6 +533,7 @@ const t = {
     free: 'Free',
     pro: 'Pro',
     proUnlimitedHint: 'Pro is not limited by the daily free quota.',
+    planLoading: 'Loading',
   },
 } as const;
 
@@ -582,6 +584,7 @@ export default function Home() {
   const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [plan, setPlan] = useState<Plan>('free');
+  const [planResolved, setPlanResolved] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const photoPickerRef = useRef<HTMLInputElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -696,6 +699,7 @@ export default function Home() {
     try {
       const deviceId = getDeviceId();
       const res = await fetch('/api/plan', {
+        cache: 'no-store',
         headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
       });
       if (!res.ok) return;
@@ -705,6 +709,8 @@ export default function Home() {
       }
     } catch (_) {
       // フェイルセーフ: free のまま継続
+    } finally {
+      setPlanResolved(true);
     }
   }, []);
 
@@ -2065,12 +2071,18 @@ export default function Home() {
         </div>
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
           <span className="px-2 text-[10px] text-white/60">{text.plan}</span>
+          {!planResolved ? (
+            <span className="px-3 py-1.5 text-xs text-white/80">{text.planLoading}</span>
+          ) : (
+            <>
           <span className={`px-3 py-1.5 text-xs ${plan === 'free' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
             {text.free}
           </span>
           <span className={`px-3 py-1.5 text-xs ${plan === 'pro' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
             {text.pro}
           </span>
+            </>
+          )}
         </div>
       </div>
       {screenMode === 'idle' && (
