@@ -312,20 +312,27 @@ function drawCarkusLogoAtOrigin(
       imageVisualBoundsCache.set(logoImage, visual);
     }
 
-    const svgAspect = logoImage.naturalWidth / logoImage.naturalHeight;
+    const visualAspect = visual.sw / Math.max(1, visual.sh);
     // マスクに対して約80%を基準にしつつ、SVG余白を見越して見た目を補正する
     const targetW = Math.max(1, logoWidth * 0.8);
     const targetH = Math.max(1, logoHeight * 0.8);
     let drawW = targetW;
-    let drawH = drawW / svgAspect;
+    let drawH = drawW / Math.max(0.01, visualAspect);
     if (drawH > targetH) {
       drawH = targetH;
-      drawW = drawH * svgAspect;
+      drawW = drawH * visualAspect;
     }
     // Carkus.svg は余白が広めなので、見た目サイズを補正
     const opticalCompensation = 1.38;
-    drawW = Math.min(logoWidth * 0.98, drawW * opticalCompensation);
-    drawH = Math.min(logoHeight * 0.98, drawW / svgAspect);
+    drawW *= opticalCompensation;
+    drawH *= opticalCompensation;
+    const maxW = logoWidth * 0.98;
+    const maxH = logoHeight * 0.98;
+    if (drawW > maxW || drawH > maxH) {
+      const ratio = Math.min(maxW / Math.max(1, drawW), maxH / Math.max(1, drawH));
+      drawW *= ratio;
+      drawH *= ratio;
+    }
     ctx.save();
     ctx.filter = 'brightness(0) invert(1)';
     ctx.drawImage(
