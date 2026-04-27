@@ -337,6 +337,7 @@ const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限
 const LOCAL_DAILY_FREE_LIMIT = 1;
 const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
 const PLAN_STORAGE_KEY = 'carkus_plan';
+const FREE_DAILY_LIMIT_DISABLED = true; // 検証期間は無料版の日次回数制限を解除
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
@@ -399,6 +400,7 @@ const t = {
     dailyFreeLimitReached: '本日の無料枠を使い切りました。',
     freeQuotaLabel: '本日の無料解析',
     freeWatermarkNote: '無料版の保存画像には Carkus 透かしが入ります。',
+    freeQuotaUnlimitedTesting: '検証モード: 無料版の日次回数制限を一時的に解除中です。',
     plan: 'プラン',
     free: '無料版',
     pro: '課金版',
@@ -459,6 +461,7 @@ const t = {
     dailyFreeLimitReached: 'You have used all free attempts for today.',
     freeQuotaLabel: 'Daily free detections',
     freeWatermarkNote: 'Saved images on Free plan include a Carkus watermark.',
+    freeQuotaUnlimitedTesting: 'Testing mode: Daily free limit is temporarily disabled.',
     plan: 'Plan',
     free: 'Free',
     pro: 'Pro',
@@ -559,6 +562,7 @@ export default function Home() {
 
   const hasLocalDailyQuota = useCallback(() => {
     if (!isFreePlan) return true;
+    if (FREE_DAILY_LIMIT_DISABLED) return true;
     const usage = loadLocalDailyUsage();
     return usage.count < LOCAL_DAILY_FREE_LIMIT;
   }, [isFreePlan, loadLocalDailyUsage]);
@@ -2068,9 +2072,15 @@ export default function Home() {
               </p>
               {isFreePlan ? (
                 <>
-                  <p className="mt-1 text-white/60 text-[11px] font-light">
-                    {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
-                  </p>
+                  {FREE_DAILY_LIMIT_DISABLED ? (
+                    <p className="mt-1 text-emerald-200/80 text-[11px] font-light">
+                      {text.freeQuotaUnlimitedTesting}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-white/60 text-[11px] font-light">
+                      {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
+                    </p>
+                  )}
                   <p className="mt-1 text-white/50 text-[10px] font-light">
                     {text.freeWatermarkNote}
                   </p>
@@ -2143,9 +2153,15 @@ export default function Home() {
           </p>
           {isFreePlan ? (
             <>
-              <p className="text-white/60 text-xs font-light mt-1 text-center max-w-xs">
-                {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
-              </p>
+              {FREE_DAILY_LIMIT_DISABLED ? (
+                <p className="text-emerald-200/80 text-[11px] font-light mt-1 text-center max-w-xs">
+                  {text.freeQuotaUnlimitedTesting}
+                </p>
+              ) : (
+                <p className="text-white/60 text-xs font-light mt-1 text-center max-w-xs">
+                  {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
+                </p>
+              )}
               <p className="text-white/50 text-[11px] font-light mt-1 text-center max-w-xs">
                 {text.freeWatermarkNote}
               </p>
