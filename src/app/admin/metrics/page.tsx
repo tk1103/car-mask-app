@@ -57,6 +57,7 @@ export default function AdminMetricsPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [data, setData] = useState<MetricsResponse | null>(null);
+  const [granularity, setGranularity] = useState<'daily' | 'weekly'>('daily');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -135,6 +136,80 @@ export default function AdminMetricsPage() {
     ];
   }, [data]);
 
+  const chartSeries = useMemo(() => {
+    if (granularity === 'daily') return resolvedSeries;
+    const buckets = new Map<
+      string,
+      {
+        date: string;
+        uniqueUsers: number;
+        detectAttempts: number;
+        detectSuccess: number;
+        detectFailure: number;
+        upgradeClick: number;
+        featureBlockedByPlan: number;
+      }
+    >();
+    for (const row of resolvedSeries) {
+      const d = new Date(`${row.date}T00:00:00Z`);
+      const day = d.getUTCDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      d.setUTCDate(d.getUTCDate() + diff);
+      const weekStart = d.toISOString().slice(0, 10);
+      const current = buckets.get(weekStart) ?? {
+        date: weekStart,
+        uniqueUsers: 0,
+        detectAttempts: 0,
+        detectSuccess: 0,
+        detectFailure: 0,
+        upgradeClick: 0,
+        featureBlockedByPlan: 0,
+      };
+      current.uniqueUsers += row.uniqueUsers;
+      current.detectAttempts += row.detectAttempts;
+      current.detectSuccess += row.detectSuccess;
+      current.detectFailure += row.detectFailure;
+      current.upgradeClick += row.upgradeClick;
+      current.featureBlockedByPlan += row.featureBlockedByPlan;
+      buckets.set(weekStart, current);
+    }
+    return Array.from(buckets.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [resolvedSeries, granularity]);
+
+  const handleExportCsv = useCallback(() => {
+    if (!chartSeries.length) return;
+    const header = [
+      'date_or_week_start',
+      'unique_users',
+      'detect_attempts',
+      'detect_success',
+      'detect_failure',
+      'upgrade_click',
+      'feature_blocked_by_plan',
+    ];
+    const lines = chartSeries.map((row) =>
+      [
+        row.date,
+        row.uniqueUsers,
+        row.detectAttempts,
+        row.detectSuccess,
+        row.detectFailure,
+        row.upgradeClick,
+        row.featureBlockedByPlan,
+      ].join(',')
+    );
+    const csv = [header.join(','), ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `carkus-metrics-${granularity}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [chartSeries, granularity]);
+
   return (
     <main className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto space-y-6">
@@ -204,6 +279,33 @@ export default function AdminMetricsPage() {
             {loading ? '取得中...' : '更新'}
           </button>
 
+          {data && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-white/60">集計単位</span>
+              <button
+                type="button"
+                onClick={() => setGranularity('daily')}
+                className={`px-3 py-1.5 rounded-full text-xs border ${granularity === 'daily' ? 'bg-white/20 border-white/30 text-white' : 'bg-white/5 border-white/20 text-white/70 hover:bg-white/10'}`}
+              >
+                日次
+              </button>
+              <button
+                type="button"
+                onClick={() => setGranularity('weekly')}
+                className={`px-3 py-1.5 rounded-full text-xs border ${granularity === 'weekly' ? 'bg-white/20 border-white/30 text-white' : 'bg-white/5 border-white/20 text-white/70 hover:bg-white/10'}`}
+              >
+                週次
+              </button>
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="px-3 py-1.5 rounded-full text-xs bg-emerald-500/20 border border-emerald-300/40 text-emerald-100 hover:bg-emerald-500/30"
+              >
+                CSVエクスポート
+              </button>
+            </div>
+          )}
+
           {error && (
             <p className="text-red-200 text-sm">{error}</p>
           )}
@@ -265,8 +367,10 @@ export default function AdminMetricsPage() {
 
         {data && (
           <section className="rounded-2xl border border-white/20 bg-white/5 p-4">
-            <p className="text-xs text-white/70 mb-3">折れ線グラフ（日次）</p>
-            <LineChart series={resolvedSeries} />
+            <p className="text-xs text-white/70 mb-3">
+              折れ線グラフ（{granularity === 'daily' ? '日次' : '週次'}）
+            </p>
+            <LineChart series={chartSeries} />
           </section>
         )}
 
@@ -296,7 +400,7 @@ export default function AdminMetricsPage() {
                   : 0
               }%`}
             />
-            <MetricCard label="データ点数" value={`${resolvedSeries.length}`} />
+            <MetricCard label="データ点数" value={`${chartSeries.length}`} />
           </section>
         )}
       </div>
@@ -316,7 +420,13 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 function LineChart({
   series,
 }: {
-  series: Array<{ date: string; uniqueUsers: number; detectAttempts: number }>;
+  series: Array<{
+    date: string;
+    uniqueUsers: number;
+    detectAttempts: number;
+    detectSuccess: number;
+    detectFailure: number;
+  }>;
 }) {
   if (series.length === 0) {
     return <p className="text-sm text-white/50">データなし</p>;
@@ -327,12 +437,16 @@ function LineChart({
   const maxY = Math.max(
     1,
     ...series.map((s) => s.uniqueUsers),
-    ...series.map((s) => s.detectAttempts)
+    ...series.map((s) => s.detectAttempts),
+    ...series.map((s) => s.detectSuccess),
+    ...series.map((s) => s.detectFailure)
   );
   const x = (i: number) => (series.length <= 1 ? w / 2 : pad + (i * (w - pad * 2)) / (series.length - 1));
   const y = (v: number) => h - pad - (v / maxY) * (h - pad * 2);
   const usersPoints = series.map((s, i) => `${x(i)},${y(s.uniqueUsers)}`).join(' ');
   const attemptsPoints = series.map((s, i) => `${x(i)},${y(s.detectAttempts)}`).join(' ');
+  const successPoints = series.map((s, i) => `${x(i)},${y(s.detectSuccess)}`).join(' ');
+  const failurePoints = series.map((s, i) => `${x(i)},${y(s.detectFailure)}`).join(' ');
   const ticks = [0, Math.round(maxY / 2), maxY];
 
   return (
@@ -348,10 +462,14 @@ function LineChart({
         ))}
         <polyline fill="none" stroke="rgb(56 189 248)" strokeWidth="3" points={usersPoints} />
         <polyline fill="none" stroke="rgb(251 191 36)" strokeWidth="3" points={attemptsPoints} />
+        <polyline fill="none" stroke="rgb(74 222 128)" strokeWidth="3" points={successPoints} />
+        <polyline fill="none" stroke="rgb(248 113 113)" strokeWidth="3" points={failurePoints} />
       </svg>
       <div className="flex flex-wrap gap-4 text-xs text-white/75">
-        <span>■ ユニーク端末（日次）</span>
-        <span className="text-amber-200">■ 検出リクエスト（日次）</span>
+        <span>■ ユニーク端末</span>
+        <span className="text-amber-200">■ 検出リクエスト</span>
+        <span className="text-emerald-300">■ 成功</span>
+        <span className="text-red-300">■ 失敗</span>
       </div>
       <div className="flex justify-between text-[11px] text-white/50">
         <span>{series[0]?.date}</span>
