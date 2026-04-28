@@ -454,8 +454,8 @@ const t = {
     addHome: 'ホーム画面に追加',
     addHomeChrome: 'ホーム画面に追加（Chrome）',
     cameraLaunchHint: 'カメラを起動して撮影してください',
-    dailyNote: `BETA: このアプリの想定は 1日あたり約${API_DAILY_LIMIT}回ですが、実際の上限はご利用中の Google アカウントの Gemini API 制限に依存します。`,
-    cameraDailyNote: `このアプリの目安は 1日あたり約${API_DAILY_LIMIT}回ですが、実際の上限は Google Gemini API 側の利用制限により前後する場合があります。`,
+    dailyNote: 'BETA: このアプリの目安は 1日あたり1〜2枚です（実際の上限は Google Gemini API 側の利用制限により前後します）。',
+    cameraDailyNote: 'このアプリの目安は 1日あたり1〜2枚です（Google Gemini API 側の利用制限により前後します）。',
     cameraDailyNoteShort: '無料版では Google Gemini API の利用制限により、1日にご利用いただける回数が変動する場合があります。',
     autoDetectFailedManual: '自動検出に失敗しました。手動で位置を合わせてください。',
     timeoutManual: '解析がタイムアウトしました。位置を手動で調整してください。',
@@ -541,8 +541,8 @@ const t = {
     addHome: 'Add to Home Screen',
     addHomeChrome: 'Add to Home Screen (Chrome)',
     cameraLaunchHint: 'Open camera and take a photo',
-    dailyNote: `BETA: This app targets about ${API_DAILY_LIMIT} uses per day, but actual limits depend on your Google Gemini API quota.`,
-    cameraDailyNote: `This app targets about ${API_DAILY_LIMIT} uses per day, but actual limits may vary by Google Gemini API quota.`,
+    dailyNote: 'BETA: This app is expected to support about 1-2 photos per day (actual limits may vary by Google Gemini API quota).',
+    cameraDailyNote: 'This app is expected to support about 1-2 photos per day (actual limits may vary by Google Gemini API quota).',
     cameraDailyNoteShort: 'On free tier, daily usage may vary due to Google Gemini API limits.',
     autoDetectFailedManual: 'Auto-detection failed. Please adjust position manually.',
     timeoutManual: 'Detection timed out. Please adjust position manually.',
@@ -2430,20 +2430,22 @@ export default function Home() {
       {screenMode === 'idle' && (
         <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-8 px-6">
           <p className="text-white/70 text-sm font-extralight tracking-wide">{text.cameraLaunchHint}</p>
-          <button
-            onClick={startCamera}
-            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-widest border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
-          >
-            <Camera size={22} strokeWidth={1.5} />
-            {text.launchCamera}
-          </button>
-          <button
-            onClick={handlePickImageFromDevice}
-            className="flex items-center gap-3 px-10 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-widest border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
-          >
-            <ImagePlus size={22} strokeWidth={1.5} />
-            {text.pickPhoto}
-          </button>
+          <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-3">
+            <button
+              onClick={startCamera}
+              className="flex items-center justify-center gap-2 px-4 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-wide border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
+            >
+              <Camera size={20} strokeWidth={1.5} />
+              {text.launchCamera}
+            </button>
+            <button
+              onClick={handlePickImageFromDevice}
+              className="flex items-center justify-center gap-2 px-4 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-wide border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
+            >
+              <ImagePlus size={20} strokeWidth={1.5} />
+              {text.pickPhoto}
+            </button>
+          </div>
           {cameraError && (
             <p className="text-red-300 text-xs font-light max-w-xs text-center">{cameraError}</p>
           )}
