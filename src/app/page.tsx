@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, ImagePlus, Download as DownloadIcon } from 'lucide-react';
 
 /** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
@@ -499,6 +500,7 @@ const t = {
     upgradeNow: 'アップグレード',
     maybeLater: 'あとで',
     upgradeLinkMissing: 'アップグレード導線は準備中です。',
+    termsOfService: '利用規約',
   },
   en: {
     beta: 'BETA',
@@ -586,6 +588,7 @@ const t = {
     upgradeNow: 'Upgrade',
     maybeLater: 'Maybe later',
     upgradeLinkMissing: 'Upgrade link is not configured yet.',
+    termsOfService: 'Terms of Service',
   },
 } as const;
 
@@ -2481,6 +2484,12 @@ export default function Home() {
               {text.proUnlimitedHint}
             </p>
           )}
+          <Link
+            href="/terms"
+            className="text-sky-400/90 hover:text-sky-300 text-xs font-light underline-offset-2 hover:underline"
+          >
+            {text.termsOfService}
+          </Link>
         </main>
       )}
 
