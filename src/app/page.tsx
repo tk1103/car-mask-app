@@ -64,6 +64,8 @@ type DetectApiResponse = {
   found?: boolean;
   plates?: Array<{ corners?: Array<{ x: number; y: number }> }>;
   corners?: Array<{ x: number; y: number }>;
+  reasoning?: string;
+  inferred?: boolean;
   error?: unknown;
   userMessage?: string;
   errorType?: DetectErrorType;
@@ -101,9 +103,13 @@ function getDeviceId(): string {
 
 // API座標をクライアント座標に変換（0-1000 → 0-1）。画像の幅・高さに依存しない正規化座標（portrait/landscape 共通）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
+  const normalize = (value: number) => {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value / 1000));
+  };
   return plate.corners.map((c) => ({
-    x: Math.max(0, Math.min(1, c.x / 1000)),
-    y: Math.max(0, Math.min(1, c.y / 1000)),
+    x: normalize(c.x),
+    y: normalize(c.y),
   })) as Corners;
 }
 
@@ -492,6 +498,7 @@ const t = {
     logoCopyrightConfirm:
       '著作権・商標権など第三者の権利を侵害しない画像のみアップロードしてください。権利侵害に関する責任は利用者が負います。続行しますか？',
     editManually: '手動で編集',
+    aiInferenceDetected: 'AI推論で角を補完した可能性があります。必要に応じて手動で微調整してください。',
     upsellTitle: '課金版で使える機能です',
     upsellBody: '無料版ではこの機能は利用できません。課金版で以下が解放されます。',
     upsellLocked1: '独自ロゴのアップロード（PNG / SVG）',
@@ -580,6 +587,7 @@ const t = {
     logoCopyrightConfirm:
       'Upload only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for rights violations. Continue?',
     editManually: 'Edit Manually',
+    aiInferenceDetected: 'AI likely inferred hidden/out-of-frame corners. Fine-tune manually if needed.',
     upsellTitle: 'Available on Pro plan',
     upsellBody: 'This feature is not available on Free. Pro unlocks:',
     upsellLocked1: 'Custom logo upload (PNG / SVG)',
@@ -631,6 +639,7 @@ export default function Home() {
   const [showManualGuide, setShowManualGuide] = useState(false);
   const [retryStatusText, setRetryStatusText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [detectionReasoning, setDetectionReasoning] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
   const [localDailySuccessCount, setLocalDailySuccessCount] = useState(0);
   const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
@@ -856,12 +865,14 @@ export default function Home() {
   const showManualHelpAfterFailure = useCallback(() => {
     setDetectionFailed(true);
     setShowManualGuide(true);
+    setDetectionReasoning(null);
   }, []);
 
   const handleEditManually = useCallback(() => {
     setDetectionFailed(true);
     setShowManualGuide(true);
     setToastMessage(null);
+    setDetectionReasoning(null);
   }, []);
 
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, retryAfterSeconds?: number) => {
@@ -1078,6 +1089,7 @@ export default function Home() {
     setIsProcessing(true);
     setCameraError(null);
     setDetectionFailed(false);
+    setDetectionReasoning(null);
     setShowManualGuide(false);
     setRetryStatusText(null);
 
@@ -1229,6 +1241,12 @@ export default function Home() {
         }
 
         if (lastResponse && lastResult && isLatestRequest()) {
+          if (typeof lastResult.reasoning === 'string' && lastResult.reasoning.trim()) {
+            console.info('Plate detection reasoning:', lastResult.reasoning);
+            setDetectionReasoning(lastResult.reasoning.trim());
+          } else {
+            setDetectionReasoning(null);
+          }
           const remaining = lastResult.remainingToday;
           if (remaining !== undefined) setDailyRemaining(remaining);
           if (!lastResponse.ok) {
@@ -1247,6 +1265,7 @@ export default function Home() {
               setEditLogoScale(1);
               setEditLogoRotation(0);
               setDetectionFailed(false);
+              if (lastResult.inferred) setToastMessage(tx('aiInferenceDetected'));
             } else {
               setToastMessage(tx('autoDetectFailedManual'));
               showManualHelpAfterFailure();
@@ -1259,6 +1278,7 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
+            if (lastResult.inferred) setToastMessage(tx('aiInferenceDetected'));
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
@@ -1356,6 +1376,7 @@ export default function Home() {
     setIsProcessing(true);
     setCameraError(null);
     setDetectionFailed(false);
+    setDetectionReasoning(null);
     setShowManualGuide(false);
     setRetryStatusText(null);
 
@@ -1517,6 +1538,12 @@ export default function Home() {
           showManualHelpAfterFailure();
           return;
         }
+        if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
+          console.info('Plate detection reasoning:', result.reasoning);
+          setDetectionReasoning(result.reasoning.trim());
+        } else {
+          setDetectionReasoning(null);
+        }
         if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
           const platesCorners: Corners[] = result.plates
             .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
@@ -1528,6 +1555,7 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
+            if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
@@ -1541,6 +1569,7 @@ export default function Home() {
           setEditLogoScale(1);
           setEditLogoRotation(0);
           setDetectionFailed(false);
+          if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
           incrementLocalDailyUsageOnSuccess();
         } else {
           setToastMessage(tx('autoDetectFailedManual'));
@@ -2597,6 +2626,12 @@ export default function Home() {
             {retryStatusText && (
               <div className="mb-3 px-3 py-2 rounded-lg bg-sky-500/15 border border-sky-300/30">
                 <span className="text-sky-100 text-xs font-light">{retryStatusText}</span>
+              </div>
+            )}
+            {!isProcessing && detectionReasoning && (
+              <div className="mb-3 px-3 py-2 rounded-lg bg-indigo-500/15 border border-indigo-300/30 space-y-1">
+                <p className="text-indigo-100 text-xs font-light">{text.aiInferenceDetected}</p>
+                <p className="text-indigo-200/80 text-[11px] leading-relaxed">{detectionReasoning}</p>
               </div>
             )}
             {detectionFailed && !isProcessing && (

@@ -17,6 +17,7 @@ type DailyPoint = {
   detectFailure: number;
   upgradeClick: number;
   featureBlockedByPlan: number;
+  detectFailureTypeCounts?: Record<string, number>;
 };
 
 function isIsoDate(value: string): boolean {
@@ -175,6 +176,7 @@ export async function GET(request: NextRequest) {
         detectFailure: s.detectFailure,
         upgradeClick: s.upgradeClick,
         featureBlockedByPlan: s.featureBlockedByPlan,
+        detectFailureTypeCounts: s.detectFailureTypeCounts ?? {},
       }));
       const totals = series.reduce(
         (acc, row) => {
@@ -184,6 +186,9 @@ export async function GET(request: NextRequest) {
           acc.detectFailure += row.detectFailure;
           acc.upgradeClick += row.upgradeClick;
           acc.featureBlockedByPlan += row.featureBlockedByPlan;
+          for (const [errorType, count] of Object.entries(row.detectFailureTypeCounts ?? {})) {
+            acc.detectFailureTypeCounts[errorType] = (acc.detectFailureTypeCounts[errorType] ?? 0) + count;
+          }
           return acc;
         },
         {
@@ -193,6 +198,7 @@ export async function GET(request: NextRequest) {
           detectFailure: 0,
           upgradeClick: 0,
           featureBlockedByPlan: 0,
+          detectFailureTypeCounts: {} as Record<string, number>,
         }
       );
       return NextResponse.json({

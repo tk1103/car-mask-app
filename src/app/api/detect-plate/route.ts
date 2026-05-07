@@ -4,7 +4,7 @@ import { trackUsageEvent } from '../../../lib/usage-metrics';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-const MODEL_NAMES = ['gemini-3-flash-preview', 'gemini-2.0-flash'] as const;
+const MODEL_NAMES = ['gemini-3.1-flash', 'gemini-2.5-flash', 'gemini-2.0-flash'] as const;
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
@@ -121,34 +121,23 @@ function isRateLimited(clientId: string): boolean {
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
-    found: { type: 'boolean', description: 'found' },
-    plates: {
+    points: {
       type: 'array',
-      description: 'plates',
+      description: 'single license plate corners',
+      minItems: 4,
+      maxItems: 4,
       items: {
         type: 'object',
         properties: {
-          found: { type: 'boolean', description: 'found' },
-          corners: {
-            type: 'array',
-            description: 'corners',
-            minItems: 4,
-            maxItems: 4,
-            items: {
-              type: 'object',
-              properties: {
-                x: { type: 'number', minimum: 0, maximum: 1000, description: 'x' },
-                y: { type: 'number', minimum: 0, maximum: 1000, description: 'y' },
-              },
-              required: ['x', 'y'],
-            },
-          },
+          x: { type: 'number', description: 'x' },
+          y: { type: 'number', description: 'y' },
         },
-        required: ['found', 'corners'],
+        required: ['x', 'y'],
       },
     },
+    reasoning: { type: 'string', description: 'why these points were inferred' },
   },
-  required: ['found', 'plates'],
+  required: ['points'],
 } as const;
 
 /** Gemini の返答テキストから JSON 文字列を抽出し、パースしやすく正規化する */
@@ -237,13 +226,22 @@ function isValidCorner(c: unknown): c is { x: number; y: number } {
   );
 }
 
+function clampToApiScale(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  const rounded = Math.round(value);
+  return Math.max(0, Math.min(1000, rounded));
+}
+
 /** parts と text から座標データを抽出。成功時は正規化済みオブジェクト、失敗時は null */
 function tryParsePlateResponse(parts: unknown[], text: string): Record<string, unknown> | null {
   for (const p of parts) {
     if (p != null && typeof p === 'object') {
       const po = p as Record<string, unknown>;
       const struct = po.struct as Record<string, unknown> | undefined;
-      const obj: Record<string, unknown> | null = ('found' in po && 'plates' in po) ? po : (struct && typeof struct === 'object' && 'found' in struct ? struct : null);
+      const obj: Record<string, unknown> | null =
+        ('points' in po || ('found' in po && 'plates' in po))
+          ? po
+          : (struct && typeof struct === 'object' && ('points' in struct || 'found' in struct) ? struct : null);
       if (obj) {
         try {
           return normalizeParsedResponse(obj as Record<string, unknown>);
@@ -261,7 +259,7 @@ function tryParsePlateResponse(parts: unknown[], text: string): Record<string, u
   for (const jsonText of uniqueCandidates) {
     try {
       const value = JSON.parse(jsonText);
-      if (value && typeof value === 'object' && ('found' in value || 'plates' in value)) {
+      if (value && typeof value === 'object' && ('points' in value || 'found' in value || 'plates' in value)) {
         return normalizeParsedResponse(value as Record<string, unknown>);
       }
     } catch (_) {}
@@ -271,10 +269,17 @@ function tryParsePlateResponse(parts: unknown[], text: string): Record<string, u
 
 /** パース結果をスキーマに合わせて正規化（plates が無くても corners があれば復元） */
 function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string, unknown> {
+  const points = Array.isArray(parsed.points) ? (parsed.points as unknown[]).filter(isValidCorner).slice(0, 4) : [];
   const result: Record<string, unknown> = {
-    found: Boolean(parsed.found),
+    found: points.length === 4 ? true : Boolean(parsed.found),
     plates: Array.isArray(parsed.plates) ? parsed.plates : [],
   };
+  if (points.length === 4) {
+    result.plates = [{ found: true, corners: points }];
+  }
+  if (typeof parsed.reasoning === 'string') {
+    result.reasoning = parsed.reasoning.trim().slice(0, 1200);
+  }
   const plates = result.plates as unknown[];
   if (plates.length === 0 && parsed.corners && Array.isArray(parsed.corners)) {
     const corners = (parsed.corners as unknown[]).filter(isValidCorner);
@@ -292,9 +297,14 @@ function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string
   );
   result.plates = validPlates.map((p: unknown) => ({
     found: true,
-    corners: (p as { corners: unknown[] }).corners.filter(isValidCorner).slice(0, 4),
+    corners: (p as { corners: unknown[] }).corners.filter(isValidCorner).slice(0, 4).map((c) => ({
+      x: clampToApiScale(c.x),
+      y: clampToApiScale(c.y),
+    })),
   }));
   if (validPlates.length === 0) result.found = false;
+  // AI 推論結果をクライアントで明示できるようにフラグ化
+  result.inferred = Boolean(result.found);
   return result;
 }
 
@@ -320,7 +330,7 @@ export async function POST(request: NextRequest) {
     await trackUsageEvent(clientId, 'detect_attempt', undefined, usageMeta);
 
     if (isRateLimited(clientId)) {
-      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'rate_limited' });
       return NextResponse.json(
         {
           found: false,
@@ -354,19 +364,19 @@ export async function POST(request: NextRequest) {
 
     if (!imageFile) {
       logStructured('error', 'detect.bad_request.no_image', { requestId });
-      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'bad_request' });
       return NextResponse.json({ error: '画像が送信されませんでした', errorType: 'bad_request', requestId }, { status: 400 });
     }
     if (!imageWidth || !imageHeight) {
       logStructured('error', 'detect.bad_request.invalid_dimensions', { requestId, imageWidth, imageHeight });
-      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'bad_request' });
       return NextResponse.json({ error: '画像サイズが送信されませんでした', errorType: 'bad_request', requestId }, { status: 400 });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       logStructured('error', 'detect.config.missing_api_key', { requestId });
-      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'config' });
       return NextResponse.json({ error: 'GEMINI_API_KEYが設定されていません', errorType: 'config', requestId }, { status: 500 });
     }
 
@@ -384,10 +394,14 @@ export async function POST(request: NextRequest) {
     });
 
     const prompt = [
-      'You are a precise license plate detector. Detect the 4 corners of the license plate.',
-      'Coordinates: [0,0] is top-left, [1000,1000] is bottom-right.',
-      'Return ONLY JSON in this format: {"found": true, "plates": [{"found": true, "corners": [{"x": 123, "y": 456}, ...]}]}.',
-      'Order: Top-Left, Top-Right, Bottom-Right, Bottom-Left.',
+      'You are an expert in image analysis for vehicle license plates.',
+      'Task: detect the four corners of each visible license plate.',
+      'If corners are partially occluded (grass, shadow, poles, dirt) or outside image bounds, logically infer and complete the true geometric rectangle that the plate should have.',
+      'Output coordinates on an integer [0..1000] scale where (0,0)=top-left and (1000,1000)=bottom-right.',
+      'Corner order must be Top-Left, Top-Right, Bottom-Right, Bottom-Left.',
+      'Return ONLY valid JSON in this exact shape:',
+      '{"points":[{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0}],"reasoning":"short reason"}',
+      'No markdown, no extra keys, no explanations outside JSON.',
     ].join(' ');
 
     const urlTemplate = (model: string) =>
@@ -407,6 +421,7 @@ export async function POST(request: NextRequest) {
         topK: 1,
         maxOutputTokens: 512,
         responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
       },
       safetySettings: [
         // BLOCK_NONE でナンバープレート画像が個人情報としてブロックされないようにする
@@ -466,7 +481,7 @@ export async function POST(request: NextRequest) {
             retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : null,
             message: String(lastErrorMessage || '').substring(0, 300),
           });
-          await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+          await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType });
           return NextResponse.json(
             {
               found: false,
@@ -537,7 +552,7 @@ export async function POST(request: NextRequest) {
             modelName,
             elapsedMs: Date.now() - startTime,
           });
-          await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+          await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'timeout' });
           return NextResponse.json(
             {
               found: false,
@@ -556,7 +571,7 @@ export async function POST(request: NextRequest) {
           modelName,
           message: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
         });
-        await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+        await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'network' });
         return NextResponse.json(
           {
             found: false,
@@ -573,7 +588,7 @@ export async function POST(request: NextRequest) {
 
     if (!lastRawText && (lastStatus === 404 || lastStatus === 400)) {
       logStructured('error', 'detect.config_invalid_model_or_key', { requestId, lastStatus });
-      await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'config' });
       return NextResponse.json({
         found: false,
         error: 'APIキーまたはモデル設定を確認してください',
@@ -588,7 +603,7 @@ export async function POST(request: NextRequest) {
       lastStatus,
       rawSnippet: (lastRawText || '').substring(0, 1000),
     });
-    await trackUsageEvent(clientId, 'detect_failure', undefined, usageMeta);
+    await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'invalid_response' });
     return NextResponse.json({
       found: false,
       error: '座標の解析に失敗しました',
@@ -604,6 +619,7 @@ export async function POST(request: NextRequest) {
     await trackUsageEvent(clientId, 'detect_failure', undefined, {
       country: getCountryCode(request),
       deviceType: getDeviceType(request),
+      errorType: 'unknown',
     });
     logStructured('error', 'detect.unexpected_error', {
       requestId,

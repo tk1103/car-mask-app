@@ -11,6 +11,7 @@ type MetricsSingleResponse = {
   detectFailure?: number;
   countryCounts?: Record<string, number>;
   deviceTypeCounts?: Record<string, number>;
+  detectFailureTypeCounts?: Record<string, number>;
   storage: 'kv' | 'memory';
   upgradeClick?: number;
   featureBlockedByPlan?: number;
@@ -28,6 +29,7 @@ type MetricsRangeResponse = {
     detectFailure: number;
     upgradeClick: number;
     featureBlockedByPlan: number;
+    detectFailureTypeCounts?: Record<string, number>;
   };
   series: Array<{
     date: string;
@@ -37,6 +39,7 @@ type MetricsRangeResponse = {
     detectFailure: number;
     upgradeClick: number;
     featureBlockedByPlan: number;
+    detectFailureTypeCounts?: Record<string, number>;
   }>;
 };
 type MetricsResponse = MetricsSingleResponse | MetricsRangeResponse;
@@ -175,6 +178,15 @@ export default function AdminMetricsPage() {
     }
     return Array.from(buckets.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [resolvedSeries, granularity]);
+
+  const failureTypeEntries = useMemo(() => {
+    if (!data) return [] as Array<[string, number]>;
+    const counts =
+      data.mode === 'range'
+        ? data.totals.detectFailureTypeCounts ?? {}
+        : data.detectFailureTypeCounts ?? {};
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [data]);
 
   const handleExportCsv = useCallback(() => {
     if (!chartSeries.length) return;
@@ -361,6 +373,16 @@ export default function AdminMetricsPage() {
               label="端末別（detect_attempt）"
               entries={Object.entries(data.deviceTypeCounts ?? {}).sort((a, b) => b[1] - a[1])}
               emptyLabel="データなし"
+            />
+          </section>
+        )}
+
+        {data && (
+          <section className="grid grid-cols-1 gap-4">
+            <MetricListCard
+              label="失敗要因（errorType）"
+              entries={failureTypeEntries}
+              emptyLabel="失敗要因データなし"
             />
           </section>
         )}
