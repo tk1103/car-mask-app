@@ -457,9 +457,7 @@ const t = {
     addHome: 'ホーム画面に追加',
     addHomeChrome: 'ホーム画面に追加（Chrome）',
     cameraLaunchHint: 'カメラを起動して撮影してください',
-    dailyNote: 'BETA: このアプリの目安は 1日あたり1〜2枚です（実際の上限は Google Gemini API 側の利用制限により前後します）。',
-    cameraDailyNote: 'このアプリの目安は 1日あたり1〜2枚です（Google Gemini API 側の利用制限により前後します）。',
-    cameraDailyNoteShort: '無料版では Google Gemini API の利用制限により、1日にご利用いただける回数が変動する場合があります。',
+    dailyNote: 'このアプリの目安は 1日あたり1〜2枚です（Google Gemini API 側の利用制限により前後します）。',
     autoDetectFailedManual: '自動検出に失敗しました。手動で位置を合わせてください。',
     timeoutManual: '解析がタイムアウトしました。位置を手動で調整してください。',
     imageFileOnly: '画像ファイルを選択してください。',
@@ -541,9 +539,7 @@ const t = {
     addHome: 'Add to Home Screen',
     addHomeChrome: 'Add to Home Screen (Chrome)',
     cameraLaunchHint: 'Open camera and take a photo',
-    dailyNote: 'BETA: This app is expected to support about 1-2 photos per day (actual limits may vary by Google Gemini API quota).',
-    cameraDailyNote: 'This app is expected to support about 1-2 photos per day (actual limits may vary by Google Gemini API quota).',
-    cameraDailyNoteShort: 'On free tier, daily usage may vary due to Google Gemini API limits.',
+    dailyNote: 'This app is expected to support about 1-2 photos per day (actual limits may vary by Google Gemini API quota).',
     autoDetectFailedManual: 'Auto-detection failed. Please adjust position manually.',
     timeoutManual: 'Detection timed out. Please adjust position manually.',
     imageFileOnly: 'Please select an image file.',
@@ -627,6 +623,7 @@ export default function Home() {
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
   const [isBlurWarning, setIsBlurWarning] = useState(false);
   const [detectionFailed, setDetectionFailed] = useState(false);
+  const [manualEditActive, setManualEditActive] = useState(false);
   const [retryStatusText, setRetryStatusText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
@@ -851,14 +848,35 @@ export default function Home() {
     }
   }, [deferredPrompt]);
 
-  const showManualHelpAfterFailure = useCallback(() => {
-    setDetectionFailed(true);
+  const ensureDefaultCorners = useCallback(() => {
+    const defaults = getDefaultCenterCorners();
+    setDetectedCorners((prev) => (prev.length > 0 ? prev : [defaults]));
+    setDetectedBaseAngles((prev) => (prev.length > 0 ? prev : [getPlateBaseAngle(defaults)]));
   }, []);
 
-  const handleEditManually = useCallback(() => {
+  const activateManualEdit = useCallback(() => {
+    activeDetectControllerRef.current?.abort();
+    activeDetectControllerRef.current = null;
+    setIsProcessing(false);
+    setRetryStatusText(null);
     setDetectionFailed(true);
+    setManualEditActive(true);
     setToastMessage(null);
-  }, []);
+    ensureDefaultCorners();
+    setEditLogoOffset({ x: 0, y: 0 });
+    setEditLogoScale(1);
+    setEditLogoRotation(0);
+  }, [ensureDefaultCorners]);
+
+  const showManualHelpAfterFailure = useCallback(() => {
+    setDetectionFailed(true);
+    setManualEditActive(true);
+    ensureDefaultCorners();
+  }, [ensureDefaultCorners]);
+
+  const handleEditManually = useCallback(() => {
+    activateManualEdit();
+  }, [activateManualEdit]);
 
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, _retryAfterSeconds?: number) => {
     switch (errorType) {
@@ -916,6 +934,8 @@ export default function Home() {
     setEditLogoScale(1);
     setEditLogoRotation(0);
     playAttemptCountRef.current = 0;
+    setManualEditActive(false);
+    setDetectionFailed(false);
   }, []);
 
   useEffect(() => {
@@ -1072,6 +1092,7 @@ export default function Home() {
     setIsProcessing(true);
     setCameraError(null);
     setDetectionFailed(false);
+    setManualEditActive(false);
     setRetryStatusText(null);
 
     try {
@@ -1216,6 +1237,7 @@ export default function Home() {
               setEditLogoScale(1);
               setEditLogoRotation(0);
               setDetectionFailed(false);
+              setManualEditActive(false);
             } else {
               setToastMessage(tx('autoDetectFailedManual'));
               showManualHelpAfterFailure();
@@ -1228,6 +1250,7 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
+            setManualEditActive(false);
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
@@ -1325,6 +1348,7 @@ export default function Home() {
     setIsProcessing(true);
     setCameraError(null);
     setDetectionFailed(false);
+    setManualEditActive(false);
     setRetryStatusText(null);
 
     try {
@@ -1499,6 +1523,7 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
+            setManualEditActive(false);
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
@@ -1512,6 +1537,7 @@ export default function Home() {
           setEditLogoScale(1);
           setEditLogoRotation(0);
           setDetectionFailed(false);
+          setManualEditActive(false);
           incrementLocalDailyUsageOnSuccess();
         } else {
           setToastMessage(tx('autoDetectFailedManual'));
@@ -1609,6 +1635,7 @@ export default function Home() {
     setRetryStatusText(null);
     setIsBlurWarning(false);
     setDetectionFailed(false);
+    setManualEditActive(false);
     setScreenMode('camera');
     // ストリーム再設定は screenMode の useEffect で行う（video は再マウント後のため、ここでは ref がまだ更新されていない場合がある）
     // フォールバック: DOM 更新後に再設定を試みる
@@ -1675,7 +1702,7 @@ export default function Home() {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, 0, 0);
 
-    if (!isProcessing && detectedCorners.length > 0) {
+    if ((manualEditActive || !isProcessing) && detectedCorners.length > 0) {
       const scale = editLogoScale;
 
       // 複数プレート対応: 各検出座標に対して fillQuad とロゴ描画を一括適用
@@ -1722,6 +1749,19 @@ export default function Home() {
 
         // 1段目: プレート全体を黒塗り
         fillQuad(ctx, quadPx, '#000000');
+        if (manualEditActive) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255, 196, 64, 0.9)';
+          ctx.lineWidth = Math.max(2, Math.min(plateWidth, plateHeight) * 0.035);
+          ctx.beginPath();
+          ctx.moveTo(quadPx[0].x, quadPx[0].y);
+          ctx.lineTo(quadPx[1].x, quadPx[1].y);
+          ctx.lineTo(quadPx[2].x, quadPx[2].y);
+          ctx.lineTo(quadPx[3].x, quadPx[3].y);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.restore();
+        }
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
 
@@ -1810,7 +1850,7 @@ export default function Home() {
         ctx.restore();
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate]);
+  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
 
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
@@ -2100,6 +2140,7 @@ export default function Home() {
 
   const onPreviewTouchStart = useCallback(
     (e: React.TouchEvent) => {
+      if (isProcessing && !manualEditActive) return;
       if (e.touches.length === 1) {
         dragStartRef.current = {
           x: e.touches[0].clientX,
@@ -2111,11 +2152,12 @@ export default function Home() {
         scaleStartRef.current = { y: dy, startScale: editLogoScale };
       }
     },
-    [editLogoOffset, editLogoScale]
+    [editLogoOffset, editLogoScale, isProcessing, manualEditActive]
   );
 
   const onPreviewTouchMove = useCallback(
     (e: React.TouchEvent) => {
+      if (isProcessing && !manualEditActive) return;
       if (e.touches.length === 1 && dragStartRef.current) {
         const dx = e.touches[0].clientX - dragStartRef.current.x;
         const dy = e.touches[0].clientY - dragStartRef.current.y;
@@ -2129,7 +2171,7 @@ export default function Home() {
         setEditLogoScale(Math.max(LOGO_SCALE_MIN, Math.min(LOGO_SCALE_MAX, scaleStartRef.current.startScale + delta)));
       }
     },
-    []
+    [isProcessing, manualEditActive]
   );
 
   const onPreviewTouchEnd = useCallback(() => {
@@ -2312,6 +2354,9 @@ export default function Home() {
               {text.pickPhoto}
             </button>
           </div>
+          <p className="text-white/55 text-xs font-light text-center max-w-sm leading-relaxed px-2">
+            {text.dailyNote}
+          </p>
           {!isStandalone && (
             <button
               onClick={handleInstallClick}
@@ -2365,7 +2410,7 @@ export default function Home() {
             </div>
           )}
           <div
-            className="absolute inset-0 touch-none"
+            className="absolute inset-0 z-[1] touch-none"
             onTouchStart={onPreviewTouchStart}
             onTouchMove={onPreviewTouchMove}
             onTouchEnd={onPreviewTouchEnd}
@@ -2386,8 +2431,9 @@ export default function Home() {
               </div>
             )}
           </div>
-          <div className="absolute bottom-0 left-0 right-0 z-10 pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-3 bg-gradient-to-t from-black/85 via-black/60 to-transparent landscape:top-0 landscape:left-auto landscape:right-0 landscape:bottom-0 landscape:w-44 landscape:pt-3 landscape:pb-3 landscape:bg-black/50 landscape:backdrop-blur-2xl landscape:border-l landscape:border-white/20 landscape:overflow-y-auto">
-            {detectionFailed && !isProcessing && (
+          <div className="absolute bottom-0 left-0 right-0 z-10 pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-3 pointer-events-none bg-gradient-to-t from-black/85 via-black/60 to-transparent landscape:top-0 landscape:left-auto landscape:right-0 landscape:bottom-0 landscape:w-44 landscape:pt-3 landscape:pb-3 landscape:bg-black/50 landscape:backdrop-blur-2xl landscape:border-l landscape:border-white/20 landscape:overflow-y-auto">
+            <div className="pointer-events-auto">
+            {detectionFailed && !isProcessing && !manualEditActive && (
               <button
                 type="button"
                 onClick={handleEditManually}
@@ -2523,6 +2569,7 @@ export default function Home() {
                 <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Copy size={14} /> {text.copy}</button>
               </div>
             )}
+            </div>
           </div>
         </div>
       )}
