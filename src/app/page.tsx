@@ -477,7 +477,8 @@ const t = {
     processingSlow: '解析に時間がかかりすぎました。手動で位置を合わせて保存してください。',
     configIssue: '現在自動検出の設定に問題があります。手動で位置を合わせてください。',
     imageReadFailed: '画像の読み取りに失敗しました。撮り直すか、手動で位置を合わせてください。',
-    serverBusyRetry: 'サーバーが混み合っています。少し時間をおいて再試行してください。手動調整はそのまま利用できます。',
+    serverBusyRetry: 'サーバーが混み合っています。手動で位置を合わせてください。',
+    quotaManualHint: 'サーバーが混雑しています。再試行せず手動でロゴ位置を合わせてください。',
     dailyFreeLimitReached: '本日の無料枠を使い切りました。',
     freeQuotaLabel: '本日の無料解析',
     freeWatermarkNote: '無料版の保存画像には Carkus 透かしが入ります。',
@@ -566,7 +567,8 @@ const t = {
     processingSlow: 'Detection is taking too long. Please adjust manually and save.',
     configIssue: 'Auto-detection config issue detected. Please adjust manually.',
     imageReadFailed: 'Failed to read image. Retake or adjust manually.',
-    serverBusyRetry: 'Server is busy. Please retry in a moment. Manual adjustment is available.',
+    serverBusyRetry: 'Server is busy. Please adjust the logo position manually.',
+    quotaManualHint: 'The server is busy. Skip retry and place the logo manually.',
     dailyFreeLimitReached: 'You have used all free attempts for today.',
     freeQuotaLabel: 'Daily free detections',
     freeWatermarkNote: 'Saved images on Free plan include a Carkus watermark.',
@@ -875,13 +877,11 @@ export default function Home() {
     setDetectionReasoning(null);
   }, []);
 
-  const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, retryAfterSeconds?: number) => {
+  const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, _retryAfterSeconds?: number) => {
     switch (errorType) {
       case 'quota':
       case 'rate_limited':
-        return retryAfterSeconds
-          ? `${tx('serverBusyRetry')} (${retryAfterSeconds}s)`
-          : tx('serverBusyRetry');
+        return tx('quotaManualHint');
       case 'timeout':
         return tx('processingSlow');
       case 'config':
@@ -1198,64 +1198,37 @@ export default function Home() {
       const controller = new AbortController();
       activeDetectControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 25_000);
-      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       try {
         const deviceId = getDeviceId();
-        const maxRetryCount = 1;
-        let lastResponse: Response | null = null;
-        let lastResult: DetectApiResponse | null = null;
-
-        for (let attempt = 0; attempt <= maxRetryCount; attempt++) {
-          const useSmallImage = attempt > 0;
-          const res = await fetch('/api/detect', {
-            method: 'POST',
-            body: createFormData(useSmallImage),
-            signal: controller.signal,
-            headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
-          });
-          let result: DetectApiResponse = {};
-          try {
-            result = await res.json();
-          } catch (_) {
-            result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
-          }
-          lastResponse = res;
-          lastResult = result;
-          if (res.status !== 429 || attempt === maxRetryCount) break;
-
-          const retryAfterHeader = res.headers.get('retry-after');
-          const retryAfterFromHeader = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN;
-          const retryAfterFromBody = typeof result.retryAfterSeconds === 'number' ? result.retryAfterSeconds : NaN;
-          const serverSuggestedSeconds = Number.isFinite(retryAfterFromBody) ? retryAfterFromBody : Number.isFinite(retryAfterFromHeader) ? retryAfterFromHeader : 0;
-          const baseBackoffMs = 1500 * Math.pow(2, attempt);
-          const jitterMs = Math.floor(Math.random() * 700);
-          const backoffMs = Math.max(baseBackoffMs + jitterMs, serverSuggestedSeconds * 1000);
-          setRetryStatusText(
-            fillI18nTemplate(tx('serverRetrying'), {
-              sec: Math.ceil(backoffMs / 1000),
-              cur: attempt + 1,
-              max: maxRetryCount + 1,
-            })
-          );
-          await wait(backoffMs);
+        const res = await fetch('/api/detect', {
+          method: 'POST',
+          body: createFormData(false),
+          signal: controller.signal,
+          headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+        });
+        let result: DetectApiResponse = {};
+        try {
+          result = await res.json();
+        } catch (_) {
+          result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
         }
 
-        if (lastResponse && lastResult && isLatestRequest()) {
-          if (typeof lastResult.reasoning === 'string' && lastResult.reasoning.trim()) {
-            console.info('Plate detection reasoning:', lastResult.reasoning);
-            setDetectionReasoning(lastResult.reasoning.trim());
+        if (isLatestRequest()) {
+          if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
+            console.info('Plate detection reasoning:', result.reasoning);
+            setDetectionReasoning(result.reasoning.trim());
           } else {
             setDetectionReasoning(null);
           }
-          const remaining = lastResult.remainingToday;
+          const remaining = result.remainingToday;
           if (remaining !== undefined) setDailyRemaining(remaining);
-          if (!lastResponse.ok) {
-            const errPayload = lastResult.error;
-            const msg = typeof errPayload === 'string' ? errPayload : lastResult.userMessage || tx('autoDetectFailedManual');
-            setToastMessage(getMessageByErrorType(lastResult.errorType, msg, lastResult.retryAfterSeconds));
+          if (!res.ok) {
+            const errPayload = result.error;
+            const msg = typeof errPayload === 'string' ? errPayload : result.userMessage || tx('autoDetectFailedManual');
+            setToastMessage(getMessageByErrorType(result.errorType, msg, result.retryAfterSeconds));
             showManualHelpAfterFailure();
-          } else if (lastResult.found && lastResult.plates && Array.isArray(lastResult.plates) && lastResult.plates.length > 0) {
-            const platesCorners: Corners[] = lastResult.plates
+          } else if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
+            const platesCorners: Corners[] = result.plates
               .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
               .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
             if (platesCorners.length > 0) {
@@ -1265,27 +1238,27 @@ export default function Home() {
               setEditLogoScale(1);
               setEditLogoRotation(0);
               setDetectionFailed(false);
-              if (lastResult.inferred) setToastMessage(tx('aiInferenceDetected'));
+              if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
             } else {
               setToastMessage(tx('autoDetectFailedManual'));
               showManualHelpAfterFailure();
             }
-          } else if (lastResult.found && lastResult.corners && Array.isArray(lastResult.corners) && lastResult.corners.length === 4) {
-            const single = normalizeCornersOrder(apiCornersToClient({ corners: lastResult.corners }));
+          } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
+            const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
             setDetectedCorners([single]);
             setDetectedBaseAngles([getPlateBaseAngle(single)]);
             setEditLogoOffset({ x: 0, y: 0 });
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
-            if (lastResult.inferred) setToastMessage(tx('aiInferenceDetected'));
+            if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
             showManualHelpAfterFailure();
           }
-          if (lastResult.found && lastResult.plates && Array.isArray(lastResult.plates) && lastResult.plates.length > 0) {
-            const hasAnyValidPlate = lastResult.plates.some((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4);
+          if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
+            const hasAnyValidPlate = result.plates.some((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4);
             if (hasAnyValidPlate) incrementLocalDailyUsageOnSuccess();
           }
         }
@@ -1587,63 +1560,24 @@ export default function Home() {
         const controller = new AbortController();
         activeDetectControllerRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 25_000);
-        const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
         try {
           const deviceId = getDeviceId();
-          const maxRetryCount = 1; // 初回+1回
-          let lastResponse: Response | null = null;
-          let lastResult: DetectApiResponse | null = null;
+          const res = await fetch('/api/detect', {
+            method: 'POST',
+            body: createFormData(false),
+            signal: controller.signal,
+            headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+          });
 
-          for (let attempt = 0; attempt <= maxRetryCount; attempt++) {
-            const useSmallImage = attempt > 0; // 再試行は軽量画像で負荷を下げる
-            const res = await fetch('/api/detect', {
-              method: 'POST',
-              body: createFormData(useSmallImage),
-              signal: controller.signal,
-              headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
-            });
-
-            let result: DetectApiResponse = {};
-            try {
-              result = await res.json();
-            } catch (_) {
-              result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
-            }
-
-            lastResponse = res;
-            lastResult = result;
-
-            if (res.status !== 429 || attempt === maxRetryCount) {
-              break;
-            }
-
-            const retryAfterHeader = res.headers.get('retry-after');
-            const retryAfterFromHeader = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN;
-            const retryAfterFromBody = typeof result.retryAfterSeconds === 'number' ? result.retryAfterSeconds : NaN;
-            const serverSuggestedSeconds = Number.isFinite(retryAfterFromBody)
-              ? retryAfterFromBody
-              : Number.isFinite(retryAfterFromHeader)
-                ? retryAfterFromHeader
-                : 0;
-            const baseBackoffMs = 1500 * Math.pow(2, attempt);
-            const jitterMs = Math.floor(Math.random() * 700);
-            const backoffMs = Math.max(baseBackoffMs + jitterMs, serverSuggestedSeconds * 1000);
-            setRetryStatusText(
-              fillI18nTemplate(tx('serverRetrying'), {
-                sec: Math.ceil(backoffMs / 1000),
-                cur: attempt + 1,
-                max: maxRetryCount + 1,
-              })
-            );
-            await wait(backoffMs);
+          let result: DetectApiResponse = {};
+          try {
+            result = await res.json();
+          } catch (_) {
+            result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
           }
 
-          if (lastResponse && lastResult && isLatestRequest()) {
-            applyResult(lastResult, lastResponse);
-          } else if (!lastResponse) {
-            throw new Error('No response from detect-plate API');
-          } else {
-            return;
+          if (isLatestRequest()) {
+            applyResult(result, res);
           }
         } catch (fetchErr: unknown) {
           if (!isLatestRequest()) return;

@@ -4,7 +4,16 @@ import { trackUsageEvent } from '../../../lib/usage-metrics';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-const MODEL_NAMES = ['gemini-3.1-flash', 'gemini-2.5-flash', 'gemini-2.0-flash'] as const;
+// gemini-2.0-flash は 2026-06-01 提供終了。標準移行先は gemini-3.5-flash。
+// コスト重視: GEMINI_DETECT_MODEL=gemini-3.1-flash-lite
+const DEFAULT_DETECT_MODEL = 'gemini-3.5-flash';
+
+function getDetectModels(): string[] {
+  const primary = process.env.GEMINI_DETECT_MODEL?.trim() || DEFAULT_DETECT_MODEL;
+  const fallback = process.env.GEMINI_DETECT_MODEL_FALLBACK?.trim() || '';
+  if (fallback && fallback !== primary) return [primary, fallback];
+  return [primary];
+}
 
 // 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
 const RATE_LIMIT_PER_MINUTE = 5;
@@ -438,7 +447,10 @@ export async function POST(request: NextRequest) {
     let lastErrorMessage = '';
     let lastRawText = '';
 
-    for (const modelName of MODEL_NAMES) {
+    const modelNames = getDetectModels();
+    for (let modelIndex = 0; modelIndex < modelNames.length; modelIndex++) {
+      const modelName = modelNames[modelIndex];
+      const isLastModel = modelIndex === modelNames.length - 1;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 20_000);
       try {
@@ -455,7 +467,7 @@ export async function POST(request: NextRequest) {
           lastErrorBody = await res.text().catch(() => '');
           const errJson: any = (() => { try { return JSON.parse(lastErrorBody); } catch { return null; } })();
           lastErrorMessage = errJson?.error?.message ?? errJson?.error ?? lastErrorBody;
-          if (res.status === 404 || res.status === 400) {
+          if ((res.status === 404 || res.status === 400) && !isLastModel) {
             logStructured('warn', 'detect.model_try_next', {
               requestId,
               modelName,
@@ -501,13 +513,29 @@ export async function POST(request: NextRequest) {
           geminiJson = await res.json();
         } catch {
           logStructured('warn', 'detect.model_invalid_json', { requestId, modelName });
-          continue;
+          await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'invalid_response' });
+          return NextResponse.json({
+            found: false,
+            error: '座標の解析に失敗しました',
+            userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
+            errorType: 'invalid_response',
+            requestId,
+            remainingToday: getDailyRemaining(clientId),
+          }, { status: 500 });
         }
 
         const candidate = geminiJson.candidates?.[0];
         if (!candidate?.content) {
           logStructured('warn', 'detect.model_empty_content', { requestId, modelName });
-          continue;
+          await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'invalid_response' });
+          return NextResponse.json({
+            found: false,
+            error: '座標の解析に失敗しました',
+            userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
+            errorType: 'invalid_response',
+            requestId,
+            remainingToday: getDailyRemaining(clientId),
+          }, { status: 500 });
         }
 
         const content = candidate.content;
@@ -544,6 +572,16 @@ export async function POST(request: NextRequest) {
           modelName,
           rawSnippet: text.substring(0, 500),
         });
+        await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'invalid_response' });
+        return NextResponse.json({
+          found: false,
+          error: '座標の解析に失敗しました',
+          userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
+          errorType: 'invalid_response',
+          requestId,
+          remainingToday: getDailyRemaining(clientId),
+          rawResponse: text.substring(0, 500),
+        }, { status: 500 });
       } catch (fetchErr: unknown) {
         clearTimeout(timeoutId);
         if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
