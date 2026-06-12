@@ -203,26 +203,44 @@ function isRateLimited(clientId: string): boolean {
   return false;
 }
 
-const RESPONSE_SCHEMA = {
+const MAX_DETECT_PLATES = Math.min(
+  3,
+  Math.max(1, Number.parseInt(process.env.GEMINI_DETECT_MAX_PLATES ?? '3', 10) || 3)
+);
+
+const PLATE_CORNERS_SCHEMA = {
   type: 'object',
   properties: {
     points: {
       type: 'array',
-      description: 'single license plate corners',
+      description: 'four corners of one license plate',
       minItems: 4,
       maxItems: 4,
       items: {
         type: 'object',
         properties: {
-          x: { type: 'number', description: 'x' },
-          y: { type: 'number', description: 'y' },
+          x: { type: 'number' },
+          y: { type: 'number' },
         },
         required: ['x', 'y'],
       },
     },
-    reasoning: { type: 'string', description: 'why these points were inferred' },
   },
   required: ['points'],
+} as const;
+
+const RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    plates: {
+      type: 'array',
+      description: 'visible license plates, most prominent first',
+      minItems: 0,
+      maxItems: MAX_DETECT_PLATES,
+      items: PLATE_CORNERS_SCHEMA,
+    },
+  },
+  required: ['plates'],
 } as const;
 
 /** Gemini の返答テキストから JSON 文字列を抽出し、パースしやすく正規化する */
@@ -317,6 +335,15 @@ function clampToApiScale(value: unknown): number {
   return Math.max(0, Math.min(1000, rounded));
 }
 
+function plateEntryToCorners(entry: unknown): { x: number; y: number }[] | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const row = entry as { points?: unknown; corners?: unknown };
+  const raw = row.points ?? row.corners;
+  if (!Array.isArray(raw)) return null;
+  const corners = raw.filter(isValidCorner).slice(0, 4);
+  return corners.length === 4 ? corners : null;
+}
+
 /** parts と text から座標データを抽出。成功時は正規化済みオブジェクト、失敗時は null */
 function tryParsePlateResponse(parts: unknown[], text: string): Record<string, unknown> | null {
   for (const p of parts) {
@@ -324,9 +351,11 @@ function tryParsePlateResponse(parts: unknown[], text: string): Record<string, u
       const po = p as Record<string, unknown>;
       const struct = po.struct as Record<string, unknown> | undefined;
       const obj: Record<string, unknown> | null =
-        ('points' in po || ('found' in po && 'plates' in po))
+        'plates' in po || 'points' in po
           ? po
-          : (struct && typeof struct === 'object' && ('points' in struct || 'found' in struct) ? struct : null);
+          : struct && typeof struct === 'object' && ('plates' in struct || 'points' in struct)
+            ? struct
+            : null;
       if (obj) {
         try {
           return normalizeParsedResponse(obj as Record<string, unknown>);
@@ -352,45 +381,44 @@ function tryParsePlateResponse(parts: unknown[], text: string): Record<string, u
   return null;
 }
 
-/** パース結果をスキーマに合わせて正規化（plates が無くても corners があれば復元） */
+/** パース結果を正規化。plates[].points を corners に統一し、最大 MAX_DETECT_PLATES 件まで */
 function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string, unknown> {
-  const points = Array.isArray(parsed.points) ? (parsed.points as unknown[]).filter(isValidCorner).slice(0, 4) : [];
-  const result: Record<string, unknown> = {
-    found: points.length === 4 ? true : Boolean(parsed.found),
-    plates: Array.isArray(parsed.plates) ? parsed.plates : [],
+  const normalizedPlates: { found: true; corners: { x: number; y: number }[] }[] = [];
+
+  const pushCorners = (corners: { x: number; y: number }[]) => {
+    if (normalizedPlates.length >= MAX_DETECT_PLATES) return;
+    normalizedPlates.push({
+      found: true,
+      corners: corners.map((c) => ({
+        x: clampToApiScale(c.x),
+        y: clampToApiScale(c.y),
+      })),
+    });
   };
-  if (points.length === 4) {
-    result.plates = [{ found: true, corners: points }];
-  }
-  if (typeof parsed.reasoning === 'string') {
-    result.reasoning = parsed.reasoning.trim().slice(0, 1200);
-  }
-  const plates = result.plates as unknown[];
-  if (plates.length === 0 && parsed.corners && Array.isArray(parsed.corners)) {
-    const corners = (parsed.corners as unknown[]).filter(isValidCorner);
-    if (corners.length === 4) {
-      result.plates = [{ found: true, corners }];
-      result.found = true;
+
+  if (Array.isArray(parsed.plates)) {
+    for (const entry of parsed.plates) {
+      const corners = plateEntryToCorners(entry);
+      if (corners) pushCorners(corners);
     }
   }
-  const validPlates = (result.plates as unknown[]).filter(
-    (p: unknown) =>
-      p !== null &&
-      typeof p === 'object' &&
-      Array.isArray((p as { corners?: unknown }).corners) &&
-      ((p as { corners: unknown[] }).corners).filter(isValidCorner).length === 4
-  );
-  result.plates = validPlates.map((p: unknown) => ({
-    found: true,
-    corners: (p as { corners: unknown[] }).corners.filter(isValidCorner).slice(0, 4).map((c) => ({
-      x: clampToApiScale(c.x),
-      y: clampToApiScale(c.y),
-    })),
-  }));
-  if (validPlates.length === 0) result.found = false;
-  // AI 推論結果をクライアントで明示できるようにフラグ化
-  result.inferred = Boolean(result.found);
-  return result;
+
+  if (normalizedPlates.length === 0 && Array.isArray(parsed.points)) {
+    const corners = (parsed.points as unknown[]).filter(isValidCorner).slice(0, 4);
+    if (corners.length === 4) pushCorners(corners);
+  }
+
+  if (normalizedPlates.length === 0 && Array.isArray(parsed.corners)) {
+    const corners = (parsed.corners as unknown[]).filter(isValidCorner).slice(0, 4);
+    if (corners.length === 4) pushCorners(corners);
+  }
+
+  const found = normalizedPlates.length > 0;
+  return {
+    found,
+    plates: normalizedPlates,
+    inferred: found,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -479,14 +507,10 @@ export async function POST(request: NextRequest) {
     });
 
     const prompt = [
-      'You are an expert in image analysis for vehicle license plates.',
-      'Task: detect the four corners of each visible license plate.',
-      'If corners are partially occluded (grass, shadow, poles, dirt) or outside image bounds, logically infer and complete the true geometric rectangle that the plate should have.',
-      'Output coordinates on an integer [0..1000] scale where (0,0)=top-left and (1000,1000)=bottom-right.',
-      'Corner order must be Top-Left, Top-Right, Bottom-Right, Bottom-Left.',
-      'Return ONLY valid JSON in this exact shape:',
-      '{"points":[{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0},{"x":0,"y":0}],"reasoning":"short reason"}',
-      'No markdown, no extra keys, no explanations outside JSON.',
+      'Detect visible vehicle license plates.',
+      `Return JSON only: {"plates":[{"points":[{x,y}×4]}]}. Up to ${MAX_DETECT_PLATES} plates.`,
+      'Grid 0-1000 integers, (0,0)=top-left. Corner order: TL, TR, BR, BL.',
+      'Skip plates that are not clearly visible. No other keys.',
     ].join(' ');
 
     const urlTemplate = (model: string) =>
@@ -502,10 +526,9 @@ export async function POST(request: NextRequest) {
       ],
       generationConfig: {
         temperature: 0,
-        maxOutputTokens: 512,
+        maxOutputTokens: 256,
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA,
-        // 4点座標だけ欲しいので thinking を切り、JSON 出力枠を確保
         thinkingConfig: { thinkingBudget: 0 },
       },
       safetySettings: [
