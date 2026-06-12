@@ -4,9 +4,10 @@ import { trackUsageEvent } from '../../../lib/usage-metrics';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // Vercel 等のサーバー実行時間を最大60秒に延長
 
-// gemini-2.0-flash は 2026-06-01 提供終了。標準移行先は gemini-3.5-flash。
-// コスト重視: GEMINI_DETECT_MODEL=gemini-3.1-flash-lite
-const DEFAULT_DETECT_MODEL = 'gemini-3.5-flash';
+// gemini-2.0-flash は 2026-06-01 提供終了。
+// 座標検出は gemini-2.5-flash（画像+structured output 実績あり）。上書き: GEMINI_DETECT_MODEL
+// コスト重視: gemini-3.1-flash-lite / 高精度: gemini-3.5-flash
+const DEFAULT_DETECT_MODEL = 'gemini-2.5-flash';
 
 function getDetectModels(): string[] {
   const primary = process.env.GEMINI_DETECT_MODEL?.trim() || DEFAULT_DETECT_MODEL;
@@ -426,11 +427,11 @@ export async function POST(request: NextRequest) {
       ],
       generationConfig: {
         temperature: 0,
-        topP: 0.1,
-        topK: 1,
         maxOutputTokens: 512,
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA,
+        // 4点座標だけ欲しいので thinking を切り、JSON 出力枠を確保
+        thinkingConfig: { thinkingBudget: 0 },
       },
       safetySettings: [
         // BLOCK_NONE でナンバープレート画像が個人情報としてブロックされないようにする
