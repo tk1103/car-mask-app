@@ -58,6 +58,81 @@ function logStructured(level: 'info' | 'warn' | 'error', event: string, payload:
   console.log(body);
 }
 
+/** gemini-2.5-flash 有料単価（USD / 1M tokens）。試算用。 */
+const GEMINI_25_FLASH_INPUT_USD_PER_M = 0.30;
+const GEMINI_25_FLASH_OUTPUT_USD_PER_M = 2.50;
+
+type GeminiUsageLog = {
+  promptTokenCount: number | null;
+  candidatesTokenCount: number | null;
+  thoughtsTokenCount: number | null;
+  totalTokenCount: number | null;
+  imageTokenCount: number | null;
+  textPromptTokenCount: number | null;
+  estimatedCostUsd: number | null;
+};
+
+function parseGeminiUsage(usageMetadata: unknown): GeminiUsageLog | null {
+  if (!usageMetadata || typeof usageMetadata !== 'object') return null;
+  const u = usageMetadata as Record<string, unknown>;
+  const promptTokenCount = typeof u.promptTokenCount === 'number' ? u.promptTokenCount : null;
+  const candidatesTokenCount = typeof u.candidatesTokenCount === 'number' ? u.candidatesTokenCount : null;
+  const thoughtsTokenCount = typeof u.thoughtsTokenCount === 'number' ? u.thoughtsTokenCount : null;
+  const totalTokenCount = typeof u.totalTokenCount === 'number' ? u.totalTokenCount : null;
+
+  let imageTokenCount: number | null = null;
+  let textPromptTokenCount: number | null = null;
+  if (Array.isArray(u.promptTokensDetails)) {
+    for (const detail of u.promptTokensDetails) {
+      if (!detail || typeof detail !== 'object') continue;
+      const row = detail as { modality?: unknown; tokenCount?: unknown };
+      const count = typeof row.tokenCount === 'number' ? row.tokenCount : 0;
+      const modality = String(row.modality ?? '').toUpperCase();
+      if (modality === 'IMAGE') imageTokenCount = (imageTokenCount ?? 0) + count;
+      else if (modality === 'TEXT') textPromptTokenCount = (textPromptTokenCount ?? 0) + count;
+    }
+  }
+
+  const inputTokens = promptTokenCount ?? 0;
+  const outputTokens = (candidatesTokenCount ?? 0) + (thoughtsTokenCount ?? 0);
+  const estimatedCostUsd =
+    promptTokenCount != null || candidatesTokenCount != null || thoughtsTokenCount != null
+      ? (inputTokens * GEMINI_25_FLASH_INPUT_USD_PER_M + outputTokens * GEMINI_25_FLASH_OUTPUT_USD_PER_M) /
+        1_000_000
+      : null;
+
+  return {
+    promptTokenCount,
+    candidatesTokenCount,
+    thoughtsTokenCount,
+    totalTokenCount,
+    imageTokenCount,
+    textPromptTokenCount,
+    estimatedCostUsd: estimatedCostUsd != null ? Math.round(estimatedCostUsd * 1e8) / 1e8 : null,
+  };
+}
+
+function logGeminiUsage(
+  requestId: string,
+  modelName: string,
+  usageMetadata: unknown,
+  extra: Record<string, unknown> = {}
+) {
+  const usage = parseGeminiUsage(usageMetadata);
+  if (!usage) {
+    logStructured('warn', 'detect.gemini_usage_missing', { requestId, modelName, ...extra });
+    return null;
+  }
+  logStructured('info', 'detect.gemini_usage', {
+    requestId,
+    modelName,
+    pricingModel: 'gemini-2.5-flash',
+    ...usage,
+    ...extra,
+  });
+  return usage;
+}
+
 /** デバイスID（UUID または d- プレフィックスならデバイス単位で制限）。無効な場合はIPで識別（レート制限用） */
 function getClientId(request: NextRequest): string {
   const deviceId = request.headers.get('x-device-id')?.trim();
@@ -526,6 +601,13 @@ export async function POST(request: NextRequest) {
         }
 
         const candidate = geminiJson.candidates?.[0];
+        const finishReason = candidate?.finishReason ?? null;
+        logGeminiUsage(requestId, modelName, geminiJson.usageMetadata, {
+          imageWidth,
+          imageHeight,
+          finishReason,
+        });
+
         if (!candidate?.content) {
           logStructured('warn', 'detect.model_empty_content', { requestId, modelName });
           await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'invalid_response' });
@@ -563,6 +645,7 @@ export async function POST(request: NextRequest) {
             found: Boolean(parsed.found),
             platesCount: (parsed.plates as unknown[])?.length || 0,
             elapsedMs: Date.now() - startTime,
+            ...(parseGeminiUsage(geminiJson.usageMetadata) ?? {}),
           });
           return NextResponse.json(parsed);
         }
