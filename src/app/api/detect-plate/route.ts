@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  getDetectRemainingToday,
+  incrementDetectSuccess,
+  isValidDeviceId,
+  resolvePlanContext,
+} from '../../../lib/plan';
 import { trackUsageEvent } from '../../../lib/usage-metrics';
 
 export const runtime = 'nodejs';
@@ -16,18 +22,12 @@ function getDetectModels(): string[] {
   return [primary];
 }
 
-// 簡易レート制限: headers から IP を取得し、同一IPは1分間に5回まで
-const RATE_LIMIT_PER_MINUTE = 5;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-
-// 1日あたりの利用回数の「目安値」。バックエンドではこの値でハード制限は行わず、UI 向けの参考情報としてのみ利用する。
-const DAILY_LIMIT_PER_CLIENT = 20;
-
 const rateLimitStore = new Map<string, number[]>();
-const dailyLimitStore = new Map<string, { count: number; date: string }>();
 
 type DetectErrorType =
   | 'rate_limited'
+  | 'daily_limit'
   | 'bad_request'
   | 'config'
   | 'quota'
@@ -164,40 +164,17 @@ function getDeviceType(request: NextRequest): 'mobile' | 'tablet' | 'desktop' | 
   return 'desktop';
 }
 
-/** 日次利用回数の制限は「デバイスID がある場合のみ」適用（IP 共有による誤検知を避ける）。
- *  現状は UI 用の残数表示のみに利用し、サーバー側でブロックはしない。 */
-function getQuotaId(request: NextRequest): string | null {
-  const deviceId = request.headers.get('x-device-id')?.trim();
-  if (deviceId && ( /^[0-9a-f-]{36}$/i.test(deviceId) || /^d-\d+-[a-z0-9]+$/i.test(deviceId) )) {
-    return `device:${deviceId}`;
-  }
-  return null;
+function getDeviceIdFromRequest(request: NextRequest): string {
+  const deviceId = request.headers.get('x-device-id')?.trim() || '';
+  return deviceId && isValidDeviceId(deviceId) ? deviceId : '';
 }
 
-/** 1日の境界を JST（UTC+9）で計算。日本時間の 0:00 でリセットされる */
-function getTodayDateString(): string {
-  const now = new Date();
-  const jstMs = now.getTime() + 9 * 60 * 60 * 1000;
-  const jstDate = new Date(jstMs);
-  const y = jstDate.getUTCFullYear();
-  const m = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(jstDate.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function getDailyRemaining(clientId: string): number {
-  const today = getTodayDateString();
-  const entry = dailyLimitStore.get(clientId);
-  if (!entry || entry.date !== today) return DAILY_LIMIT_PER_CLIENT;
-  return Math.max(0, DAILY_LIMIT_PER_CLIENT - entry.count);
-}
-
-function isRateLimited(clientId: string): boolean {
+function isRateLimited(clientId: string, maxPerMinute: number): boolean {
   const now = Date.now();
   const cutoff = now - RATE_LIMIT_WINDOW_MS;
   let timestamps = rateLimitStore.get(clientId) ?? [];
   timestamps = timestamps.filter((t) => t > cutoff);
-  if (timestamps.length >= RATE_LIMIT_PER_MINUTE) return true;
+  if (timestamps.length >= maxPerMinute) return true;
   timestamps.push(now);
   rateLimitStore.set(clientId, timestamps);
   return false;
@@ -422,44 +399,68 @@ function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string
 }
 
 export async function GET(request: NextRequest) {
-  const quotaId = getQuotaId(request);
-  if (!quotaId) {
-    // デバイスIDが無い場合は「残り回数不明」として扱い、フロント側で 20回 を表示させる
+  const deviceId = getDeviceIdFromRequest(request);
+  if (!deviceId) {
     return NextResponse.json({ remainingToday: null });
   }
-  // 日次カウンタは UI 表示用のみ。実際のブロックは行わない。
-  return NextResponse.json({ remainingToday: getDailyRemaining(quotaId) });
+  const planCtx = await resolvePlanContext(deviceId);
+  const remainingToday = await getDetectRemainingToday(deviceId, planCtx);
+  return NextResponse.json({
+    remainingToday,
+    plan: planCtx.plan,
+    dailyDetectLimit: planCtx.features.dailyDetectLimit,
+  });
 }
 
 export async function POST(request: NextRequest) {
   try {
     const requestId = createRequestId();
     const clientId = getClientId(request);
-    const quotaId = getQuotaId(request);
+    const deviceId = getDeviceIdFromRequest(request);
+    const planCtx = await resolvePlanContext(deviceId);
+    let remainingToday = await getDetectRemainingToday(deviceId, planCtx);
+    const rateLimitPerMinute = planCtx.features.rateLimitPerMinute;
     const usageMeta = {
       country: getCountryCode(request),
       deviceType: getDeviceType(request),
+      plan: planCtx.plan,
     };
     await trackUsageEvent(clientId, 'detect_attempt', undefined, usageMeta);
 
-    if (isRateLimited(clientId)) {
-      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'rate_limited' });
+    if (deviceId && planCtx.plan === 'free' && remainingToday !== null && remainingToday <= 0) {
+      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'daily_limit' });
       return NextResponse.json(
         {
           found: false,
-          error: 'リクエストが多すぎます',
-          userMessage: 'しばらく待ってからもう一度お試しください。（1分間に5回まで）',
-          errorType: 'rate_limited' as DetectErrorType,
-          retryAfterSeconds: 60,
+          error: '本日の無料自動検出枠を使い切りました',
+          userMessage: '本日の無料自動検出枠を使い切りました。手動で枠を調整してください。',
+          errorType: 'daily_limit' as DetectErrorType,
           requestId,
           status: 429,
-          remainingToday: getDailyRemaining(clientId),
+          remainingToday: 0,
+          plan: planCtx.plan,
         },
         { status: 429 }
       );
     }
 
-    // NOTE: quotaId に対する日次カウントは現在 UI 用にのみ利用し、ここではインクリメントしない。
+    if (isRateLimited(clientId, rateLimitPerMinute)) {
+      await trackUsageEvent(clientId, 'detect_failure', undefined, { ...usageMeta, errorType: 'rate_limited' });
+      return NextResponse.json(
+        {
+          found: false,
+          error: 'リクエストが多すぎます',
+          userMessage: `しばらく待ってからもう一度お試しください。（1分間に${rateLimitPerMinute}回まで）`,
+          errorType: 'rate_limited' as DetectErrorType,
+          retryAfterSeconds: 60,
+          requestId,
+          status: 429,
+          remainingToday,
+          plan: planCtx.plan,
+        },
+        { status: 429 }
+      );
+    }
 
     const requestStart = Date.now();
     const formData = await request.formData();
@@ -472,7 +473,8 @@ export async function POST(request: NextRequest) {
       sizeBytes: imageFile?.size || 0,
       imageWidth,
       imageHeight,
-      hasQuotaId: Boolean(quotaId),
+      hasDeviceId: Boolean(deviceId),
+      plan: planCtx.plan,
     });
 
     if (!imageFile) {
@@ -601,7 +603,8 @@ export async function POST(request: NextRequest) {
               errorType,
               retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined,
               requestId,
-              remainingToday: getDailyRemaining(clientId),
+              remainingToday,
+          plan: planCtx.plan,
             },
             { status: res.status === 429 ? 429 : 500 }
           );
@@ -619,7 +622,8 @@ export async function POST(request: NextRequest) {
             userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
             errorType: 'invalid_response',
             requestId,
-            remainingToday: getDailyRemaining(clientId),
+            remainingToday,
+          plan: planCtx.plan,
           }, { status: 500 });
         }
 
@@ -640,7 +644,8 @@ export async function POST(request: NextRequest) {
             userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
             errorType: 'invalid_response',
             requestId,
-            remainingToday: getDailyRemaining(clientId),
+            remainingToday,
+          plan: planCtx.plan,
           }, { status: 500 });
         }
 
@@ -659,8 +664,11 @@ export async function POST(request: NextRequest) {
 
         const parsed = tryParsePlateResponse(parts, text);
         if (parsed) {
-          (parsed as { remainingToday?: number }).remainingToday = getDailyRemaining(clientId);
+          await incrementDetectSuccess(deviceId, planCtx);
+          remainingToday = await getDetectRemainingToday(deviceId, planCtx);
+          (parsed as { remainingToday?: number | null }).remainingToday = remainingToday;
           (parsed as { requestId?: string }).requestId = requestId;
+          (parsed as { plan?: string }).plan = planCtx.plan;
           await trackUsageEvent(clientId, 'detect_success', undefined, usageMeta);
           logStructured('info', 'detect.success', {
             requestId,
@@ -686,7 +694,8 @@ export async function POST(request: NextRequest) {
           userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
           errorType: 'invalid_response',
           requestId,
-          remainingToday: getDailyRemaining(clientId),
+          remainingToday,
+          plan: planCtx.plan,
           rawResponse: text.substring(0, 500),
         }, { status: 500 });
       } catch (fetchErr: unknown) {
@@ -706,7 +715,8 @@ export async function POST(request: NextRequest) {
               errorType: 'timeout',
               requestId,
               status: 504,
-              remainingToday: getDailyRemaining(clientId),
+              remainingToday,
+          plan: planCtx.plan,
             },
             { status: 504 }
           );
@@ -724,7 +734,8 @@ export async function POST(request: NextRequest) {
             userMessage: '通信エラーです。位置を手動で調整してください。',
             errorType: 'network',
             requestId,
-            remainingToday: getDailyRemaining(clientId),
+            remainingToday,
+          plan: planCtx.plan,
           },
           { status: 500 }
         );
@@ -740,7 +751,8 @@ export async function POST(request: NextRequest) {
         userMessage: 'APIキーまたはモデル設定を確認してください。位置を手動で調整できます。',
         errorType: 'config',
         requestId,
-        remainingToday: getDailyRemaining(clientId),
+        remainingToday,
+          plan: planCtx.plan,
       }, { status: 500 });
     }
     logStructured('error', 'detect.invalid_response_all_models_failed', {
@@ -755,7 +767,8 @@ export async function POST(request: NextRequest) {
       userMessage: '座標の解析に失敗しました。位置を手動で調整してください。',
       errorType: 'invalid_response',
       requestId,
-      remainingToday: getDailyRemaining(clientId),
+      remainingToday,
+          plan: planCtx.plan,
       rawResponse: (lastRawText || '').substring(0, 500),
     }, { status: 500 });
   } catch (error) {

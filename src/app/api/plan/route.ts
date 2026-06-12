@@ -1,37 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  getDetectRemainingToday,
+  getPlanLimitsForDocs,
+  isBillingEnabled,
+  isValidDeviceId,
+  resolvePlanContext,
+} from '../../../lib/plan';
 
 export const runtime = 'nodejs';
-
-type Plan = 'free' | 'pro';
-
-function normalizePlan(value?: string | null): Plan {
-  return value?.toLowerCase() === 'pro' ? 'pro' : 'free';
-}
-
-function resolvePlan(deviceId: string): Plan {
-  const forcedPlan = normalizePlan(process.env.FORCE_PLAN);
-  if (process.env.FORCE_PLAN) return forcedPlan;
-
-  const defaultPlan = normalizePlan(process.env.DEFAULT_PLAN);
-  const rawProDeviceIds = process.env.PRO_DEVICE_IDS || '';
-  const proDeviceIds = new Set(
-    rawProDeviceIds
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean)
-  );
-  if (deviceId && proDeviceIds.has(deviceId)) return 'pro';
-  return defaultPlan;
-}
 
 export async function GET(request: NextRequest) {
   const deviceId =
     request.headers.get('x-device-id')?.trim() ||
     request.nextUrl.searchParams.get('deviceId')?.trim() ||
     '';
-  const plan = resolvePlan(deviceId);
+
+  const ctx = await resolvePlanContext(deviceId);
+  const remainingDetectionsToday = await getDetectRemainingToday(deviceId, ctx);
+
   return NextResponse.json({
-    plan,
-    planSource: process.env.FORCE_PLAN ? 'force' : deviceId ? 'device' : 'default',
+    plan: ctx.plan,
+    planSource: ctx.source,
+    features: ctx.features,
+    remainingDetectionsToday,
+    limits: getPlanLimitsForDocs(),
+    hasValidDeviceId: Boolean(deviceId && isValidDeviceId(deviceId)),
+    billingEnabled: isBillingEnabled(),
   });
 }

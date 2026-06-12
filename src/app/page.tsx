@@ -58,7 +58,22 @@ type DetectErrorType =
   | 'timeout'
   | 'network'
   | 'invalid_response'
+  | 'daily_limit'
   | 'unknown';
+
+type PlanFeatures = {
+  customLogo: boolean;
+  watermarkOnExport: boolean;
+  dailyDetectLimit: number;
+  rateLimitPerMinute: number;
+};
+
+const DEFAULT_PLAN_FEATURES: PlanFeatures = {
+  customLogo: false,
+  watermarkOnExport: true,
+  dailyDetectLimit: 3,
+  rateLimitPerMinute: 5,
+};
 
 type DetectApiResponse = {
   found?: boolean;
@@ -405,11 +420,7 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 }
 
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
-const API_DAILY_LIMIT = 20; // UI 上の目安値（Gemini 側の実際の上限とは異なる場合があります）
-const LOCAL_DAILY_FREE_LIMIT = 1;
-const LOCAL_DAILY_SUCCESS_KEY = 'carkus_daily_success_usage';
 const CUSTOM_LOGO_STORAGE_KEY = 'carkus_custom_logo_data_url';
-const FREE_DAILY_LIMIT_DISABLED = true; // 検証期間は無料版の日次回数制限を解除
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
 const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
 const LOGO_SCALE_MIN = 0.12;
@@ -457,7 +468,7 @@ const t = {
     addHome: 'ホーム画面に追加',
     addHomeChrome: 'ホーム画面に追加（Chrome）',
     cameraLaunchHint: 'カメラを起動して撮影してください',
-    dailyNote: 'このアプリの目安は 1日あたり1〜2枚です（Google Gemini API 側の利用制限により前後します）。',
+    dailyNote: 'β版: AI 自動検出は 1日3回までです。枠を使い切っても手動編集・保存はできます。',
     autoDetectFailedManual: '自動検出に失敗しました。手動で位置を合わせてください。',
     timeoutManual: '解析がタイムアウトしました。位置を手動で調整してください。',
     imageFileOnly: '画像ファイルを選択してください。',
@@ -473,10 +484,9 @@ const t = {
     imageReadFailed: '画像の読み取りに失敗しました。撮り直すか、手動で位置を合わせてください。',
     serverBusyRetry: 'サーバーが混み合っています。手動で位置を合わせてください。',
     quotaManualHint: 'サーバーが混雑しています。再試行せず手動でロゴ位置を合わせてください。',
-    dailyFreeLimitReached: '本日の無料枠を使い切りました。',
-    freeQuotaLabel: '本日の無料解析',
+    dailyFreeLimitManualOnly: '本日の自動検出枠を使い切りました。手動で枠を調整してください。',
+    freeQuotaLabel: '本日の無料自動検出',
     freeWatermarkNote: '無料版の保存画像には Carkus 透かしが入ります。',
-    freeQuotaUnlimitedTesting: '検証モード: 無料版の日次回数制限を一時的に解除中です。',
     plan: 'プラン',
     free: '無料版',
     pro: '課金版',
@@ -486,6 +496,7 @@ const t = {
     resetLogo: '標準ロゴに戻す',
     resetLogoSuccess: '標準ロゴに戻しました。',
     proOnlyLogo: '独自ロゴは課金版で利用できます。',
+    betaCustomLogoUnavailable: 'β版では独自ロゴは利用できません。',
     logoUploadSuccess: '独自ロゴを適用しました。',
     logoUploadFailed: '独自ロゴの読み込みに失敗しました。',
     logoTypeError: 'PNG または SVG を選択してください。',
@@ -498,11 +509,15 @@ const t = {
     upsellBody: '無料版ではこの機能は利用できません。課金版で以下が解放されます。',
     upsellLocked1: '独自ロゴのアップロード（PNG / SVG）',
     upsellLocked2: '保存画像から透かしを削除',
-    upsellLocked3: '日次制限の対象外',
+    upsellLocked3: 'AI 自動検出の 1日制限なし',
     upgradeNow: 'アップグレード',
     maybeLater: 'あとで',
     upgradeLinkMissing: 'アップグレード導線は準備中です。',
     termsOfService: '利用規約',
+    privacyPolicy: 'プライバシーポリシー',
+    pressKit: 'プレスキット',
+    tagline: '車の写真のナンバーを、ロゴでマスク',
+    heroDescription: 'スマホのブラウザだけで、撮影→AI検出→手動調整→保存まで。SNS用の愛車写真に。',
   },
   en: {
     beta: 'BETA',
@@ -539,7 +554,7 @@ const t = {
     addHome: 'Add to Home Screen',
     addHomeChrome: 'Add to Home Screen (Chrome)',
     cameraLaunchHint: 'Open camera and take a photo',
-    dailyNote: 'This app is expected to support about 1-2 photos per day (actual limits may vary by Google Gemini API quota).',
+    dailyNote: 'Beta: 3 AI auto-detections per day. Manual edit and save still work after the limit.',
     autoDetectFailedManual: 'Auto-detection failed. Please adjust position manually.',
     timeoutManual: 'Detection timed out. Please adjust position manually.',
     imageFileOnly: 'Please select an image file.',
@@ -555,10 +570,9 @@ const t = {
     imageReadFailed: 'Failed to read image. Retake or adjust manually.',
     serverBusyRetry: 'Server is busy. Please adjust the logo position manually.',
     quotaManualHint: 'The server is busy. Skip retry and place the logo manually.',
-    dailyFreeLimitReached: 'You have used all free attempts for today.',
-    freeQuotaLabel: 'Daily free detections',
+    dailyFreeLimitManualOnly: 'Daily auto-detect limit reached. Adjust the frame manually.',
+    freeQuotaLabel: 'Daily free auto-detections',
     freeWatermarkNote: 'Saved images on Free plan include a Carkus watermark.',
-    freeQuotaUnlimitedTesting: 'Testing mode: Daily free limit is temporarily disabled.',
     plan: 'Plan',
     free: 'Free',
     pro: 'Pro',
@@ -568,6 +582,7 @@ const t = {
     resetLogo: 'Reset to default',
     resetLogoSuccess: 'Reset to default logo.',
     proOnlyLogo: 'Custom logo is available on Pro plan.',
+    betaCustomLogoUnavailable: 'Custom logo is not available in the beta.',
     logoUploadSuccess: 'Custom logo applied.',
     logoUploadFailed: 'Failed to load custom logo.',
     logoTypeError: 'Please select PNG or SVG.',
@@ -580,26 +595,20 @@ const t = {
     upsellBody: 'This feature is not available on Free. Pro unlocks:',
     upsellLocked1: 'Custom logo upload (PNG / SVG)',
     upsellLocked2: 'No watermark on saved images',
-    upsellLocked3: 'No daily free-limit restriction',
+    upsellLocked3: 'Unlimited AI auto-detections',
     upgradeNow: 'Upgrade',
     maybeLater: 'Maybe later',
     upgradeLinkMissing: 'Upgrade link is not configured yet.',
     termsOfService: 'Terms of Service',
+    privacyPolicy: 'Privacy Policy',
+    pressKit: 'Press Kit',
+    tagline: 'Mask license plates on car photos with a logo',
+    heroDescription: 'Shoot, auto-detect, adjust manually, and save—all in your mobile browser.',
   },
 } as const;
 
 function fillI18nTemplate(template: string, vars: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : ''));
-}
-
-function getJstDateString(): string {
-  const now = new Date();
-  const jstMs = now.getTime() + 9 * 60 * 60 * 1000;
-  const jstDate = new Date(jstMs);
-  const y = jstDate.getUTCFullYear();
-  const m = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(jstDate.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
 
 export default function Home() {
@@ -626,8 +635,8 @@ export default function Home() {
   const [manualEditActive, setManualEditActive] = useState(false);
   const [retryStatusText, setRetryStatusText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
-  const [localDailySuccessCount, setLocalDailySuccessCount] = useState(0);
+  const [dailyRemaining, setDailyRemaining] = useState<number | null>(null);
+  const [planFeatures, setPlanFeatures] = useState<PlanFeatures>(DEFAULT_PLAN_FEATURES);
   const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
   const [customLogoSrc, setCustomLogoSrc] = useState<string | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -638,6 +647,7 @@ export default function Home() {
   const [showUpsell, setShowUpsell] = useState(false);
   const [plan, setPlan] = useState<Plan>('free');
   const [planResolved, setPlanResolved] = useState(false);
+  const [billingEnabled, setBillingEnabled] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const photoPickerRef = useRef<HTMLInputElement>(null);
   const customLogoPickerRef = useRef<HTMLInputElement>(null);
@@ -671,49 +681,19 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
-  const loadLocalDailyUsage = useCallback(() => {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      setLocalDailySuccessCount(0);
-      return { date: getJstDateString(), count: 0 };
-    }
-    const today = getJstDateString();
-    try {
-      const raw = window.localStorage.getItem(LOCAL_DAILY_SUCCESS_KEY);
-      if (!raw) {
-        setLocalDailySuccessCount(0);
-        return { date: today, count: 0 };
-      }
-      const parsed = JSON.parse(raw) as { date?: string; count?: number };
-      const count = parsed.date === today ? Math.max(0, Number(parsed.count || 0)) : 0;
-      setLocalDailySuccessCount(count);
-      if (parsed.date !== today) {
-        window.localStorage.setItem(LOCAL_DAILY_SUCCESS_KEY, JSON.stringify({ date: today, count: 0 }));
-      }
-      return { date: today, count };
-    } catch (_) {
-      setLocalDailySuccessCount(0);
-      return { date: today, count: 0 };
-    }
-  }, []);
-
-  const hasLocalDailyQuota = useCallback(() => {
+  const hasAutoDetectQuota = useCallback(() => {
     if (!isFreePlan) return true;
-    if (FREE_DAILY_LIMIT_DISABLED) return true;
-    const usage = loadLocalDailyUsage();
-    return usage.count < LOCAL_DAILY_FREE_LIMIT;
-  }, [isFreePlan, loadLocalDailyUsage]);
+    if (dailyRemaining === null) return true;
+    return dailyRemaining > 0;
+  }, [isFreePlan, dailyRemaining]);
 
-  const incrementLocalDailyUsageOnSuccess = useCallback(() => {
-    if (!isFreePlan) return;
+  const clearStoredCustomLogo = useCallback(() => {
     if (typeof window === 'undefined' || !window.localStorage) return;
-    const today = getJstDateString();
-    const usage = loadLocalDailyUsage();
-    const nextCount = Math.min(LOCAL_DAILY_FREE_LIMIT, usage.count + 1);
     try {
-      window.localStorage.setItem(LOCAL_DAILY_SUCCESS_KEY, JSON.stringify({ date: today, count: nextCount }));
+      window.localStorage.removeItem(CUSTOM_LOGO_STORAGE_KEY);
     } catch (_) {}
-    setLocalDailySuccessCount(nextCount);
-  }, [isFreePlan, loadLocalDailyUsage]);
+    setCustomLogoSrc(null);
+  }, []);
 
   const createTrackedObjectUrl = useCallback((blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -736,12 +716,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (!planResolved || !billingEnabled || plan !== 'pro' || typeof window === 'undefined' || !window.localStorage) return;
     try {
       const saved = window.localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY);
       if (saved) setCustomLogoSrc(saved);
     } catch (_) {}
-  }, []);
+  }, [billingEnabled, plan, planResolved]);
 
   useEffect(() => {
     const img = new Image();
@@ -779,15 +759,31 @@ export default function Home() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      if (data?.plan === 'pro' || data?.plan === 'free') {
+      setBillingEnabled(Boolean(data?.billingEnabled));
+      if (!data?.billingEnabled) {
+        setPlan('free');
+        clearStoredCustomLogo();
+      } else if (data?.plan === 'pro' || data?.plan === 'free') {
         setPlan(data.plan);
+        if (data.plan === 'free') clearStoredCustomLogo();
+      }
+      if (data?.features && typeof data.features === 'object') {
+        setPlanFeatures({
+          customLogo: Boolean(data.features.customLogo),
+          watermarkOnExport: Boolean(data.features.watermarkOnExport),
+          dailyDetectLimit: Number(data.features.dailyDetectLimit) || DEFAULT_PLAN_FEATURES.dailyDetectLimit,
+          rateLimitPerMinute: Number(data.features.rateLimitPerMinute) || DEFAULT_PLAN_FEATURES.rateLimitPerMinute,
+        });
+      }
+      if (data?.remainingDetectionsToday === null || typeof data?.remainingDetectionsToday === 'number') {
+        setDailyRemaining(data.remainingDetectionsToday);
       }
     } catch (_) {
       // フェイルセーフ: free のまま継続
     } finally {
       setPlanResolved(true);
     }
-  }, []);
+  }, [clearStoredCustomLogo]);
 
   useEffect(() => {
     fetchPlan();
@@ -807,10 +803,6 @@ export default function Home() {
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
   }, []);
-
-  useEffect(() => {
-    loadLocalDailyUsage();
-  }, [loadLocalDailyUsage]);
 
   /** 画面表示用に残り回数を取得（APIは消費しない） */
   const fetchRemainingQuota = useCallback(async () => {
@@ -880,6 +872,8 @@ export default function Home() {
 
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, _retryAfterSeconds?: number) => {
     switch (errorType) {
+      case 'daily_limit':
+        return tx('dailyFreeLimitManualOnly');
       case 'quota':
       case 'rate_limited':
         return tx('quotaManualHint');
@@ -999,6 +993,10 @@ export default function Home() {
 
   const handlePickCustomLogo = useCallback(() => {
     if (isFreePlan) {
+      if (!billingEnabled) {
+        setToastMessage(tx('betaCustomLogoUnavailable'));
+        return;
+      }
       trackPlanEvent('feature_blocked_by_plan');
       setShowUpsell(true);
       return;
@@ -1006,7 +1004,7 @@ export default function Home() {
     const accepted = typeof window !== 'undefined' ? window.confirm(tx('logoCopyrightConfirm')) : true;
     if (!accepted) return;
     customLogoPickerRef.current?.click();
-  }, [isFreePlan, tx, trackPlanEvent]);
+  }, [billingEnabled, isFreePlan, tx, trackPlanEvent]);
 
   const handleUpgradeClick = useCallback(() => {
     trackPlanEvent('upgrade_click');
@@ -1078,11 +1076,6 @@ export default function Home() {
       setCameraError(tx('imageFileOnly'));
       return;
     }
-    if (!hasLocalDailyQuota()) {
-      setCameraError(tx('dailyFreeLimitReached'));
-      return;
-    }
-
     activeDetectControllerRef.current?.abort();
     activeDetectControllerRef.current = null;
     const requestId = activeDetectRequestIdRef.current + 1;
@@ -1197,6 +1190,13 @@ export default function Home() {
         return fd;
       };
 
+      if (!hasAutoDetectQuota()) {
+        setIsProcessing(false);
+        setToastMessage(tx('dailyFreeLimitManualOnly'));
+        showManualHelpAfterFailure();
+        return;
+      }
+
       const controller = new AbortController();
       activeDetectControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 25_000);
@@ -1251,14 +1251,9 @@ export default function Home() {
             setEditLogoRotation(0);
             setDetectionFailed(false);
             setManualEditActive(false);
-            incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
             showManualHelpAfterFailure();
-          }
-          if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
-            const hasAnyValidPlate = result.plates.some((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4);
-            if (hasAnyValidPlate) incrementLocalDailyUsageOnSuccess();
           }
         }
       } finally {
@@ -1284,15 +1279,11 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
+  }, [createTrackedObjectUrl, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
 
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth || !video.videoHeight) return;
-    if (!hasLocalDailyQuota()) {
-      setCameraError(tx('dailyFreeLimitReached'));
-      return;
-    }
     activeDetectControllerRef.current?.abort();
     activeDetectControllerRef.current = null;
     const requestId = activeDetectRequestIdRef.current + 1;
@@ -1524,7 +1515,6 @@ export default function Home() {
             setEditLogoRotation(0);
             setDetectionFailed(false);
             setManualEditActive(false);
-            incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
             showManualHelpAfterFailure();
@@ -1538,12 +1528,18 @@ export default function Home() {
           setEditLogoRotation(0);
           setDetectionFailed(false);
           setManualEditActive(false);
-          incrementLocalDailyUsageOnSuccess();
         } else {
           setToastMessage(tx('autoDetectFailedManual'));
           showManualHelpAfterFailure();
         }
       };
+
+      if (!hasAutoDetectQuota()) {
+        setIsProcessing(false);
+        setToastMessage(tx('dailyFreeLimitManualOnly'));
+        showManualHelpAfterFailure();
+        return;
+      }
 
       (async () => {
         const videoTrack = streamRef.current?.getVideoTracks()[0];
@@ -1619,7 +1615,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, getMessageByErrorType, hasLocalDailyQuota, incrementLocalDailyUsageOnSuccess, showManualHelpAfterFailure, tx]);
+  }, [createTrackedObjectUrl, detectBrightness, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, tx]);
 
   const retake = useCallback(() => {
     if (previewImageUrl) revokeTrackedObjectUrl(previewImageUrl);
@@ -1862,7 +1858,7 @@ export default function Home() {
     if (!outCtx) return null;
     outCtx.drawImage(source, 0, 0);
 
-    if (isFreePlan) {
+    if (planFeatures.watermarkOnExport) {
       const shortEdge = Math.min(outCanvas.width, outCanvas.height);
       const padding = Math.max(16, Math.round(shortEdge * 0.03));
       const liftY = Math.max(22, Math.round(shortEdge * 0.08));
@@ -1883,7 +1879,7 @@ export default function Home() {
     return await new Promise<Blob | null>((resolve) => {
       outCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.99);
     });
-  }, [isFreePlan]);
+  }, [planFeatures.watermarkOnExport]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
@@ -2201,16 +2197,18 @@ export default function Home() {
           </button>
         </div>
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
-          {!planResolved ? (
+          {!billingEnabled ? (
+            <span className="px-3 py-1.5 text-xs bg-white/20 text-white tracking-wide">{text.beta}</span>
+          ) : !planResolved ? (
             <span className="px-3 py-1.5 text-xs text-white/80">{text.planLoading}</span>
           ) : (
             <>
-          <span className={`px-3 py-1.5 text-xs ${plan === 'free' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
-            {text.free}
-          </span>
-          <span className={`px-3 py-1.5 text-xs ${plan === 'pro' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
-            {text.pro}
-          </span>
+              <span className={`px-3 py-1.5 text-xs ${plan === 'free' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
+                {text.free}
+              </span>
+              <span className={`px-3 py-1.5 text-xs ${plan === 'pro' ? 'bg-white/20 text-white' : 'text-white/70'}`}>
+                {text.pro}
+              </span>
             </>
           )}
         </div>
@@ -2248,7 +2246,7 @@ export default function Home() {
         </div>
       )}
 
-      {showUpsell && (
+      {billingEnabled && showUpsell && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/65 backdrop-blur-md">
           <div className="w-full max-w-sm rounded-2xl border border-white/20 bg-black/80 px-5 py-5 shadow-2xl">
             <h3 className="text-white text-base font-medium">{text.upsellTitle}</h3>
@@ -2338,6 +2336,10 @@ export default function Home() {
 
       {screenMode === 'idle' && (
         <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-6 px-6">
+          <div className="text-center max-w-md space-y-3">
+            <h1 className="text-white text-lg font-light tracking-wide leading-snug">{text.tagline}</h1>
+            <p className="text-white/55 text-sm font-light leading-relaxed">{text.heroDescription}</p>
+          </div>
           <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               onClick={startCamera}
@@ -2366,12 +2368,23 @@ export default function Home() {
               <DownloadIcon size={16} strokeWidth={1.5} />
             </button>
           )}
-          <Link
-            href="/terms"
-            className="text-white/40 hover:text-white/60 text-[10px] font-light underline-offset-2 hover:underline"
-          >
-            {text.termsOfService}
-          </Link>
+          <nav className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] font-light">
+            <Link href="/terms" className="text-white/40 hover:text-white/60 underline-offset-2 hover:underline">
+              {text.termsOfService}
+            </Link>
+            <span className="text-white/20" aria-hidden>
+              ·
+            </span>
+            <Link href="/privacy" className="text-white/40 hover:text-white/60 underline-offset-2 hover:underline">
+              {text.privacyPolicy}
+            </Link>
+            <span className="text-white/20" aria-hidden>
+              ·
+            </span>
+            <Link href="/press" className="text-white/40 hover:text-white/60 underline-offset-2 hover:underline">
+              {text.pressKit}
+            </Link>
+          </nav>
         </main>
       )}
 

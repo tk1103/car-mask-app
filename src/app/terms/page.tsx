@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { getContactLabel, getContactMailto, site } from '../../lib/site';
 
 export const metadata: Metadata = {
-  title: '利用規約 | Carkus',
-  description: 'Carkus（カーカス）の利用規約',
+  title: `利用規約 | ${site.name}`,
+  description: `${site.name}（${site.nameReading}）の利用規約`,
   robots: { index: true, follow: true },
 };
 
@@ -18,8 +19,9 @@ export default function TermsPage() {
           >
             ← トップに戻る
           </Link>
-          <h1 className="text-3xl font-light text-white mt-4 tracking-wide">Carkus 利用規約</h1>
-          <p className="text-zinc-500 text-base mt-2">最終更新日: 2026年4月29日</p>
+          <h1 className="text-3xl font-light text-white mt-4 tracking-wide">{site.name} 利用規約</h1>
+          <p className="text-zinc-500 text-base mt-2">最終更新日: 2026年6月12日</p>
+          <p className="text-zinc-500 text-sm mt-1">運営者: {site.operatorName}</p>
         </header>
 
         <div className="space-y-8 text-base font-light text-zinc-300 leading-relaxed">
@@ -112,8 +114,28 @@ export default function TermsPage() {
 
           <section>
             <h2 className="text-xl font-medium text-white mb-2">第12条（お問い合わせ）</h2>
-            <p>
-              本規約に関するお問い合わせは、当社の公式サイト上に掲載の窓口（または掲示する連絡先）にて受け付けます。掲示がない間は、当社の決定する方法にて公表するものとします。
+            <p>本規約に関するお問い合わせは、下記までご連絡ください。</p>
+            <ul className="mt-2 space-y-1">
+              <li>運営者: {site.operatorName}</li>
+              <li>
+                連絡先:{' '}
+                {getContactMailto() ? (
+                  <a href={getContactMailto()!} className="text-sky-400 hover:text-sky-300 underline underline-offset-2">
+                    {site.contactEmail}
+                  </a>
+                ) : (
+                  <span className="text-zinc-500">{getContactLabel()}</span>
+                )}
+              </li>
+            </ul>
+            <p className="mt-3 text-sm text-zinc-500">
+              <Link href="/privacy" className="text-sky-400 hover:text-sky-300">
+                プライバシーポリシー
+              </Link>
+              {' · '}
+              <Link href="/press" className="text-sky-400 hover:text-sky-300">
+                プレスキット
+              </Link>
             </p>
           </section>
         </div>
