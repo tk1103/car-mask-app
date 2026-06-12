@@ -412,6 +412,8 @@ const CUSTOM_LOGO_STORAGE_KEY = 'carkus_custom_logo_data_url';
 const FREE_DAILY_LIMIT_DISABLED = true; // 検証期間は無料版の日次回数制限を解除
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
 const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
+const LOGO_SCALE_MIN = 0.12;
+const LOGO_SCALE_MAX = 2;
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
@@ -435,13 +437,7 @@ const t = {
     processingManualHint:
       "It's taking a while. You can also place the logo manually!（解析に時間がかかっています。手動でロゴを配置することも可能です）",
     processingSidebarHint: '枠の調整は解析の完了後に行えます。今は解析の終了をお待ちください。',
-    manualGuideTitle: '手動で枠を合わせる',
-    manualGuideWhy:
-      '自動でナンバープレート上の枠位置を特定できませんでした（明るさ・距離・反射などの影響で起こり得ます）。次の3ステップで同じ品質に仕上げられます。',
-    manualStep1: '「サイズ」で枠（ロゴ）の大きさをプレート幅に合わせる',
-    manualStep2: '写真上を指でドラッグして、枠をプレートの上に乗せる',
-    manualStep3: '必要なら「角度」で回転を整える',
-    guideClose: 'この説明を閉じる',
+    manualGuideTitle: '枠をドラッグして合わせてください',
     serverRetrying: 'サーバー混雑のため {sec} 秒後に再試行します（{cur}/{max}）',
     saveSuccess: '保存しました',
     saveThanks: 'ご利用ありがとうございます',
@@ -525,13 +521,7 @@ const t = {
     processingManualHint:
       "It's taking a while. You can also place the logo manually!（解析に時間がかかっています。手動でロゴを配置することも可能です）",
     processingSidebarHint: 'You can move the frame after analysis finishes. Please wait.',
-    manualGuideTitle: 'Align the frame yourself',
-    manualGuideWhy:
-      "We could not find the frame on the license plate (light, distance, or reflections can cause this). Follow these 3 steps for the same result.",
-    manualStep1: "Use 'Size' to match the frame (logo) width to the plate",
-    manualStep2: "Drag on the photo to place the frame on the plate",
-    manualStep3: "Optionally use 'Angle' to fine-tune rotation",
-    guideClose: 'Dismiss this help',
+    manualGuideTitle: 'Drag the frame to align',
     serverRetrying: 'Server busy. Retrying in {sec}s ({cur}/{max})',
     saveSuccess: 'Saved',
     saveThanks: 'Thank you for using Carkus',
@@ -622,7 +612,6 @@ export default function Home() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [processingElapsedSec, setProcessingElapsedSec] = useState(0);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [maskImage, setMaskImage] = useState<HTMLImageElement | null>(null);
 
@@ -637,11 +626,9 @@ export default function Home() {
   const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
   const [isBlurWarning, setIsBlurWarning] = useState(false);
-  const [detectionFailed, setDetectionFailed] = useState(false); // 編集画面では常に「編集モード」として扱い、トーストのみ表示
-  const [showManualGuide, setShowManualGuide] = useState(false);
+  const [detectionFailed, setDetectionFailed] = useState(false);
   const [retryStatusText, setRetryStatusText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [detectionReasoning, setDetectionReasoning] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null); // APIから返る本日の残り回数（null=未取得）
   const [localDailySuccessCount, setLocalDailySuccessCount] = useState(0);
   const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
@@ -866,15 +853,11 @@ export default function Home() {
 
   const showManualHelpAfterFailure = useCallback(() => {
     setDetectionFailed(true);
-    setShowManualGuide(true);
-    setDetectionReasoning(null);
   }, []);
 
   const handleEditManually = useCallback(() => {
     setDetectionFailed(true);
-    setShowManualGuide(true);
     setToastMessage(null);
-    setDetectionReasoning(null);
   }, []);
 
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, _retryAfterSeconds?: number) => {
@@ -1089,8 +1072,6 @@ export default function Home() {
     setIsProcessing(true);
     setCameraError(null);
     setDetectionFailed(false);
-    setDetectionReasoning(null);
-    setShowManualGuide(false);
     setRetryStatusText(null);
 
     try {
@@ -1216,9 +1197,6 @@ export default function Home() {
         if (isLatestRequest()) {
           if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
             console.info('Plate detection reasoning:', result.reasoning);
-            setDetectionReasoning(result.reasoning.trim());
-          } else {
-            setDetectionReasoning(null);
           }
           const remaining = result.remainingToday;
           if (remaining !== undefined) setDailyRemaining(remaining);
@@ -1238,7 +1216,6 @@ export default function Home() {
               setEditLogoScale(1);
               setEditLogoRotation(0);
               setDetectionFailed(false);
-              if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
             } else {
               setToastMessage(tx('autoDetectFailedManual'));
               showManualHelpAfterFailure();
@@ -1251,7 +1228,6 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
-            if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
@@ -1349,8 +1325,6 @@ export default function Home() {
     setIsProcessing(true);
     setCameraError(null);
     setDetectionFailed(false);
-    setDetectionReasoning(null);
-    setShowManualGuide(false);
     setRetryStatusText(null);
 
     try {
@@ -1507,15 +1481,12 @@ export default function Home() {
           const backendMessage = result.userMessage;
           const retryAfterSeconds = result.retryAfterSeconds;
           const message = getMessageByErrorType(result.errorType, backendMessage || rawMessage, retryAfterSeconds);
-          setToastMessage(`${message} [${errorCode}]`);
+          setToastMessage(message);
           showManualHelpAfterFailure();
           return;
         }
         if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
-          console.info('Plate detection reasoning:', result.reasoning);
-          setDetectionReasoning(result.reasoning.trim());
-        } else {
-          setDetectionReasoning(null);
+          console.info('Plate detection reasoning:', result.reasoning.trim());
         }
         if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
           const platesCorners: Corners[] = result.plates
@@ -1528,7 +1499,6 @@ export default function Home() {
             setEditLogoScale(1);
             setEditLogoRotation(0);
             setDetectionFailed(false);
-            if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
             incrementLocalDailyUsageOnSuccess();
           } else {
             setToastMessage(tx('autoDetectFailedManual'));
@@ -1542,7 +1512,6 @@ export default function Home() {
           setEditLogoScale(1);
           setEditLogoRotation(0);
           setDetectionFailed(false);
-          if (result.inferred) setToastMessage(tx('aiInferenceDetected'));
           incrementLocalDailyUsageOnSuccess();
         } else {
           setToastMessage(tx('autoDetectFailedManual'));
@@ -1640,7 +1609,6 @@ export default function Home() {
     setRetryStatusText(null);
     setIsBlurWarning(false);
     setDetectionFailed(false);
-    setShowManualGuide(false);
     setScreenMode('camera');
     // ストリーム再設定は screenMode の useEffect で行う（video は再マウント後のため、ここでは ref がまだ更新されていない場合がある）
     // フォールバック: DOM 更新後に再設定を試みる
@@ -1657,18 +1625,6 @@ export default function Home() {
       setTimeout(applyStream, 600);
     }
   }, [previewImageUrl, revokeTrackedObjectUrl]);
-
-  useEffect(() => {
-    if (!isProcessing) {
-      setProcessingElapsedSec(0);
-      return;
-    }
-    setProcessingElapsedSec(0);
-    const id = window.setInterval(() => {
-      setProcessingElapsedSec((n) => n + 1);
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [isProcessing]);
 
   useEffect(() => {
     if (!isProcessing || screenMode !== 'preview_edit') return;
@@ -2170,7 +2126,7 @@ export default function Home() {
       } else if (e.touches.length === 2 && scaleStartRef.current) {
         const dy = Math.abs(e.touches[1].clientY - e.touches[0].clientY);
         const delta = (dy - scaleStartRef.current.y) * 0.01;
-        setEditLogoScale(Math.max(0.3, Math.min(2, scaleStartRef.current.startScale + delta)));
+        setEditLogoScale(Math.max(LOGO_SCALE_MIN, Math.min(LOGO_SCALE_MAX, scaleStartRef.current.startScale + delta)));
       }
     },
     []
@@ -2219,22 +2175,18 @@ export default function Home() {
       </div>
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-black/40 backdrop-blur-xl border-b border-white/20">
-          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center gap-2 flex-wrap">
+          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center">
             <span className="h-6 flex items-center shrink-0 text-white">
               <CarkusLogo className="h-full w-auto text-white" />
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/80 text-[10px] font-medium tracking-widest shrink-0">{text.beta}</span>
-            <span className="text-white/50 text-xs font-extralight shrink-0">ver0.8</span>
           </div>
         </header>
       )}
 
       {showSaveSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-          <div className="bg-black/50 backdrop-blur-2xl border border-white/20 rounded-2xl px-8 py-6 flex flex-col items-center gap-3 shadow-2xl">
+          <div className="bg-black/50 backdrop-blur-2xl border border-white/20 rounded-2xl px-6 py-5 flex items-center justify-center shadow-2xl">
             <CheckCircle className="text-emerald-400" size={40} strokeWidth={2} />
-            <p className="text-white font-light">{text.saveSuccess}</p>
-            <p className="text-white/70 text-xs font-extralight">{text.saveThanks}</p>
           </div>
         </div>
       )}
@@ -2285,117 +2237,65 @@ export default function Home() {
       )}
 
       {screenMode === 'camera' && (
-        <div className="fixed inset-0 z-0 flex flex-col landscape:flex-row">
-          <div className="flex-1 min-h-0 relative">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-            {showFlash && (
-              <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
-            )}
-            {isProcessing && (
-              <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex flex-col items-center justify-center z-10 px-4">
-                <Loader2 className="animate-spin text-white" size={48} strokeWidth={2.5} />
-                <p className="text-white font-light text-sm mt-4">{text.processing}...</p>
-                <p className="text-white/90 text-xs font-light text-center max-w-xs mt-2 tabular-nums">
-                  {fillI18nTemplate(text.processingElapsed, { sec: Math.max(0, processingElapsedSec) })}
-                </p>
-                <p className="text-white/65 text-[11px] font-extralight text-center max-w-xs mt-1.5 leading-relaxed">
-                  {text.processingDurationHint}
-                </p>
-                {processingElapsedSec >= 8 && (
-                  <p className="text-amber-200/90 text-xs font-light text-center max-w-xs mt-2">{text.processingWaitMore}</p>
-                )}
-                  {processingElapsedSec >= 15 && (
-                    <p className="text-amber-100/90 text-xs font-light text-center max-w-xs mt-2 leading-relaxed">
-                      {text.processingManualHint}
-                    </p>
-                  )}
-                {processingElapsedSec >= 20 && (
-                  <p className="text-white/75 text-[11px] font-extralight text-center max-w-xs mt-1.5 leading-relaxed">
-                    {text.processingRetakeIfSlow}
-                  </p>
-                )}
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
-                  <div className="h-full bg-white/80 processing-sweep" />
-                </div>
+        <div className="fixed inset-0 z-0 bg-black">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          {showFlash && (
+            <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
+          )}
+          {isProcessing && (
+            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+              <Loader2 className="animate-spin text-white" size={44} strokeWidth={2.5} />
+              <p className="text-white/90 font-light text-sm mt-3">{text.processing}</p>
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
+                <div className="h-full bg-white/80 processing-sweep" />
               </div>
-            )}
-            <div className="absolute top-0 left-0 right-0 z-20 pt-[env(safe-area-inset-top)] pb-4 px-4 bg-black/30 backdrop-blur-xl border-b border-white/20 landscape:right-0 landscape:border-b-0 landscape:border-r landscape:border-white/20">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="h-5 flex items-center shrink-0 text-white drop-shadow-md">
-                    <CarkusLogo className="h-full w-auto text-white" />
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-[10px] font-medium tracking-widest">{text.beta}</span>
-                </div>
-                <button
-                  onClick={stopCamera}
-                  className="py-2 px-4 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 hover:bg-white/20 transition-colors"
-                >
-                  {text.finish}
-                </button>
-              </div>
-              {cameraError && <p className="mt-2 text-red-200 text-xs font-light">{cameraError}</p>}
-              <p className="mt-1 text-white/70 text-xs font-light">
-                {text.cameraDailyNote}
-              </p>
-              {isFreePlan ? (
-                <>
-                  {FREE_DAILY_LIMIT_DISABLED ? (
-                    <p className="mt-1 text-emerald-200/80 text-[11px] font-light">
-                      {text.freeQuotaUnlimitedTesting}
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-white/60 text-[11px] font-light">
-                      {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
-                    </p>
-                  )}
-                  <p className="mt-1 text-white/50 text-[10px] font-light">
-                    {text.freeWatermarkNote}
-                  </p>
-                </>
-              ) : (
-                <p className="mt-1 text-emerald-200/80 text-[11px] font-light">
-                  {text.proUnlimitedHint}
-                </p>
-              )}
             </div>
+          )}
+          <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+            <span className="h-5 flex items-center shrink-0 text-white drop-shadow-md">
+              <CarkusLogo className="h-full w-auto text-white" />
+            </span>
+            <button
+              onClick={stopCamera}
+              className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
+            >
+              {text.finish}
+            </button>
           </div>
-            <div className="shrink-0 flex flex-col items-center justify-center gap-2 py-6 px-4 bg-black/30 backdrop-blur-xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-44 landscape:py-4">
+          <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-center gap-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 px-4 bg-gradient-to-t from-black/50 to-transparent">
+            <button
+              onClick={handlePickImageFromDevice}
+              disabled={isProcessing}
+              className="w-11 h-11 rounded-full bg-black/40 backdrop-blur-sm border border-white/25 text-white flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+              aria-label={text.pickPhoto}
+            >
+              <ImagePlus size={20} strokeWidth={1.8} />
+            </button>
             <button
               onClick={captureAndDetect}
               disabled={isProcessing}
-              className="min-w-[8rem] px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform hover:bg-white/20"
+              className="w-[4.5rem] h-[4.5rem] rounded-full bg-white/15 backdrop-blur-sm border-2 border-white/40 flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+              aria-label={text.capture}
             >
               {isProcessing ? (
                 <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
               ) : (
-                <span className="font-light text-sm tracking-wide">{text.capture}</span>
+                <span className="w-12 h-12 rounded-full bg-white/90" />
               )}
             </button>
-            <button
-              onClick={handlePickImageFromDevice}
-              disabled={isProcessing}
-              className="min-w-[8rem] px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-light border border-white/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-transform hover:bg-white/20"
-            >
-              <ImagePlus size={20} strokeWidth={1.8} />
-              <span className="font-light text-sm tracking-wide">{text.pickPhoto}</span>
-            </button>
-            <p className="text-white/70 text-xs font-light text-center">
-              {text.cameraDailyNoteShort}
-            </p>
+            <div className="w-11" aria-hidden />
           </div>
         </div>
       )}
 
       {screenMode === 'idle' && (
-        <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-8 px-6">
-          <p className="text-white/70 text-sm font-extralight tracking-wide">{text.cameraLaunchHint}</p>
+        <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-6 px-6">
           <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               onClick={startCamera}
@@ -2412,44 +2312,18 @@ export default function Home() {
               {text.pickPhoto}
             </button>
           </div>
-          {cameraError && (
-            <p className="text-red-300 text-xs font-light max-w-xs text-center">{cameraError}</p>
-          )}
           {!isStandalone && (
             <button
               onClick={handleInstallClick}
-              className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/10 backdrop-blur-sm text-white/90 font-light text-xs tracking-wide border border-white/20 hover:bg-white/20 transition-colors"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-sm text-white/80 font-light text-xs tracking-wide border border-white/20 hover:bg-white/20 transition-colors"
+              aria-label={text.install}
             >
               <DownloadIcon size={16} strokeWidth={1.5} />
-              {isIOS ? text.addHomeIOS : isAndroid ? (deferredPrompt ? text.addHomeAndroid : text.addHome) : deferredPrompt ? text.addHomeChrome : text.install}
             </button>
-          )}
-          <p className="text-white/60 text-xs font-light mt-4 text-center max-w-xs">
-            {text.dailyNote}
-          </p>
-          {isFreePlan ? (
-            <>
-              {FREE_DAILY_LIMIT_DISABLED ? (
-                <p className="text-emerald-200/80 text-[11px] font-light mt-1 text-center max-w-xs">
-                  {text.freeQuotaUnlimitedTesting}
-                </p>
-              ) : (
-                <p className="text-white/60 text-xs font-light mt-1 text-center max-w-xs">
-                  {text.freeQuotaLabel}: {localDailySuccessCount}/{LOCAL_DAILY_FREE_LIMIT}
-                </p>
-              )}
-              <p className="text-white/50 text-[11px] font-light mt-1 text-center max-w-xs">
-                {text.freeWatermarkNote}
-              </p>
-            </>
-          ) : (
-            <p className="text-emerald-200/80 text-[11px] font-light mt-1 text-center max-w-xs">
-              {text.proUnlimitedHint}
-            </p>
           )}
           <Link
             href="/terms"
-            className="text-sky-400/90 hover:text-sky-300 text-xs font-light underline-offset-2 hover:underline"
+            className="text-white/40 hover:text-white/60 text-[10px] font-light underline-offset-2 hover:underline"
           >
             {text.termsOfService}
           </Link>
@@ -2484,121 +2358,48 @@ export default function Home() {
       )}
 
       {screenMode === 'preview_edit' && previewImageUrl && (
-        <div className="fixed inset-0 z-0 flex flex-col landscape:flex-row">
+        <div className="fixed inset-0 z-0 bg-black">
           {toastMessage && (
-            <div className="fixed top-4 left-4 right-4 landscape:left-auto landscape:right-4 landscape:max-w-sm z-30 px-4 py-3 rounded-xl bg-black/60 backdrop-blur-2xl text-white text-sm font-light shadow-lg border border-white/20 animate-scale-in">
+            <div className="fixed top-3 left-3 right-3 landscape:left-auto landscape:right-3 landscape:max-w-xs z-30 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-xl text-white text-xs font-light border border-white/20">
               {toastMessage}
             </div>
           )}
-          {isBlurWarning && (
-            <div className="shrink-0 px-4 py-3 flex flex-col gap-2 bg-amber-500/20 backdrop-blur-xl border-b border-amber-400/30 landscape:border-b-0 landscape:border-r landscape:border-amber-400/30">
-              <p className="text-amber-200 text-sm font-light text-center">
-                {lang === 'ja' ? '写真がぼやけている可能性があります。撮り直すことをお勧めします。' : 'Photo may be blurry. Retaking is recommended.'}
-              </p>
-            </div>
-          )}
-          <div className="flex-1 min-h-0 flex flex-col landscape:flex-row">
-            <div
-              className="flex-1 min-h-0 relative touch-none bg-black"
-              onTouchStart={onPreviewTouchStart}
-              onTouchMove={onPreviewTouchMove}
-              onTouchEnd={onPreviewTouchEnd}
-              onTouchCancel={onPreviewTouchEnd}
-            >
-              <canvas
-                ref={previewCanvasRef}
-                className="absolute inset-0 w-full h-full object-contain"
-                style={{ touchAction: 'none' }}
-              />
-              {isProcessing && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/25">
-                  <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
-                    <div className="absolute inset-0 rounded-full border border-white/40 border-t-white animate-spin-slow" />
-                    <div className="w-16 h-16 rounded-full bg-black/70 flex items-center justify-center animate-pulse-mask">
-                      <span className="text-white text-xs font-light tracking-wide">{text.processing}</span>
-                    </div>
-                  </div>
-                  <p className="text-white/90 text-xs font-light mt-4 text-center max-w-[min(100%,20rem)] px-3 tabular-nums">
-                    {fillI18nTemplate(text.processingElapsed, { sec: Math.max(0, processingElapsedSec) })}
-                  </p>
-                  <p className="text-white/65 text-[11px] font-extralight text-center max-w-[min(100%,20rem)] px-3 mt-1.5 leading-relaxed">
-                    {text.processingDurationHint}
-                  </p>
-                  {processingElapsedSec >= 8 && (
-                    <p className="text-amber-200/90 text-xs font-light text-center max-w-[min(100%,20rem)] px-3 mt-2">
-                      {text.processingWaitMore}
-                    </p>
-                  )}
-                  {processingElapsedSec >= 15 && (
-                    <p className="text-amber-100/90 text-xs font-light text-center max-w-[min(100%,20rem)] px-3 mt-2 leading-relaxed">
-                      {text.processingManualHint}
-                    </p>
-                  )}
-                  {processingElapsedSec >= 20 && (
-                    <p className="text-white/75 text-[11px] font-extralight text-center max-w-[min(100%,20rem)] px-3 mt-1.5 leading-relaxed">
-                      {text.processingRetakeIfSlow}
-                    </p>
-                  )}
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
-                    <div className="h-full bg-white/80 processing-sweep" />
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="shrink-0 bg-black/40 backdrop-blur-2xl border-t border-white/20 landscape:border-t-0 landscape:border-l landscape:border-white/20 landscape:w-56 pt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] landscape:py-4 landscape:overflow-y-auto">
+          <div
+            className="absolute inset-0 touch-none"
+            onTouchStart={onPreviewTouchStart}
+            onTouchMove={onPreviewTouchMove}
+            onTouchEnd={onPreviewTouchEnd}
+            onTouchCancel={onPreviewTouchEnd}
+          >
+            <canvas
+              ref={previewCanvasRef}
+              className="absolute inset-0 w-full h-full object-contain"
+              style={{ touchAction: 'none' }}
+            />
             {isProcessing && (
-              <div className="mb-3 space-y-1.5 py-2 px-3 rounded-lg bg-amber-500/20 border border-amber-400/30">
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="animate-spin text-amber-400 shrink-0" size={16} strokeWidth={2} />
-                  <span className="text-amber-100 text-xs font-light leading-snug">{text.processingSidebarHint}</span>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/25">
+                <Loader2 className="animate-spin text-white" size={40} strokeWidth={2.5} />
+                <p className="text-white/90 text-sm font-light mt-3">{text.processing}</p>
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
+                  <div className="h-full bg-white/80 processing-sweep" />
                 </div>
-                <p className="text-amber-200/80 text-[11px] font-extralight text-center leading-relaxed">
-                  {fillI18nTemplate(text.processingElapsed, { sec: Math.max(0, processingElapsedSec) })} · {text.processingDurationHint}
-                </p>
               </div>
             )}
-            {retryStatusText && (
-              <div className="mb-3 px-3 py-2 rounded-lg bg-sky-500/15 border border-sky-300/30">
-                <span className="text-sky-100 text-xs font-light">{retryStatusText}</span>
-              </div>
-            )}
-            {!isProcessing && detectionReasoning && (
-              <div className="mb-3 px-3 py-2 rounded-lg bg-indigo-500/15 border border-indigo-300/30 space-y-1">
-                <p className="text-indigo-100 text-xs font-light">{text.aiInferenceDetected}</p>
-                <p className="text-indigo-200/80 text-[11px] leading-relaxed">{detectionReasoning}</p>
-              </div>
-            )}
+          </div>
+          <div className="absolute bottom-0 left-0 right-0 z-10 pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-3 bg-gradient-to-t from-black/85 via-black/60 to-transparent landscape:top-0 landscape:left-auto landscape:right-0 landscape:bottom-0 landscape:w-44 landscape:pt-3 landscape:pb-3 landscape:bg-black/50 landscape:backdrop-blur-2xl landscape:border-l landscape:border-white/20 landscape:overflow-y-auto">
             {detectionFailed && !isProcessing && (
               <button
                 type="button"
                 onClick={handleEditManually}
-                className="mb-3 w-full px-4 py-3 rounded-full text-sm font-medium bg-amber-400/90 text-black hover:bg-amber-300 transition-colors shadow-[0_0_0_1px_rgba(255,255,255,0.25)]"
+                className="mb-2 w-full px-3 py-2 rounded-full text-xs font-medium bg-amber-400/90 text-black hover:bg-amber-300 transition-colors"
               >
                 {text.editManually}
               </button>
             )}
-            {detectionFailed && showManualGuide && (
-              <div className="mb-3 px-3 py-3 rounded-xl bg-gradient-to-b from-white/12 to-white/5 border border-white/25 space-y-2.5">
-                <p className="text-white text-base font-medium tracking-wide">{text.manualGuideTitle}</p>
-                <p className="text-white/85 text-sm font-light leading-relaxed">{text.manualGuideWhy}</p>
-                <ol className="list-decimal pl-5 space-y-2 text-white/95 text-sm font-light leading-relaxed marker:text-amber-300/90">
-                  <li>{text.manualStep1}</li>
-                  <li>{text.manualStep2}</li>
-                  <li>{text.manualStep3}</li>
-                </ol>
-                <button
-                  type="button"
-                  onClick={() => setShowManualGuide(false)}
-                  className="w-full px-3 py-2.5 rounded-full text-sm bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors"
-                >
-                  {text.guideClose}
-                </button>
-              </div>
-            )}
             {!isProcessing && (
               <>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-white/85 text-sm font-light w-12">{text.template}</span>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-white/70 text-xs font-light w-10">{text.template}</span>
                   <div className="flex items-center rounded-full border border-white/20 bg-white/5 overflow-hidden">
                     <button
                       type="button"
@@ -2623,8 +2424,8 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-white/85 text-sm font-light w-12">{text.angle}</span>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-white/70 text-xs font-light w-10">{text.angle}</span>
                   <input
                     type="range"
                     min="-30"
@@ -2632,26 +2433,25 @@ export default function Home() {
                     step="1"
                     value={editLogoRotation}
                     onChange={(e) => setEditLogoRotation(Number(e.target.value))}
-                    className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                    className="slider-large flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white"
                   />
-                  <span className="text-white/85 text-sm tabular-nums w-10 text-right">{editLogoRotation}°</span>
                 </div>
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-white/85 text-sm font-light w-12">{text.size}</span>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-white/70 text-xs font-light w-10">{text.size}</span>
                   <input
                     type="range"
-                    min="0.3"
-                    max="2"
+                    min={LOGO_SCALE_MIN}
+                    max={LOGO_SCALE_MAX}
                     step="0.05"
                     value={editLogoScale}
                     onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                    className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white max-w-[200px]"
+                    className="slider-large flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white"
                   />
                 </div>
               </>
             )}
             {!isProcessing && (
-              <div className="flex items-center justify-center gap-2 mb-3">
+              <div className="flex items-center justify-center gap-1.5 mb-1.5">
                 <button
                   onClick={handlePickCustomLogo}
                   disabled={isProcessing}
@@ -2723,10 +2523,6 @@ export default function Home() {
                 <button onClick={handleCopyToClipboard} disabled={isProcessing} className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/90 text-xs font-light hover:bg-white/20 transition-colors disabled:opacity-50"><Copy size={14} /> {text.copy}</button>
               </div>
             )}
-            <div className="mt-3 min-h-[60px] flex items-center justify-center rounded-xl bg-white/10 backdrop-blur-sm border border-white/20">
-              <span className="text-white/50 text-xs">広告枠（ベータ）</span>
-            </div>
-            </div>
           </div>
         </div>
       )}
