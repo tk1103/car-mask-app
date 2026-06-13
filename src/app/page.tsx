@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, ImagePlus, Download as DownloadIcon } from 'lucide-react';
+import { getFeedbackMailto } from '../lib/site';
+import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, ImagePlus, Download as DownloadIcon, Mail } from 'lucide-react';
 
 /** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
 function CarkusLogo({ className }: { className?: string }) {
@@ -518,6 +519,8 @@ const t = {
     pressKit: 'プレスキット',
     tagline: '車の写真のナンバーを、ロゴでマスク',
     heroDescription: 'スマホのブラウザだけで、撮影→AI検出→手動調整→保存まで。SNS用の愛車写真に。',
+    contactFeedback: '要望・バグ報告',
+    contactFeedbackHint: 'β版のご意見・不具合はメールでお知らせください。',
   },
   en: {
     beta: 'BETA',
@@ -604,6 +607,8 @@ const t = {
     pressKit: 'Press Kit',
     tagline: 'Mask license plates on car photos with a logo',
     heroDescription: 'Shoot, auto-detect, adjust manually, and save—all in your mobile browser.',
+    contactFeedback: 'Feedback & bug reports',
+    contactFeedbackHint: 'Send beta feedback or bug reports by email.',
   },
 } as const;
 
@@ -2359,6 +2364,16 @@ export default function Home() {
           <p className="text-white/55 text-xs font-light text-center max-w-sm leading-relaxed px-2">
             {text.dailyNote}
           </p>
+          <div className="flex flex-col items-center gap-2 max-w-sm text-center">
+            <p className="text-white/45 text-[11px] font-light leading-relaxed px-2">{text.contactFeedbackHint}</p>
+            <a
+              href={getFeedbackMailto(lang)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 backdrop-blur-sm text-white/85 font-light text-xs tracking-wide border border-white/20 hover:bg-white/20 transition-colors"
+            >
+              <Mail size={16} strokeWidth={1.5} />
+              {text.contactFeedback}
+            </a>
+          </div>
           {!isStandalone && (
             <button
               onClick={handleInstallClick}
