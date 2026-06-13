@@ -1008,7 +1008,6 @@ export default function Home() {
 
   const showManualHelpAfterFailure = useCallback(() => {
     setDetectionFailed(true);
-    setManualEditActive(true);
     ensureDefaultCorners();
   }, [ensureDefaultCorners]);
 
@@ -1855,7 +1854,9 @@ export default function Home() {
     }
   }, [createTrackedObjectUrl, detectBrightness, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, tx]);
 
-  const retake = useCallback(() => {
+  const retake = useCallback(async () => {
+    activeDetectControllerRef.current?.abort();
+    activeDetectControllerRef.current = null;
     if (previewImageUrl) revokeTrackedObjectUrl(previewImageUrl);
     setPreviewImageUrl(null);
     setDetectedCorners([]);
@@ -1870,22 +1871,15 @@ export default function Home() {
     setIsBlurWarning(false);
     setDetectionFailed(false);
     setManualEditActive(false);
-    setScreenMode('camera');
-    // ストリーム再設定は screenMode の useEffect で行う（video は再マウント後のため、ここでは ref がまだ更新されていない場合がある）
-    // フォールバック: DOM 更新後に再設定を試みる
-    const stream = streamRef.current;
-    if (stream) {
-      const applyStream = () => {
-        const video = videoRef.current;
-        if (video && stream.active) {
-          video.srcObject = stream;
-          video.play().catch(() => {});
-        }
-      };
-      setTimeout(applyStream, 250);
-      setTimeout(applyStream, 600);
+    setIsProcessing(false);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
-  }, [previewImageUrl, revokeTrackedObjectUrl]);
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setStream(null);
+    await startCamera();
+  }, [previewImageUrl, revokeTrackedObjectUrl, startCamera]);
 
   useEffect(() => {
     if (!isProcessing || screenMode !== 'preview_edit') return;
@@ -1952,12 +1946,6 @@ export default function Home() {
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
 
-        // 各プレートの初期角度（API検出時）に対して、UI回転値をオフセットとして適用
-        const baseAngle = detectedBaseAngles[plateIndex] ?? getPlateBaseAngle(corners);
-        const finalRotation = baseAngle + (editLogoRotation * Math.PI) / 180;
-        const cf = Math.cos(finalRotation);
-        const sf = Math.sin(finalRotation);
-
         const plateWidthTop = Math.hypot((scaled[1].x - scaled[0].x) * w, (scaled[1].y - scaled[0].y) * h);
         const plateWidthBottom = Math.hypot((scaled[2].x - scaled[3].x) * w, (scaled[2].y - scaled[3].y) * h);
         const plateWidth = (plateWidthTop + plateWidthBottom) / 2;
@@ -1968,10 +1956,14 @@ export default function Home() {
         const logoHeight = plateHeight * 1.05;
         const offsetX = (editLogoOffset.x / 100) * logoWidth;
         const offsetY = (editLogoOffset.y / 100) * logoHeight;
+
+        // 各プレートの検出四隅をピクセル座標へ（ユーザー調整のスケール・回転・オフセットのみ適用）
+        const userRotRad = (editLogoRotation * Math.PI) / 180;
+        const cf = Math.cos(userRotRad);
+        const sf = Math.sin(userRotRad);
         const offsetPxX = offsetX * cf - offsetY * sf;
         const offsetPxY = offsetX * sf + offsetY * cf;
 
-        // 4隅をピクセル座標に（スケール→回転→オフセット）
         const quadPx: QuadPx = scaled.map((c) => {
           const px = c.x * w - centerX;
           const py = c.y * h - centerY;
@@ -2092,23 +2084,9 @@ export default function Home() {
             }
           }
         }
-
-        if (manualEditActive) {
-          ctx.save();
-          ctx.strokeStyle = 'rgba(255, 196, 64, 0.9)';
-          ctx.lineWidth = Math.max(2, Math.min(plateWidth, plateHeight) * 0.035);
-          ctx.beginPath();
-          ctx.moveTo(quadPx[0].x, quadPx[0].y);
-          ctx.lineTo(quadPx[1].x, quadPx[1].y);
-          ctx.lineTo(quadPx[2].x, quadPx[2].y);
-          ctx.lineTo(quadPx[3].x, quadPx[3].y);
-          ctx.closePath();
-          ctx.stroke();
-          ctx.restore();
-        }
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusBrandImage, customMaskPreparedImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
+  }, [screenMode, previewImageLoaded, detectedCorners, carkusBrandImage, customMaskPreparedImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
 
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
