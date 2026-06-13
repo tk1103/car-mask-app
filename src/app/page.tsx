@@ -380,6 +380,79 @@ function drawCarkusLogoAtOrigin(
   }
 }
 
+/** ユーザー画像を矩形内にアスペクト比を保って中央配置 */
+function drawFitImageAtOrigin(
+  ctx: CanvasRenderingContext2D,
+  logoWidth: number,
+  logoHeight: number,
+  logoImage: HTMLImageElement
+) {
+  let visual = imageVisualBoundsCache.get(logoImage);
+  if (!visual) {
+    const probeW = Math.min(1024, logoImage.naturalWidth);
+    const probeH = Math.max(1, Math.round(probeW * (logoImage.naturalHeight / logoImage.naturalWidth)));
+    const probe = document.createElement('canvas');
+    probe.width = probeW;
+    probe.height = probeH;
+    const pctx = probe.getContext('2d', { willReadFrequently: true });
+    if (pctx) {
+      pctx.clearRect(0, 0, probeW, probeH);
+      pctx.drawImage(logoImage, 0, 0, probeW, probeH);
+      const data = pctx.getImageData(0, 0, probeW, probeH).data;
+      let minX = probeW;
+      let minY = probeH;
+      let maxX = -1;
+      let maxY = -1;
+      for (let y = 0; y < probeH; y++) {
+        for (let x = 0; x < probeW; x++) {
+          const a = data[(y * probeW + x) * 4 + 3];
+          if (a < 10) continue;
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+      if (maxX >= minX && maxY >= minY) {
+        const scaleX = logoImage.naturalWidth / probeW;
+        const scaleY = logoImage.naturalHeight / probeH;
+        visual = {
+          sx: minX * scaleX,
+          sy: minY * scaleY,
+          sw: Math.max(1, (maxX - minX + 1) * scaleX),
+          sh: Math.max(1, (maxY - minY + 1) * scaleY),
+        };
+      } else {
+        visual = { sx: 0, sy: 0, sw: logoImage.naturalWidth, sh: logoImage.naturalHeight };
+      }
+    } else {
+      visual = { sx: 0, sy: 0, sw: logoImage.naturalWidth, sh: logoImage.naturalHeight };
+    }
+    imageVisualBoundsCache.set(logoImage, visual);
+  }
+
+  const visualAspect = visual.sw / Math.max(1, visual.sh);
+  const targetW = Math.max(1, logoWidth * 0.92);
+  const targetH = Math.max(1, logoHeight * 0.92);
+  let drawW = targetW;
+  let drawH = drawW / Math.max(0.01, visualAspect);
+  if (drawH > targetH) {
+    drawH = targetH;
+    drawW = drawH * visualAspect;
+  }
+  ctx.drawImage(
+    logoImage,
+    visual.sx,
+    visual.sy,
+    visual.sw,
+    visual.sh,
+    -drawW / 2,
+    -drawH / 2,
+    drawW,
+    drawH
+  );
+}
+
 // 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
 function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
   const maxSize = 320;
@@ -422,6 +495,7 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const CUSTOM_LOGO_STORAGE_KEY = 'carkus_custom_logo_data_url';
+const MASK_STYLE_STORAGE_KEY = 'carkus_mask_style';
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
 const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
 const LOGO_SCALE_MIN = 0.12;
@@ -433,6 +507,11 @@ const LOGO_CANVAS_WIDTH = 400;
 type Lang = 'ja' | 'en';
 type Plan = 'free' | 'pro';
 type MaskTemplate = 'fit' | 'centered' | 'badge';
+type MaskStyle = 'carkus' | 'black' | 'white' | 'custom';
+
+function isMaskStyle(value: string | null | undefined): value is MaskStyle {
+  return value === 'carkus' || value === 'black' || value === 'white' || value === 'custom';
+}
 const t = {
   ja: {
     beta: 'BETA',
@@ -495,12 +574,19 @@ const t = {
     planLoading: '判定中',
     customLogo: '独自ロゴ',
     resetLogo: '標準ロゴに戻す',
+    maskStyleLabel: 'マスク',
+    maskStyleCarkus: 'Carkus',
+    maskStyleBlack: '黒',
+    maskStyleWhite: '白',
+    maskStyleCustom: '独自',
+    maskStyleCustomChange: '画像を変更',
+    maskStyleCustomMissing: '独自マスク用の画像を選択してください',
     resetLogoSuccess: '標準ロゴに戻しました。',
     proOnlyLogo: '独自ロゴは課金版で利用できます。',
     betaCustomLogoUnavailable: 'β版では独自ロゴは利用できません。',
-    logoUploadSuccess: '独自ロゴを適用しました。',
+    logoUploadSuccess: '独自マスク画像を保存しました。',
     logoUploadFailed: '独自ロゴの読み込みに失敗しました。',
-    logoTypeError: 'PNG または SVG を選択してください。',
+    logoTypeError: 'PNG / JPEG / WebP / SVG を選択してください。',
     logoTooLarge: 'ロゴ画像は 5MB 以下にしてください。',
     logoCopyrightConfirm:
       '著作権・商標権など第三者の権利を侵害しない画像のみアップロードしてください。権利侵害に関する責任は利用者が負います。続行しますか？',
@@ -583,12 +669,19 @@ const t = {
     planLoading: 'Loading',
     customLogo: 'Custom logo',
     resetLogo: 'Reset to default',
+    maskStyleLabel: 'Mask',
+    maskStyleCarkus: 'Carkus',
+    maskStyleBlack: 'Black',
+    maskStyleWhite: 'White',
+    maskStyleCustom: 'Custom',
+    maskStyleCustomChange: 'Change image',
+    maskStyleCustomMissing: 'Please choose a custom mask image.',
     resetLogoSuccess: 'Reset to default logo.',
     proOnlyLogo: 'Custom logo is available on Pro plan.',
     betaCustomLogoUnavailable: 'Custom logo is not available in the beta.',
-    logoUploadSuccess: 'Custom logo applied.',
+    logoUploadSuccess: 'Custom mask image saved.',
     logoUploadFailed: 'Failed to load custom logo.',
-    logoTypeError: 'Please select PNG or SVG.',
+    logoTypeError: 'Please select PNG, JPEG, WebP, or SVG.',
     logoTooLarge: 'Logo image must be 5MB or smaller.',
     logoCopyrightConfirm:
       'Upload only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for rights violations. Continue?',
@@ -632,6 +725,7 @@ export default function Home() {
   const [editLogoScale, setEditLogoScale] = useState(1);
   const [editLogoRotation, setEditLogoRotation] = useState(0); // 度（-30〜30）
   const [maskTemplate, setMaskTemplate] = useState<MaskTemplate>('fit');
+  const [maskStyle, setMaskStyle] = useState<MaskStyle>('carkus');
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
   const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
@@ -642,7 +736,8 @@ export default function Home() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null);
   const [planFeatures, setPlanFeatures] = useState<PlanFeatures>(DEFAULT_PLAN_FEATURES);
-  const [carkusLogoImage, setCarkusLogoImage] = useState<HTMLImageElement | null>(null);
+  const [carkusBrandImage, setCarkusBrandImage] = useState<HTMLImageElement | null>(null);
+  const [customLogoImage, setCustomLogoImage] = useState<HTMLImageElement | null>(null);
   const [customLogoSrc, setCustomLogoSrc] = useState<string | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
@@ -692,14 +787,6 @@ export default function Home() {
     return dailyRemaining > 0;
   }, [isFreePlan, dailyRemaining]);
 
-  const clearStoredCustomLogo = useCallback(() => {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    try {
-      window.localStorage.removeItem(CUSTOM_LOGO_STORAGE_KEY);
-    } catch (_) {}
-    setCustomLogoSrc(null);
-  }, []);
-
   const createTrackedObjectUrl = useCallback((blob: Blob) => {
     const url = URL.createObjectURL(blob);
     objectUrlRegistryRef.current.add(url);
@@ -721,19 +808,38 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!planResolved || !billingEnabled || plan !== 'pro' || typeof window === 'undefined' || !window.localStorage) return;
-    try {
-      const saved = window.localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY);
-      if (saved) setCustomLogoSrc(saved);
-    } catch (_) {}
-  }, [billingEnabled, plan, planResolved]);
-
-  useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => setCarkusLogoImage(img);
-    img.onerror = () => setCarkusLogoImage(null);
-    img.src = customLogoSrc || '/Carkus.svg';
+    img.onload = () => setCarkusBrandImage(img);
+    img.onerror = () => setCarkusBrandImage(null);
+    img.src = '/Carkus.svg';
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const savedLogo = window.localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY);
+      if (savedLogo) setCustomLogoSrc(savedLogo);
+      const savedStyle = window.localStorage.getItem(MASK_STYLE_STORAGE_KEY);
+      if (isMaskStyle(savedStyle)) {
+        if (savedStyle === 'custom' && !savedLogo) {
+          setMaskStyle('carkus');
+        } else {
+          setMaskStyle(savedStyle);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (!customLogoSrc) {
+      setCustomLogoImage(null);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => setCustomLogoImage(img);
+    img.onerror = () => setCustomLogoImage(null);
+    img.src = customLogoSrc;
   }, [customLogoSrc]);
 
   useEffect(() => {
@@ -767,10 +873,8 @@ export default function Home() {
       setBillingEnabled(Boolean(data?.billingEnabled));
       if (!data?.billingEnabled) {
         setPlan('free');
-        clearStoredCustomLogo();
       } else if (data?.plan === 'pro' || data?.plan === 'free') {
         setPlan(data.plan);
-        if (data.plan === 'free') clearStoredCustomLogo();
       }
       if (data?.features && typeof data.features === 'object') {
         setPlanFeatures({
@@ -788,7 +892,7 @@ export default function Home() {
     } finally {
       setPlanResolved(true);
     }
-  }, [clearStoredCustomLogo]);
+  }, []);
 
   useEffect(() => {
     fetchPlan();
@@ -996,20 +1100,35 @@ export default function Home() {
     photoPickerRef.current?.click();
   }, []);
 
-  const handlePickCustomLogo = useCallback(() => {
-    if (isFreePlan) {
-      if (!billingEnabled) {
-        setToastMessage(tx('betaCustomLogoUnavailable'));
-        return;
-      }
-      trackPlanEvent('feature_blocked_by_plan');
-      setShowUpsell(true);
-      return;
+  const persistMaskStyle = useCallback((style: MaskStyle) => {
+    setMaskStyle(style);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(MASK_STYLE_STORAGE_KEY, style);
+      } catch (_) {}
     }
+  }, []);
+
+  const openCustomLogoPicker = useCallback(() => {
     const accepted = typeof window !== 'undefined' ? window.confirm(tx('logoCopyrightConfirm')) : true;
     if (!accepted) return;
     customLogoPickerRef.current?.click();
-  }, [billingEnabled, isFreePlan, tx, trackPlanEvent]);
+  }, [tx]);
+
+  const handleMaskStyleChange = useCallback(
+    (style: MaskStyle) => {
+      if (style === 'custom' && !customLogoSrc) {
+        openCustomLogoPicker();
+        return;
+      }
+      persistMaskStyle(style);
+    },
+    [customLogoSrc, openCustomLogoPicker, persistMaskStyle]
+  );
+
+  const handlePickCustomLogo = useCallback(() => {
+    openCustomLogoPicker();
+  }, [openCustomLogoPicker]);
 
   const handleUpgradeClick = useCallback(() => {
     trackPlanEvent('upgrade_click');
@@ -1027,7 +1146,12 @@ export default function Home() {
     if (!file) return;
     const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
     const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
-    if (!isSvg && !isPng) {
+    const isJpeg =
+      file.type === 'image/jpeg' ||
+      file.type === 'image/jpg' ||
+      /\.jpe?g$/i.test(file.name);
+    const isWebp = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp');
+    if (!isSvg && !isPng && !isJpeg && !isWebp) {
       setToastMessage(tx('logoTypeError'));
       return;
     }
@@ -1057,21 +1181,12 @@ export default function Home() {
         } catch (_) {}
       }
       setCustomLogoSrc(dataUrl);
+      persistMaskStyle('custom');
       setToastMessage(tx('logoUploadSuccess'));
     } catch (_) {
       setToastMessage(tx('logoUploadFailed'));
     }
-  }, [tx]);
-
-  const handleResetCustomLogo = useCallback(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        window.localStorage.removeItem(CUSTOM_LOGO_STORAGE_KEY);
-      } catch (_) {}
-    }
-    setCustomLogoSrc(null);
-    setToastMessage(tx('resetLogoSuccess'));
-  }, [tx]);
+  }, [persistMaskStyle, tx]);
 
   const handleImageFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1748,8 +1863,9 @@ export default function Home() {
           };
         }) as QuadPx;
 
-        // 1段目: プレート全体を黒塗り
-        fillQuad(ctx, quadPx, '#000000');
+        // 1段目: プレート全体を塗り（マスク種別に応じた色）
+        const plateFillColor = maskStyle === 'white' ? '#ffffff' : '#000000';
+        fillQuad(ctx, quadPx, plateFillColor);
         if (manualEditActive) {
           ctx.save();
           ctx.strokeStyle = 'rgba(255, 196, 64, 0.9)';
@@ -1763,19 +1879,24 @@ export default function Home() {
           ctx.stroke();
           ctx.restore();
         }
+
+        if (maskStyle === 'black' || maskStyle === 'white') {
+          return;
+        }
+
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
 
-        // 2段目: ロゴは非歪みで中央配置（内接矩形方式）
+        const overlayImage = maskStyle === 'custom' ? customLogoImage : carkusBrandImage;
         const isLogoImageReady = Boolean(
-          carkusLogoImage &&
-          carkusLogoImage.naturalWidth > 0 &&
-          carkusLogoImage.naturalHeight > 0
+          overlayImage &&
+          overlayImage.naturalWidth > 0 &&
+          overlayImage.naturalHeight > 0
         );
-        // naturalWidth が 0 のロード中はフォールバック比率を使い、ゼロ除算を防ぐ。
-        const logoAspect = isLogoImageReady
-          ? carkusLogoImage!.naturalWidth / carkusLogoImage!.naturalHeight
-          : 3.2;
+        if (!isLogoImageReady) {
+          return;
+        }
+        const logoAspect = overlayImage!.naturalWidth / overlayImage!.naturalHeight;
 
         const midLeft = { x: (quadPx[0].x + quadPx[3].x) / 2, y: (quadPx[0].y + quadPx[3].y) / 2 };
         const midRight = { x: (quadPx[1].x + quadPx[2].x) / 2, y: (quadPx[1].y + quadPx[2].y) / 2 };
@@ -1826,7 +1947,11 @@ export default function Home() {
           lctx.clearRect(0, 0, Lw, Lh);
           lctx.save();
           lctx.translate(Lw / 2, Lh / 2);
-          drawCarkusLogoAtOrigin(lctx, Lw * 0.92, Lh * 0.92, undefined, carkusLogoImage);
+          if (maskStyle === 'carkus') {
+            drawCarkusLogoAtOrigin(lctx, Lw * 0.92, Lh * 0.92, undefined, carkusBrandImage);
+          } else {
+            drawFitImageAtOrigin(lctx, Lw * 0.92, Lh * 0.92, customLogoImage!);
+          }
           lctx.restore();
         }
 
@@ -1851,7 +1976,7 @@ export default function Home() {
         ctx.restore();
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusLogoImage, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
+  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusBrandImage, customLogoImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
 
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
@@ -2185,7 +2310,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
       <input ref={photoPickerRef} type="file" accept="image/*" onChange={handleImageFileSelected} className="hidden" />
-      <input ref={customLogoPickerRef} type="file" accept=".png,.svg,image/png,image/svg+xml" onChange={handleCustomLogoSelected} className="hidden" />
+      <input ref={customLogoPickerRef} type="file" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleCustomLogoSelected} className="hidden" />
       <div className="fixed top-3 right-3 z-[120] flex flex-col items-end gap-2">
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
           <button
@@ -2345,6 +2470,39 @@ export default function Home() {
             <h1 className="text-white text-lg font-light tracking-wide leading-snug">{text.tagline}</h1>
             <p className="text-white/55 text-sm font-light leading-relaxed">{text.heroDescription}</p>
           </div>
+          <div className="w-full max-w-md flex flex-col items-center gap-1.5">
+            <span className="text-white/55 text-[11px] font-light">{text.maskStyleLabel}</span>
+            <div className="flex w-full items-center rounded-full border border-white/20 bg-white/5 overflow-hidden">
+              {(
+                [
+                  ['carkus', text.maskStyleCarkus],
+                  ['black', text.maskStyleBlack],
+                  ['white', text.maskStyleWhite],
+                  ['custom', text.maskStyleCustom],
+                ] as const
+              ).map(([style, label]) => (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => handleMaskStyleChange(style)}
+                  className={`flex-1 px-2 py-2 text-xs font-light transition-colors ${
+                    maskStyle === style ? 'bg-white/20 text-white' : 'text-white/70 hover:bg-white/10'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {maskStyle === 'custom' && (
+              <button
+                type="button"
+                onClick={handlePickCustomLogo}
+                className="text-white/60 text-[11px] font-light underline underline-offset-2 hover:text-white/85"
+              >
+                {text.maskStyleCustomChange}
+              </button>
+            )}
+          </div>
           <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               onClick={startCamera}
@@ -2473,6 +2631,41 @@ export default function Home() {
             {!isProcessing && (
               <>
                 <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-white/70 text-xs font-light w-10">{text.maskStyleLabel}</span>
+                  <div className="flex flex-1 items-center rounded-full border border-white/20 bg-white/5 overflow-hidden">
+                    {(
+                      [
+                        ['carkus', text.maskStyleCarkus],
+                        ['black', text.maskStyleBlack],
+                        ['white', text.maskStyleWhite],
+                        ['custom', text.maskStyleCustom],
+                      ] as const
+                    ).map(([style, label]) => (
+                      <button
+                        key={style}
+                        type="button"
+                        onClick={() => handleMaskStyleChange(style)}
+                        className={`flex-1 px-1.5 py-1.5 text-[10px] font-light ${
+                          maskStyle === style ? 'bg-white/20 text-white' : 'text-white/70 hover:bg-white/10'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {maskStyle === 'custom' && (
+                  <div className="flex justify-end mb-1.5">
+                    <button
+                      type="button"
+                      onClick={handlePickCustomLogo}
+                      className="px-2.5 py-1 rounded-full text-[10px] bg-white/10 border border-white/20 text-white/80 hover:bg-white/20"
+                    >
+                      {text.maskStyleCustomChange}
+                    </button>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-white/70 text-xs font-light w-10">{text.template}</span>
                   <div className="flex items-center rounded-full border border-white/20 bg-white/5 overflow-hidden">
                     <button
@@ -2523,24 +2716,6 @@ export default function Home() {
                   />
                 </div>
               </>
-            )}
-            {!isProcessing && (
-              <div className="flex items-center justify-center gap-1.5 mb-1.5">
-                <button
-                  onClick={handlePickCustomLogo}
-                  disabled={isProcessing}
-                  className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/90 hover:bg-white/20 transition-colors disabled:opacity-50"
-                >
-                  {text.customLogo}
-                </button>
-                <button
-                  onClick={handleResetCustomLogo}
-                  disabled={isProcessing}
-                  className="px-3 py-2 rounded-full text-xs bg-white/10 border border-white/20 text-white/80 hover:bg-white/20 transition-colors disabled:opacity-50"
-                >
-                  {text.resetLogo}
-                </button>
-              </div>
             )}
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
