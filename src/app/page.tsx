@@ -380,79 +380,6 @@ function drawCarkusLogoAtOrigin(
   }
 }
 
-/** ユーザー画像を矩形内にアスペクト比を保って中央配置 */
-function drawFitImageAtOrigin(
-  ctx: CanvasRenderingContext2D,
-  logoWidth: number,
-  logoHeight: number,
-  logoImage: HTMLImageElement
-) {
-  let visual = imageVisualBoundsCache.get(logoImage);
-  if (!visual) {
-    const probeW = Math.min(1024, logoImage.naturalWidth);
-    const probeH = Math.max(1, Math.round(probeW * (logoImage.naturalHeight / logoImage.naturalWidth)));
-    const probe = document.createElement('canvas');
-    probe.width = probeW;
-    probe.height = probeH;
-    const pctx = probe.getContext('2d', { willReadFrequently: true });
-    if (pctx) {
-      pctx.clearRect(0, 0, probeW, probeH);
-      pctx.drawImage(logoImage, 0, 0, probeW, probeH);
-      const data = pctx.getImageData(0, 0, probeW, probeH).data;
-      let minX = probeW;
-      let minY = probeH;
-      let maxX = -1;
-      let maxY = -1;
-      for (let y = 0; y < probeH; y++) {
-        for (let x = 0; x < probeW; x++) {
-          const a = data[(y * probeW + x) * 4 + 3];
-          if (a < 10) continue;
-          if (x < minX) minX = x;
-          if (y < minY) minY = y;
-          if (x > maxX) maxX = x;
-          if (y > maxY) maxY = y;
-        }
-      }
-      if (maxX >= minX && maxY >= minY) {
-        const scaleX = logoImage.naturalWidth / probeW;
-        const scaleY = logoImage.naturalHeight / probeH;
-        visual = {
-          sx: minX * scaleX,
-          sy: minY * scaleY,
-          sw: Math.max(1, (maxX - minX + 1) * scaleX),
-          sh: Math.max(1, (maxY - minY + 1) * scaleY),
-        };
-      } else {
-        visual = { sx: 0, sy: 0, sw: logoImage.naturalWidth, sh: logoImage.naturalHeight };
-      }
-    } else {
-      visual = { sx: 0, sy: 0, sw: logoImage.naturalWidth, sh: logoImage.naturalHeight };
-    }
-    imageVisualBoundsCache.set(logoImage, visual);
-  }
-
-  const visualAspect = visual.sw / Math.max(1, visual.sh);
-  const targetW = Math.max(1, logoWidth * 0.92);
-  const targetH = Math.max(1, logoHeight * 0.92);
-  let drawW = targetW;
-  let drawH = drawW / Math.max(0.01, visualAspect);
-  if (drawH > targetH) {
-    drawH = targetH;
-    drawW = drawH * visualAspect;
-  }
-  ctx.drawImage(
-    logoImage,
-    visual.sx,
-    visual.sy,
-    visual.sw,
-    visual.sh,
-    -drawW / 2,
-    -drawH / 2,
-    drawW,
-    drawH
-  );
-}
-
 // 簡易ブレ検出：Laplacianの分散（低い＝ぼけている）
 function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
   const maxSize = 320;
@@ -495,7 +422,12 @@ function getBlurScore(sourceCanvas: HTMLCanvasElement): number {
 
 const BLUR_SCORE_THRESHOLD = 120; // これ以下ならブレ警告
 const CUSTOM_LOGO_STORAGE_KEY = 'carkus_custom_logo_data_url';
+const CUSTOM_MASK_PREPARED_KEY = 'carkus_custom_mask_prepared';
+const CUSTOM_MASK_SETUP_KEY = 'carkus_custom_mask_setup';
 const MASK_STYLE_STORAGE_KEY = 'carkus_mask_style';
+/** 日本のナンバープレート近似アスペクト（幅:高さ = 2:1） */
+const PLATE_MASK_WIDTH = 520;
+const PLATE_MASK_HEIGHT = 260;
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
 const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
 const LOGO_SCALE_MIN = 0.12;
@@ -509,8 +441,55 @@ type Plan = 'free' | 'pro';
 type MaskTemplate = 'fit' | 'centered' | 'badge';
 type MaskStyle = 'carkus' | 'black' | 'white' | 'custom';
 
+type CustomMaskSetup = {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+};
+
 function isMaskStyle(value: string | null | undefined): value is MaskStyle {
   return value === 'carkus' || value === 'black' || value === 'white' || value === 'custom';
+}
+
+function parseCustomMaskSetup(raw: string | null): CustomMaskSetup {
+  if (!raw) return { scale: 1, offsetX: 0, offsetY: 0 };
+  try {
+    const parsed = JSON.parse(raw) as Partial<CustomMaskSetup>;
+    return {
+      scale: typeof parsed.scale === 'number' && Number.isFinite(parsed.scale) ? parsed.scale : 1,
+      offsetX: typeof parsed.offsetX === 'number' && Number.isFinite(parsed.offsetX) ? parsed.offsetX : 0,
+      offsetY: typeof parsed.offsetY === 'number' && Number.isFinite(parsed.offsetY) ? parsed.offsetY : 0,
+    };
+  } catch {
+    return { scale: 1, offsetX: 0, offsetY: 0 };
+  }
+}
+
+/** ユーザー画像をナンバー形状（2:1）にトリミング・配置したマスク bitmap を生成 */
+function renderPreparedCustomMask(
+  source: HTMLImageElement,
+  setup: CustomMaskSetup
+): HTMLCanvasElement {
+  const W = PLATE_MASK_WIDTH;
+  const H = PLATE_MASK_HEIGHT;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+  const iw = source.naturalWidth || source.width;
+  const ih = source.naturalHeight || source.height;
+  if (!iw || !ih) return canvas;
+  const baseScale = Math.max(W / iw, H / ih);
+  const s = baseScale * Math.max(0.2, setup.scale);
+  const drawW = iw * s;
+  const drawH = ih * s;
+  const x = (W - drawW) / 2 + setup.offsetX;
+  const y = (H - drawH) / 2 + setup.offsetY;
+  ctx.drawImage(source, x, y, drawW, drawH);
+  return canvas;
 }
 const t = {
   ja: {
@@ -580,7 +559,13 @@ const t = {
     maskStyleWhite: '白',
     maskStyleCustom: '独自',
     maskStyleCustomChange: '画像を変更',
+    maskStyleCustomAdjust: 'マスクを調整',
     maskStyleCustomMissing: '独自マスク用の画像を選択してください',
+    customMaskSetupTitle: 'マスク画像をナンバー枠に合わせる',
+    customMaskSetupHint: 'ドラッグで位置、スライダーで拡大。枠いっぱいに覆うように調整してください。',
+    customMaskSetupSave: 'この設定を保存',
+    customMaskSetupScale: '拡大',
+    manualEditFrameHint: '手動編集モードの枠線（黄色）',
     resetLogoSuccess: '標準ロゴに戻しました。',
     proOnlyLogo: '独自ロゴは課金版で利用できます。',
     betaCustomLogoUnavailable: 'β版では独自ロゴは利用できません。',
@@ -675,7 +660,13 @@ const t = {
     maskStyleWhite: 'White',
     maskStyleCustom: 'Custom',
     maskStyleCustomChange: 'Change image',
+    maskStyleCustomAdjust: 'Adjust mask',
     maskStyleCustomMissing: 'Please choose a custom mask image.',
+    customMaskSetupTitle: 'Fit mask to license plate frame',
+    customMaskSetupHint: 'Drag to move, slider to zoom. Cover the entire plate frame.',
+    customMaskSetupSave: 'Save this mask',
+    customMaskSetupScale: 'Zoom',
+    manualEditFrameHint: 'Manual edit frame (amber)',
     resetLogoSuccess: 'Reset to default logo.',
     proOnlyLogo: 'Custom logo is available on Pro plan.',
     betaCustomLogoUnavailable: 'Custom logo is not available in the beta.',
@@ -739,6 +730,16 @@ export default function Home() {
   const [carkusBrandImage, setCarkusBrandImage] = useState<HTMLImageElement | null>(null);
   const [customLogoImage, setCustomLogoImage] = useState<HTMLImageElement | null>(null);
   const [customLogoSrc, setCustomLogoSrc] = useState<string | null>(null);
+  const [customMaskPreparedSrc, setCustomMaskPreparedSrc] = useState<string | null>(null);
+  const [customMaskPreparedImage, setCustomMaskPreparedImage] = useState<HTMLImageElement | null>(null);
+  const [showCustomMaskSetup, setShowCustomMaskSetup] = useState(false);
+  const [setupSourceSrc, setSetupSourceSrc] = useState<string | null>(null);
+  const [setupSourceImage, setSetupSourceImage] = useState<HTMLImageElement | null>(null);
+  const [setupScale, setSetupScale] = useState(1);
+  const [setupOffsetX, setSetupOffsetX] = useState(0);
+  const [setupOffsetY, setSetupOffsetY] = useState(0);
+  const setupCanvasRef = useRef<HTMLCanvasElement>(null);
+  const setupDragRef = useRef<{ startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [isAndroid, setIsAndroid] = useState(false);
@@ -820,9 +821,11 @@ export default function Home() {
     try {
       const savedLogo = window.localStorage.getItem(CUSTOM_LOGO_STORAGE_KEY);
       if (savedLogo) setCustomLogoSrc(savedLogo);
+      const savedPrepared = window.localStorage.getItem(CUSTOM_MASK_PREPARED_KEY);
+      if (savedPrepared) setCustomMaskPreparedSrc(savedPrepared);
       const savedStyle = window.localStorage.getItem(MASK_STYLE_STORAGE_KEY);
       if (isMaskStyle(savedStyle)) {
-        if (savedStyle === 'custom' && !savedLogo) {
+        if (savedStyle === 'custom' && !savedPrepared) {
           setMaskStyle('carkus');
         } else {
           setMaskStyle(savedStyle);
@@ -841,6 +844,40 @@ export default function Home() {
     img.onerror = () => setCustomLogoImage(null);
     img.src = customLogoSrc;
   }, [customLogoSrc]);
+
+  useEffect(() => {
+    if (!customMaskPreparedSrc) {
+      setCustomMaskPreparedImage(null);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => setCustomMaskPreparedImage(img);
+    img.onerror = () => setCustomMaskPreparedImage(null);
+    img.src = customMaskPreparedSrc;
+  }, [customMaskPreparedSrc]);
+
+  useEffect(() => {
+    if (!showCustomMaskSetup || !setupSourceImage || !setupCanvasRef.current) return;
+    const canvas = setupCanvasRef.current;
+    canvas.width = PLATE_MASK_WIDTH;
+    canvas.height = PLATE_MASK_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(0, 0, W, H);
+    const prepared = renderPreparedCustomMask(setupSourceImage, {
+      scale: setupScale,
+      offsetX: setupOffsetX,
+      offsetY: setupOffsetY,
+    });
+    ctx.drawImage(prepared, 0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255, 196, 64, 0.85)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, W - 2, H - 2);
+  }, [showCustomMaskSetup, setupSourceImage, setupScale, setupOffsetX, setupOffsetY]);
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -1115,20 +1152,108 @@ export default function Home() {
     customLogoPickerRef.current?.click();
   }, [tx]);
 
+  const openCustomMaskSetupModal = useCallback(
+    (sourceSrc: string, setup?: CustomMaskSetup) => {
+      const img = new Image();
+      img.onload = () => {
+        setSetupSourceSrc(sourceSrc);
+        setSetupSourceImage(img);
+        const parsed = setup ?? parseCustomMaskSetup(
+          typeof window !== 'undefined' ? window.localStorage.getItem(CUSTOM_MASK_SETUP_KEY) : null
+        );
+        setSetupScale(parsed.scale);
+        setSetupOffsetX(parsed.offsetX);
+        setSetupOffsetY(parsed.offsetY);
+        setShowCustomMaskSetup(true);
+      };
+      img.onerror = () => setToastMessage(tx('logoUploadFailed'));
+      img.src = sourceSrc;
+    },
+    [tx]
+  );
+
+  const saveCustomMaskSetup = useCallback(() => {
+    if (!setupSourceImage) return;
+    const setup: CustomMaskSetup = { scale: setupScale, offsetX: setupOffsetX, offsetY: setupOffsetY };
+    const prepared = renderPreparedCustomMask(setupSourceImage, setup);
+    const dataUrl = prepared.toDataURL('image/jpeg', 0.92);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(CUSTOM_MASK_PREPARED_KEY, dataUrl);
+        window.localStorage.setItem(CUSTOM_MASK_SETUP_KEY, JSON.stringify(setup));
+        if (setupSourceSrc) window.localStorage.setItem(CUSTOM_LOGO_STORAGE_KEY, setupSourceSrc);
+      }
+    } catch (_) {
+      setToastMessage(tx('logoUploadFailed'));
+      return;
+    }
+    setCustomMaskPreparedSrc(dataUrl);
+    if (setupSourceSrc) setCustomLogoSrc(setupSourceSrc);
+    persistMaskStyle('custom');
+    setShowCustomMaskSetup(false);
+    setToastMessage(tx('logoUploadSuccess'));
+  }, [persistMaskStyle, setupOffsetX, setupOffsetY, setupScale, setupSourceImage, setupSourceSrc, tx]);
+
   const handleMaskStyleChange = useCallback(
     (style: MaskStyle) => {
-      if (style === 'custom' && !customLogoSrc) {
+      if (style === 'custom') {
+        if (customMaskPreparedSrc) {
+          persistMaskStyle('custom');
+          return;
+        }
+        if (customLogoSrc) {
+          openCustomMaskSetupModal(customLogoSrc);
+          return;
+        }
         openCustomLogoPicker();
         return;
       }
       persistMaskStyle(style);
     },
-    [customLogoSrc, openCustomLogoPicker, persistMaskStyle]
+    [customLogoSrc, customMaskPreparedSrc, openCustomLogoPicker, openCustomMaskSetupModal, persistMaskStyle]
   );
 
   const handlePickCustomLogo = useCallback(() => {
     openCustomLogoPicker();
   }, [openCustomLogoPicker]);
+
+  const handleAdjustCustomMask = useCallback(() => {
+    const src = customLogoSrc || setupSourceSrc;
+    if (!src) {
+      openCustomLogoPicker();
+      return;
+    }
+    openCustomMaskSetupModal(src);
+  }, [customLogoSrc, openCustomLogoPicker, openCustomMaskSetupModal, setupSourceSrc]);
+
+  const onSetupPointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!setupCanvasRef.current) return;
+    setupDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      offsetX: setupOffsetX,
+      offsetY: setupOffsetY,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [setupOffsetX, setupOffsetY]);
+
+  const onSetupPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = setupDragRef.current;
+    const canvas = setupCanvasRef.current;
+    if (!drag || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = PLATE_MASK_WIDTH / Math.max(1, rect.width);
+    const scaleY = PLATE_MASK_HEIGHT / Math.max(1, rect.height);
+    setSetupOffsetX(drag.offsetX + (e.clientX - drag.startX) * scaleX);
+    setSetupOffsetY(drag.offsetY + (e.clientY - drag.startY) * scaleY);
+  }, []);
+
+  const onSetupPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    setupDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, []);
 
   const handleUpgradeClick = useCallback(() => {
     trackPlanEvent('upgrade_click');
@@ -1175,18 +1300,11 @@ export default function Home() {
         test.src = dataUrl;
       });
       if (!test.naturalWidth || !test.naturalHeight) throw new Error('image_invalid');
-      if (typeof window !== 'undefined' && window.localStorage) {
-        try {
-          window.localStorage.setItem(CUSTOM_LOGO_STORAGE_KEY, dataUrl);
-        } catch (_) {}
-      }
-      setCustomLogoSrc(dataUrl);
-      persistMaskStyle('custom');
-      setToastMessage(tx('logoUploadSuccess'));
+      openCustomMaskSetupModal(dataUrl, { scale: 1, offsetX: 0, offsetY: 0 });
     } catch (_) {
       setToastMessage(tx('logoUploadFailed'));
     }
-  }, [persistMaskStyle, tx]);
+  }, [openCustomMaskSetupModal, tx]);
 
   const handleImageFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1863,9 +1981,118 @@ export default function Home() {
           };
         }) as QuadPx;
 
-        // 1段目: プレート全体を塗り（マスク種別に応じた色）
-        const plateFillColor = maskStyle === 'white' ? '#ffffff' : '#000000';
-        fillQuad(ctx, quadPx, plateFillColor);
+        // マスク種別ごとの描画
+        if (maskStyle === 'custom') {
+          if (
+            customMaskPreparedImage &&
+            customMaskPreparedImage.naturalWidth > 0 &&
+            customMaskPreparedImage.naturalHeight > 0
+          ) {
+            drawImageWarpedToQuad(
+              ctx,
+              customMaskPreparedImage,
+              quadPx,
+              PLATE_MASK_WIDTH,
+              PLATE_MASK_HEIGHT
+            );
+          } else {
+            fillQuad(ctx, quadPx, '#000000');
+          }
+        } else {
+          const plateFillColor = maskStyle === 'white' ? '#ffffff' : '#000000';
+          fillQuad(ctx, quadPx, plateFillColor);
+
+          if (maskStyle === 'black' || maskStyle === 'white') {
+            // 単色マスクのみ
+          } else if (maskStyle === 'carkus') {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+
+            const overlayImage = carkusBrandImage;
+            const isLogoImageReady = Boolean(
+              overlayImage &&
+              overlayImage.naturalWidth > 0 &&
+              overlayImage.naturalHeight > 0
+            );
+            if (isLogoImageReady) {
+              const logoAspect = overlayImage!.naturalWidth / overlayImage!.naturalHeight;
+
+              const midLeft = { x: (quadPx[0].x + quadPx[3].x) / 2, y: (quadPx[0].y + quadPx[3].y) / 2 };
+              const midRight = { x: (quadPx[1].x + quadPx[2].x) / 2, y: (quadPx[1].y + quadPx[2].y) / 2 };
+              const midTop = { x: (quadPx[0].x + quadPx[1].x) / 2, y: (quadPx[0].y + quadPx[1].y) / 2 };
+              const midBottom = { x: (quadPx[2].x + quadPx[3].x) / 2, y: (quadPx[2].y + quadPx[3].y) / 2 };
+              const axisUxRaw = midRight.x - midLeft.x;
+              const axisUyRaw = midRight.y - midLeft.y;
+              const axisULen = Math.max(1e-6, Math.hypot(axisUxRaw, axisUyRaw));
+              const axisUx = axisUxRaw / axisULen;
+              const axisUy = axisUyRaw / axisULen;
+              let axisVx = -axisUy;
+              let axisVy = axisUx;
+              const topBottomVecX = midBottom.x - midTop.x;
+              const topBottomVecY = midBottom.y - midTop.y;
+              if (axisVx * topBottomVecX + axisVy * topBottomVecY < 0) {
+                axisVx *= -1;
+                axisVy *= -1;
+              }
+
+              const plateWidthPx = Math.max(1, Math.hypot(midRight.x - midLeft.x, midRight.y - midLeft.y));
+              const plateHeightPx = Math.max(1, Math.abs(topBottomVecX * axisVx + topBottomVecY * axisVy));
+              const insetPx = Math.max(1, plateHeightPx * LOGO_INSET_RATIO_BY_PLATE_HEIGHT);
+              const availableW = Math.max(1, plateWidthPx - insetPx * 2);
+              const availableH = Math.max(1, plateHeightPx - insetPx * 2);
+
+              let logoDrawW = availableW;
+              let logoDrawH = logoDrawW / Math.max(0.01, logoAspect);
+              if (logoDrawH > availableH) {
+                logoDrawH = availableH;
+                logoDrawW = logoDrawH * logoAspect;
+              }
+              const templateScale = maskTemplate === 'fit' ? 1 : maskTemplate === 'centered' ? 0.78 : 0.52;
+              logoDrawW *= templateScale;
+              logoDrawH *= templateScale;
+              const templateShiftU = maskTemplate === 'badge' ? availableW * 0.22 : 0;
+
+              const Lh = 220;
+              const Lw = Math.max(120, Math.round(Lh * logoAspect));
+              let logoCanvas = logoCanvasRef.current;
+              if (!logoCanvas) {
+                logoCanvas = document.createElement('canvas');
+                logoCanvasRef.current = logoCanvas;
+              }
+              logoCanvas.width = Lw;
+              logoCanvas.height = Lh;
+              const lctx = logoCanvas.getContext('2d');
+              if (lctx) {
+                lctx.clearRect(0, 0, Lw, Lh);
+                lctx.save();
+                lctx.translate(Lw / 2, Lh / 2);
+                drawCarkusLogoAtOrigin(lctx, Lw * 0.92, Lh * 0.92, undefined, carkusBrandImage);
+                lctx.restore();
+              }
+
+              const quadCenterX = (quadPx[0].x + quadPx[1].x + quadPx[2].x + quadPx[3].x) / 4;
+              const quadCenterY = (quadPx[0].y + quadPx[1].y + quadPx[2].y + quadPx[3].y) / 4;
+
+              const logoCenterX =
+                quadCenterX +
+                axisUx * templateShiftU +
+                axisUx * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
+                axisVx * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
+              const logoCenterY =
+                quadCenterY +
+                axisUy * templateShiftU +
+                axisUy * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
+                axisVy * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
+              const logoAngle = Math.atan2(axisUy, axisUx);
+              ctx.save();
+              ctx.translate(logoCenterX, logoCenterY);
+              ctx.rotate(logoAngle);
+              ctx.drawImage(logoCanvas, -logoDrawW / 2, -logoDrawH / 2, logoDrawW, logoDrawH);
+              ctx.restore();
+            }
+          }
+        }
+
         if (manualEditActive) {
           ctx.save();
           ctx.strokeStyle = 'rgba(255, 196, 64, 0.9)';
@@ -1879,104 +2106,9 @@ export default function Home() {
           ctx.stroke();
           ctx.restore();
         }
-
-        if (maskStyle === 'black' || maskStyle === 'white') {
-          return;
-        }
-
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-
-        const overlayImage = maskStyle === 'custom' ? customLogoImage : carkusBrandImage;
-        const isLogoImageReady = Boolean(
-          overlayImage &&
-          overlayImage.naturalWidth > 0 &&
-          overlayImage.naturalHeight > 0
-        );
-        if (!isLogoImageReady) {
-          return;
-        }
-        const logoAspect = overlayImage!.naturalWidth / overlayImage!.naturalHeight;
-
-        const midLeft = { x: (quadPx[0].x + quadPx[3].x) / 2, y: (quadPx[0].y + quadPx[3].y) / 2 };
-        const midRight = { x: (quadPx[1].x + quadPx[2].x) / 2, y: (quadPx[1].y + quadPx[2].y) / 2 };
-        const midTop = { x: (quadPx[0].x + quadPx[1].x) / 2, y: (quadPx[0].y + quadPx[1].y) / 2 };
-        const midBottom = { x: (quadPx[2].x + quadPx[3].x) / 2, y: (quadPx[2].y + quadPx[3].y) / 2 };
-        const axisUxRaw = midRight.x - midLeft.x;
-        const axisUyRaw = midRight.y - midLeft.y;
-        const axisULen = Math.max(1e-6, Math.hypot(axisUxRaw, axisUyRaw));
-        const axisUx = axisUxRaw / axisULen;
-        const axisUy = axisUyRaw / axisULen;
-        let axisVx = -axisUy;
-        let axisVy = axisUx;
-        const topBottomVecX = midBottom.x - midTop.x;
-        const topBottomVecY = midBottom.y - midTop.y;
-        if (axisVx * topBottomVecX + axisVy * topBottomVecY < 0) {
-          axisVx *= -1;
-          axisVy *= -1;
-        }
-
-        const plateWidthPx = Math.max(1, Math.hypot(midRight.x - midLeft.x, midRight.y - midLeft.y));
-        const plateHeightPx = Math.max(1, Math.abs(topBottomVecX * axisVx + topBottomVecY * axisVy));
-        const insetPx = Math.max(1, plateHeightPx * LOGO_INSET_RATIO_BY_PLATE_HEIGHT);
-        const availableW = Math.max(1, plateWidthPx - insetPx * 2);
-        const availableH = Math.max(1, plateHeightPx - insetPx * 2);
-
-        let logoDrawW = availableW;
-        let logoDrawH = logoDrawW / Math.max(0.01, logoAspect);
-        if (logoDrawH > availableH) {
-          logoDrawH = availableH;
-          logoDrawW = logoDrawH * logoAspect;
-        }
-        const templateScale = maskTemplate === 'fit' ? 1 : maskTemplate === 'centered' ? 0.78 : 0.52;
-        logoDrawW *= templateScale;
-        logoDrawH *= templateScale;
-        const templateShiftU = maskTemplate === 'badge' ? availableW * 0.22 : 0;
-
-        const Lh = 220;
-        const Lw = Math.max(120, Math.round(Lh * logoAspect));
-        let logoCanvas = logoCanvasRef.current;
-        if (!logoCanvas) {
-          logoCanvas = document.createElement('canvas');
-          logoCanvasRef.current = logoCanvas;
-        }
-        logoCanvas.width = Lw;
-        logoCanvas.height = Lh;
-        const lctx = logoCanvas.getContext('2d');
-        if (lctx) {
-          lctx.clearRect(0, 0, Lw, Lh);
-          lctx.save();
-          lctx.translate(Lw / 2, Lh / 2);
-          if (maskStyle === 'carkus') {
-            drawCarkusLogoAtOrigin(lctx, Lw * 0.92, Lh * 0.92, undefined, carkusBrandImage);
-          } else {
-            drawFitImageAtOrigin(lctx, Lw * 0.92, Lh * 0.92, customLogoImage!);
-          }
-          lctx.restore();
-        }
-
-        const quadCenterX = (quadPx[0].x + quadPx[1].x + quadPx[2].x + quadPx[3].x) / 4;
-        const quadCenterY = (quadPx[0].y + quadPx[1].y + quadPx[2].y + quadPx[3].y) / 4;
-
-        const logoCenterX =
-          quadCenterX +
-          axisUx * templateShiftU +
-          axisUx * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
-          axisVx * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
-        const logoCenterY =
-          quadCenterY +
-          axisUy * templateShiftU +
-          axisUy * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
-          axisVy * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
-        const logoAngle = Math.atan2(axisUy, axisUx);
-        ctx.save();
-        ctx.translate(logoCenterX, logoCenterY);
-        ctx.rotate(logoAngle);
-        ctx.drawImage(logoCanvas, -logoDrawW / 2, -logoDrawH / 2, logoDrawW, logoDrawH);
-        ctx.restore();
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusBrandImage, customLogoImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
+  }, [screenMode, previewImageLoaded, detectedCorners, detectedBaseAngles, carkusBrandImage, customMaskPreparedImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
 
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
@@ -2494,13 +2626,24 @@ export default function Home() {
               ))}
             </div>
             {maskStyle === 'custom' && (
-              <button
-                type="button"
-                onClick={handlePickCustomLogo}
-                className="text-white/60 text-[11px] font-light underline underline-offset-2 hover:text-white/85"
-              >
-                {text.maskStyleCustomChange}
-              </button>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={handlePickCustomLogo}
+                  className="text-white/60 text-[11px] font-light underline underline-offset-2 hover:text-white/85"
+                >
+                  {text.maskStyleCustomChange}
+                </button>
+                {customMaskPreparedSrc && (
+                  <button
+                    type="button"
+                    onClick={handleAdjustCustomMask}
+                    className="text-white/60 text-[11px] font-light underline underline-offset-2 hover:text-white/85"
+                  >
+                    {text.maskStyleCustomAdjust}
+                  </button>
+                )}
+              </div>
             )}
           </div>
           <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -2559,6 +2702,65 @@ export default function Home() {
             </Link>
           </nav>
         </main>
+      )}
+
+      {showCustomMaskSetup && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+          <div className="bg-black/80 backdrop-blur-2xl rounded-2xl px-5 py-5 max-w-lg w-full shadow-2xl flex flex-col gap-4 border border-white/20">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-white font-light text-base">{text.customMaskSetupTitle}</h2>
+                <p className="text-white/60 text-xs font-light mt-1 leading-relaxed">{text.customMaskSetupHint}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCustomMaskSetup(false)}
+                className="text-white/60 hover:text-white shrink-0"
+                aria-label={text.close}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="w-full rounded-lg overflow-hidden border-2 border-amber-400/80 bg-black">
+              <canvas
+                ref={setupCanvasRef}
+                className="w-full aspect-[2/1] touch-none cursor-grab active:cursor-grabbing"
+                onPointerDown={onSetupPointerDown}
+                onPointerMove={onSetupPointerMove}
+                onPointerUp={onSetupPointerUp}
+                onPointerCancel={onSetupPointerUp}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-white/70 text-xs font-light w-12 shrink-0">{text.customMaskSetupScale}</span>
+              <input
+                type="range"
+                min="0.5"
+                max="3"
+                step="0.05"
+                value={setupScale}
+                onChange={(e) => setSetupScale(Number(e.target.value))}
+                className="slider-large flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCustomMaskSetup(false)}
+                className="px-4 py-2 rounded-full text-sm font-light bg-white/10 border border-white/20 text-white/80 hover:bg-white/20"
+              >
+                {text.close}
+              </button>
+              <button
+                type="button"
+                onClick={saveCustomMaskSetup}
+                className="px-4 py-2 rounded-full text-sm font-light bg-white text-black hover:bg-white/90"
+              >
+                {text.customMaskSetupSave}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showInstallGuide && (
@@ -2655,7 +2857,7 @@ export default function Home() {
                   </div>
                 </div>
                 {maskStyle === 'custom' && (
-                  <div className="flex justify-end mb-1.5">
+                  <div className="flex justify-end gap-2 mb-1.5">
                     <button
                       type="button"
                       onClick={handlePickCustomLogo}
@@ -2663,8 +2865,18 @@ export default function Home() {
                     >
                       {text.maskStyleCustomChange}
                     </button>
+                    {customMaskPreparedSrc && (
+                      <button
+                        type="button"
+                        onClick={handleAdjustCustomMask}
+                        className="px-2.5 py-1 rounded-full text-[10px] bg-white/10 border border-white/20 text-white/80 hover:bg-white/20"
+                      >
+                        {text.maskStyleCustomAdjust}
+                      </button>
+                    )}
                   </div>
                 )}
+                {maskStyle === 'carkus' && (
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-white/70 text-xs font-light w-10">{text.template}</span>
                   <div className="flex items-center rounded-full border border-white/20 bg-white/5 overflow-hidden">
@@ -2691,6 +2903,7 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+                )}
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-white/70 text-xs font-light w-10">{text.angle}</span>
                   <input
