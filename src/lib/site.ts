@@ -4,7 +4,7 @@
  */
 export const site = {
   name: 'Carkus',
-  nameReading: 'カーカス',
+  nameReading: 'カークス',
   taglineJa: '車の写真のナンバーを、ロゴでマスク',
   taglineEn: 'Mask license plates on car photos with a logo',
   descriptionJa:
