@@ -5,12 +5,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 type MetricsSingleResponse = {
   mode: 'single';
   date: string;
+  pageViews?: number;
+  pageViewUniqueUsers?: number;
   uniqueUsers: number;
   detectAttempts?: number;
   detectSuccess?: number;
   detectFailure?: number;
   countryCounts?: Record<string, number>;
   deviceTypeCounts?: Record<string, number>;
+  pageViewCountryCounts?: Record<string, number>;
+  pageViewDeviceTypeCounts?: Record<string, number>;
   detectFailureTypeCounts?: Record<string, number>;
   storage: 'kv' | 'memory';
   upgradeClick?: number;
@@ -23,6 +27,8 @@ type MetricsRangeResponse = {
   days: number;
   storage: 'kv' | 'memory';
   totals: {
+    pageViews: number;
+    pageViewUniqueUsers: number;
     uniqueUsers: number;
     detectAttempts: number;
     detectSuccess: number;
@@ -33,6 +39,8 @@ type MetricsRangeResponse = {
   };
   series: Array<{
     date: string;
+    pageViews: number;
+    pageViewUniqueUsers: number;
     uniqueUsers: number;
     detectAttempts: number;
     detectSuccess: number;
@@ -129,6 +137,8 @@ export default function AdminMetricsPage() {
     return [
       {
         date: data.date,
+        pageViews: data.pageViews ?? 0,
+        pageViewUniqueUsers: data.pageViewUniqueUsers ?? 0,
         uniqueUsers: data.uniqueUsers,
         detectAttempts: data.detectAttempts ?? 0,
         detectSuccess: data.detectSuccess ?? 0,
@@ -145,6 +155,8 @@ export default function AdminMetricsPage() {
       string,
       {
         date: string;
+        pageViews: number;
+        pageViewUniqueUsers: number;
         uniqueUsers: number;
         detectAttempts: number;
         detectSuccess: number;
@@ -161,6 +173,8 @@ export default function AdminMetricsPage() {
       const weekStart = d.toISOString().slice(0, 10);
       const current = buckets.get(weekStart) ?? {
         date: weekStart,
+        pageViews: 0,
+        pageViewUniqueUsers: 0,
         uniqueUsers: 0,
         detectAttempts: 0,
         detectSuccess: 0,
@@ -168,6 +182,8 @@ export default function AdminMetricsPage() {
         upgradeClick: 0,
         featureBlockedByPlan: 0,
       };
+      current.pageViews += row.pageViews;
+      current.pageViewUniqueUsers += row.pageViewUniqueUsers;
       current.uniqueUsers += row.uniqueUsers;
       current.detectAttempts += row.detectAttempts;
       current.detectSuccess += row.detectSuccess;
@@ -192,6 +208,8 @@ export default function AdminMetricsPage() {
     if (!chartSeries.length) return;
     const header = [
       'date_or_week_start',
+      'page_views',
+      'page_view_unique_users',
       'unique_users',
       'detect_attempts',
       'detect_success',
@@ -202,6 +220,8 @@ export default function AdminMetricsPage() {
     const lines = chartSeries.map((row) =>
       [
         row.date,
+        row.pageViews,
+        row.pageViewUniqueUsers,
         row.uniqueUsers,
         row.detectAttempts,
         row.detectSuccess,
@@ -228,7 +248,7 @@ export default function AdminMetricsPage() {
         <header className="space-y-2">
           <h1 className="text-2xl md:text-3xl font-light tracking-wide">Carkus Metrics</h1>
           <p className="text-white/70 text-sm">
-            期間を選んで総数と推移を確認できます（単日表示にも対応）。
+            日次のアクセス数（PV/UV）と AI 検出の利用状況を確認できます（JST 基準）。
           </p>
         </header>
 
@@ -330,12 +350,12 @@ export default function AdminMetricsPage() {
               value={data.mode === 'range' ? `${data.from} 〜 ${data.to}` : data.date}
             />
             <MetricCard
-              label="利用人数（合計）"
-              value={`${data.mode === 'range' ? data.totals.uniqueUsers : data.uniqueUsers}`}
+              label="PV（ページビュー）"
+              value={`${data.mode === 'range' ? data.totals.pageViews : data.pageViews ?? 0}`}
             />
             <MetricCard
-              label="検出リクエスト（合計）"
-              value={`${data.mode === 'range' ? data.totals.detectAttempts : data.detectAttempts ?? 0}`}
+              label="UV（訪問者数）"
+              value={`${data.mode === 'range' ? data.totals.pageViewUniqueUsers : data.pageViewUniqueUsers ?? 0}`}
             />
             <MetricCard label="保存方式" value={data.storage === 'kv' ? 'KV（永続）' : 'Memory（一時）'} />
           </section>
@@ -344,6 +364,10 @@ export default function AdminMetricsPage() {
         {data && (
           <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <MetricCard
+              label="検出リクエスト（合計）"
+              value={`${data.mode === 'range' ? data.totals.detectAttempts : data.detectAttempts ?? 0}`}
+            />
+            <MetricCard
               label="検出成功（合計）"
               value={`${data.mode === 'range' ? data.totals.detectSuccess : data.detectSuccess ?? 0}`}
             />
@@ -351,6 +375,15 @@ export default function AdminMetricsPage() {
               label="検出失敗（合計）"
               value={`${data.mode === 'range' ? data.totals.detectFailure : data.detectFailure ?? 0}`}
             />
+            <MetricCard
+              label="アクティブ端末（全イベント）"
+              value={`${data.mode === 'range' ? data.totals.uniqueUsers : data.uniqueUsers}`}
+            />
+          </section>
+        )}
+
+        {data && (
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <MetricCard
               label="feature_blocked_by_plan"
               value={`${data.mode === 'range' ? data.totals.featureBlockedByPlan : data.featureBlockedByPlan ?? 0}`}
@@ -364,6 +397,16 @@ export default function AdminMetricsPage() {
 
         {data && data.mode === 'single' && (
           <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <MetricListCard
+              label="国別（page_view）"
+              entries={Object.entries(data.pageViewCountryCounts ?? {}).sort((a, b) => b[1] - a[1])}
+              emptyLabel="データなし"
+            />
+            <MetricListCard
+              label="端末別（page_view）"
+              entries={Object.entries(data.pageViewDeviceTypeCounts ?? {}).sort((a, b) => b[1] - a[1])}
+              emptyLabel="データなし"
+            />
             <MetricListCard
               label="国別（detect_attempt）"
               entries={Object.entries(data.countryCounts ?? {}).sort((a, b) => b[1] - a[1])}
@@ -444,6 +487,8 @@ function LineChart({
 }: {
   series: Array<{
     date: string;
+    pageViews: number;
+    pageViewUniqueUsers: number;
     uniqueUsers: number;
     detectAttempts: number;
     detectSuccess: number;
@@ -458,6 +503,8 @@ function LineChart({
   const pad = 26;
   const maxY = Math.max(
     1,
+    ...series.map((s) => s.pageViews),
+    ...series.map((s) => s.pageViewUniqueUsers),
     ...series.map((s) => s.uniqueUsers),
     ...series.map((s) => s.detectAttempts),
     ...series.map((s) => s.detectSuccess),
@@ -465,6 +512,8 @@ function LineChart({
   );
   const x = (i: number) => (series.length <= 1 ? w / 2 : pad + (i * (w - pad * 2)) / (series.length - 1));
   const y = (v: number) => h - pad - (v / maxY) * (h - pad * 2);
+  const pageViewPoints = series.map((s, i) => `${x(i)},${y(s.pageViews)}`).join(' ');
+  const pageViewUvPoints = series.map((s, i) => `${x(i)},${y(s.pageViewUniqueUsers)}`).join(' ');
   const usersPoints = series.map((s, i) => `${x(i)},${y(s.uniqueUsers)}`).join(' ');
   const attemptsPoints = series.map((s, i) => `${x(i)},${y(s.detectAttempts)}`).join(' ');
   const successPoints = series.map((s, i) => `${x(i)},${y(s.detectSuccess)}`).join(' ');
@@ -482,13 +531,17 @@ function LineChart({
             </text>
           </g>
         ))}
-        <polyline fill="none" stroke="rgb(56 189 248)" strokeWidth="3" points={usersPoints} />
-        <polyline fill="none" stroke="rgb(251 191 36)" strokeWidth="3" points={attemptsPoints} />
-        <polyline fill="none" stroke="rgb(74 222 128)" strokeWidth="3" points={successPoints} />
-        <polyline fill="none" stroke="rgb(248 113 113)" strokeWidth="3" points={failurePoints} />
+        <polyline fill="none" stroke="rgb(147 197 253)" strokeWidth="3" points={pageViewPoints} />
+        <polyline fill="none" stroke="rgb(56 189 248)" strokeWidth="3" points={pageViewUvPoints} />
+        <polyline fill="none" stroke="rgb(167 139 250)" strokeWidth="2" points={usersPoints} />
+        <polyline fill="none" stroke="rgb(251 191 36)" strokeWidth="2" points={attemptsPoints} />
+        <polyline fill="none" stroke="rgb(74 222 128)" strokeWidth="2" points={successPoints} />
+        <polyline fill="none" stroke="rgb(248 113 113)" strokeWidth="2" points={failurePoints} />
       </svg>
       <div className="flex flex-wrap gap-4 text-xs text-white/75">
-        <span>■ ユニーク端末</span>
+        <span className="text-sky-200">■ PV</span>
+        <span className="text-sky-400">■ UV（訪問）</span>
+        <span className="text-violet-300">■ アクティブ端末</span>
         <span className="text-amber-200">■ 検出リクエスト</span>
         <span className="text-emerald-300">■ 成功</span>
         <span className="text-red-300">■ 失敗</span>

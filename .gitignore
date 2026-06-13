@@ -47,3 +47,5 @@ next-env.d.ts
 
 # temporary uploads
 /public/temp
+.env*.local
+.metrics-admin-token.local

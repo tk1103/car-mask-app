@@ -11,6 +11,8 @@ type PreflightCheck = {
 
 type DailyPoint = {
   date: string;
+  pageViews: number;
+  pageViewUniqueUsers: number;
   uniqueUsers: number;
   detectAttempts: number;
   detectSuccess: number;
@@ -170,6 +172,8 @@ export async function GET(request: NextRequest) {
       const summaries = await Promise.all(dates.map((d) => getUsageSummary(d)));
       const series: DailyPoint[] = summaries.map((s) => ({
         date: s.date,
+        pageViews: s.pageViews,
+        pageViewUniqueUsers: s.pageViewUniqueUsers,
         uniqueUsers: s.uniqueUsers,
         detectAttempts: s.detectAttempts,
         detectSuccess: s.detectSuccess,
@@ -180,6 +184,8 @@ export async function GET(request: NextRequest) {
       }));
       const totals = series.reduce(
         (acc, row) => {
+          acc.pageViews += row.pageViews;
+          acc.pageViewUniqueUsers += row.pageViewUniqueUsers;
           acc.uniqueUsers += row.uniqueUsers;
           acc.detectAttempts += row.detectAttempts;
           acc.detectSuccess += row.detectSuccess;
@@ -192,6 +198,8 @@ export async function GET(request: NextRequest) {
           return acc;
         },
         {
+          pageViews: 0,
+          pageViewUniqueUsers: 0,
           uniqueUsers: 0,
           detectAttempts: 0,
           detectSuccess: 0,

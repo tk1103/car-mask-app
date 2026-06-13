@@ -51,25 +51,41 @@ for target in production preview development; do
 done
 
 echo ""
-read -r -p "Do you also want to set KV_REST_API_URL / KV_REST_API_TOKEN now? (y/N): " SET_KV
-if [[ "${SET_KV,,}" == "y" ]]; then
-  read -r -p "KV_REST_API_URL: " KV_REST_API_URL
-  read -r -p "KV_REST_API_TOKEN: " KV_REST_API_TOKEN
-
-  if [[ -n "${KV_REST_API_URL}" && -n "${KV_REST_API_TOKEN}" ]]; then
+echo "4) Syncing KV_REST_API_* from Upstash integration (if present)..."
+npx vercel env pull .env.vercel.tmp --environment=production --yes >/dev/null 2>&1 || true
+if [[ -f .env.vercel.tmp ]]; then
+  KV_URL="$(grep '^KVRESTAPI_KV_REST_API_URL=' .env.vercel.tmp | sed 's/^KVRESTAPI_KV_REST_API_URL=//' | tr -d '"' || true)"
+  KV_TOKEN="$(grep '^KVRESTAPI_KV_REST_API_TOKEN=' .env.vercel.tmp | sed 's/^KVRESTAPI_KV_REST_API_TOKEN=//' | tr -d '"' || true)"
+  if [[ -n "${KV_URL}" && -n "${KV_TOKEN}" ]]; then
     for target in production preview development; do
-      set_vercel_env "KV_REST_API_URL" "$KV_REST_API_URL" "$target"
-      set_vercel_env "KV_REST_API_TOKEN" "$KV_REST_API_TOKEN" "$target"
-      echo "  - KV vars set for $target"
+      npx vercel env rm KV_REST_API_URL "$target" --yes >/dev/null 2>&1 || true
+      npx vercel env rm KV_REST_API_TOKEN "$target" --yes >/dev/null 2>&1 || true
+      if [[ "$target" == "preview" ]]; then
+        npx vercel env add KV_REST_API_URL preview --value "$KV_URL" --yes >/dev/null 2>&1 || \
+          printf "%s" "$KV_URL" | npx vercel env add KV_REST_API_URL preview --yes >/dev/null 2>&1 || true
+        npx vercel env add KV_REST_API_TOKEN preview --value "$KV_TOKEN" --yes >/dev/null 2>&1 || \
+          printf "%s" "$KV_TOKEN" | npx vercel env add KV_REST_API_TOKEN preview --yes >/dev/null 2>&1 || true
+      else
+        printf "%s" "$KV_URL" | npx vercel env add KV_REST_API_URL "$target" --yes >/dev/null
+        printf "%s" "$KV_TOKEN" | npx vercel env add KV_REST_API_TOKEN "$target" --yes >/dev/null
+      fi
+      echo "  - KV_REST_API_* synced for $target"
     done
   else
-    echo "  - KV values were empty, skipped."
+    echo "  - KVRESTAPI_* not found. Run: npx vercel install upstash"
   fi
+  rm -f .env.vercel.tmp
 fi
 
 echo ""
 echo "Done."
+echo "METRICS_ADMIN_TOKEN (save securely):"
+echo "  $METRICS_ADMIN_TOKEN"
+echo ""
+echo "Admin dashboard:"
+echo "  https://auto-mobile-camera.vercel.app/admin/metrics"
+echo ""
 echo "Next:"
 echo "  1) Deploy: npx vercel --prod"
-echo "  2) Check metrics API:"
-echo "     curl -H \"x-admin-token: $METRICS_ADMIN_TOKEN\" \"https://<your-domain>/api/admin/metrics\""
+echo "  2) Preflight check:"
+echo "     curl -H \"x-admin-token: $METRICS_ADMIN_TOKEN\" \"https://auto-mobile-camera.vercel.app/api/admin/metrics?preflight=1\""
