@@ -131,11 +131,15 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
 
 /** 編集用デフォルト四角（正規化座標 0-1）。解析失敗時やAPIエラー時に使用。一般的なナンバープレート位置（画像下部中央） */
 function getDefaultCenterCorners(): Corners {
+  const cx = 0.5;
+  const cy = 0.8;
+  const halfW = 0.11;
+  const halfH = 0.05;
   return [
-    { x: 0.28, y: 0.70 },
-    { x: 0.72, y: 0.70 },
-    { x: 0.72, y: 0.90 },
-    { x: 0.28, y: 0.90 },
+    { x: cx - halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy - halfH },
+    { x: cx + halfW, y: cy + halfH },
+    { x: cx - halfW, y: cy + halfH },
   ];
 }
 
@@ -432,6 +436,12 @@ const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
 const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心補正（-0.5〜0.5想定）
 const LOGO_SCALE_MIN = 0.12;
 const LOGO_SCALE_MAX = 2;
+/** 手動編集・解析失敗時のマスク初期スケール（検出成功時は 1） */
+const DEFAULT_MANUAL_MASK_SCALE = 0.5;
+/** Free プラン書き出し時の最大高さ（px） */
+const FREE_EXPORT_MAX_HEIGHT = 1280;
+const FREE_EXPORT_JPEG_QUALITY = 0.92;
+const PRO_EXPORT_JPEG_QUALITY = 0.99;
 
 // 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
 const LOGO_CANVAS_WIDTH = 400;
@@ -440,6 +450,18 @@ type Lang = 'ja' | 'en';
 type Plan = 'free' | 'pro';
 type MaskTemplate = 'fit' | 'centered' | 'badge';
 type MaskStyle = 'carkus' | 'black' | 'white' | 'custom';
+
+type RetakeSnapshot = {
+  previewImageUrl: string;
+  detectedCorners: Corners[];
+  detectedBaseAngles: number[];
+  editLogoOffset: { x: number; y: number };
+  editLogoScale: number;
+  editLogoRotation: number;
+  detectionFailed: boolean;
+  manualEditActive: boolean;
+  maskTemplate: MaskTemplate;
+};
 
 type CustomMaskSetup = {
   scale: number;
@@ -512,6 +534,7 @@ const t = {
     saveSuccess: '保存しました',
     saveThanks: 'ご利用ありがとうございます',
     retake: '撮り直す',
+    backToEdit: '編集に戻る',
     angle: '角度',
     size: 'サイズ',
     template: 'テンプレ',
@@ -613,6 +636,7 @@ const t = {
     saveSuccess: 'Saved',
     saveThanks: 'Thank you for using Carkus',
     retake: 'Retake',
+    backToEdit: 'Back to edit',
     angle: 'Angle',
     size: 'Size',
     template: 'Template',
@@ -740,6 +764,7 @@ export default function Home() {
   const [setupOffsetY, setSetupOffsetY] = useState(0);
   const setupCanvasRef = useRef<HTMLCanvasElement>(null);
   const setupDragRef = useRef<{ startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
+  const [retakeSnapshot, setRetakeSnapshot] = useState<RetakeSnapshot | null>(null);
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [isAndroid, setIsAndroid] = useState(false);
@@ -1002,7 +1027,7 @@ export default function Home() {
     setToastMessage(null);
     ensureDefaultCorners();
     setEditLogoOffset({ x: 0, y: 0 });
-    setEditLogoScale(1);
+    setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
     setEditLogoRotation(0);
   }, [ensureDefaultCorners]);
 
@@ -1057,7 +1082,15 @@ export default function Home() {
     }
   }, [tx]);
 
+  const discardRetakeSnapshot = useCallback(() => {
+    setRetakeSnapshot((prev) => {
+      if (prev?.previewImageUrl) revokeTrackedObjectUrl(prev.previewImageUrl);
+      return null;
+    });
+  }, [revokeTrackedObjectUrl]);
+
   const stopCamera = useCallback(() => {
+    discardRetakeSnapshot();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -1075,7 +1108,7 @@ export default function Home() {
     playAttemptCountRef.current = 0;
     setManualEditActive(false);
     setDetectionFailed(false);
-  }, []);
+  }, [discardRetakeSnapshot]);
 
   useEffect(() => {
     if (!stream || !videoRef.current) return;
@@ -1397,13 +1430,14 @@ export default function Home() {
       }
       const apiBlobSmall = await compressCanvasToLimit(apiCanvasSmall, 0.85);
 
+      discardRetakeSnapshot();
       setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
       setScreenMode('preview_edit');
       const defaultCorners = getDefaultCenterCorners();
       setDetectedCorners([defaultCorners]);
       setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
       setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(1);
+      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
       setEditLogoRotation(0);
       setToastMessage(null);
       setIsProcessing(true);
@@ -1508,7 +1542,7 @@ export default function Home() {
       setDetectedCorners([defaultCorners]);
       setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
       setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(1);
+      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
       setEditLogoRotation(0);
       setScreenMode('preview_edit');
       setToastMessage(`画像の解析に失敗しました。手動で位置を合わせてください。${err instanceof Error ? ` (${err.message})` : ''}`);
@@ -1516,7 +1550,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
+  }, [createTrackedObjectUrl, discardRetakeSnapshot, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
 
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
@@ -1677,13 +1711,15 @@ export default function Home() {
       const apiBlobSmall = await compressCanvasToLimit(apiCanvasSmall, 0.85);
 
       // 投機的実行: 即座に編集画面へ移行し、中央にデフォルトロゴを表示。API はバックグラウンドで実行
+      discardRetakeSnapshot();
       setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
       setScreenMode('preview_edit');
       const defaultCorners = getDefaultCenterCorners();
       setDetectedCorners([defaultCorners]);
       setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
       setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(1);
+      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
+      setEditLogoRotation(0);
       setEditLogoRotation(0);
       setCameraError(null);
       setToastMessage(null);
@@ -1845,19 +1881,31 @@ export default function Home() {
       setDetectedCorners([defaultCorners]);
       setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
       setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(1);
+      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
       setEditLogoRotation(0);
       setToastMessage(tx('autoDetectFailedManual'));
       showManualHelpAfterFailure();
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, detectBrightness, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, tx]);
+  }, [createTrackedObjectUrl, detectBrightness, discardRetakeSnapshot, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, tx]);
 
   const retake = useCallback(async () => {
     activeDetectControllerRef.current?.abort();
     activeDetectControllerRef.current = null;
-    if (previewImageUrl) revokeTrackedObjectUrl(previewImageUrl);
+    if (previewImageUrl) {
+      setRetakeSnapshot({
+        previewImageUrl,
+        detectedCorners: detectedCorners.map((corners) => corners.map((p) => ({ ...p })) as Corners),
+        detectedBaseAngles: [...detectedBaseAngles],
+        editLogoOffset: { ...editLogoOffset },
+        editLogoScale: editLogoScale,
+        editLogoRotation: editLogoRotation,
+        detectionFailed,
+        manualEditActive,
+        maskTemplate,
+      });
+    }
     setPreviewImageUrl(null);
     setDetectedCorners([]);
     setDetectedBaseAngles([]);
@@ -1879,7 +1927,46 @@ export default function Home() {
     if (videoRef.current) videoRef.current.srcObject = null;
     setStream(null);
     await startCamera();
-  }, [previewImageUrl, revokeTrackedObjectUrl, startCamera]);
+  }, [
+    detectionFailed,
+    detectedBaseAngles,
+    detectedCorners,
+    editLogoOffset,
+    editLogoRotation,
+    editLogoScale,
+    manualEditActive,
+    maskTemplate,
+    previewImageUrl,
+    startCamera,
+  ]);
+
+  const cancelRetakeBackToPreview = useCallback(() => {
+    if (!retakeSnapshot) return;
+    activeDetectControllerRef.current?.abort();
+    activeDetectControllerRef.current = null;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setStream(null);
+    setPreviewImageUrl(retakeSnapshot.previewImageUrl);
+    setDetectedCorners(retakeSnapshot.detectedCorners);
+    setDetectedBaseAngles(retakeSnapshot.detectedBaseAngles);
+    setEditLogoOffset(retakeSnapshot.editLogoOffset);
+    setEditLogoScale(retakeSnapshot.editLogoScale);
+    setEditLogoRotation(retakeSnapshot.editLogoRotation);
+    setDetectionFailed(retakeSnapshot.detectionFailed);
+    setManualEditActive(retakeSnapshot.manualEditActive);
+    setMaskTemplate(retakeSnapshot.maskTemplate);
+    setPreviewImageLoaded(false);
+    setCameraError(null);
+    setToastMessage(null);
+    setRetryStatusText(null);
+    setIsProcessing(false);
+    setRetakeSnapshot(null);
+    setScreenMode('preview_edit');
+  }, [retakeSnapshot]);
 
   useEffect(() => {
     if (!isProcessing || screenMode !== 'preview_edit') return;
@@ -2091,12 +2178,21 @@ export default function Home() {
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
     if (!source) return null;
+    let exportWidth = source.width;
+    let exportHeight = source.height;
+    if (isFreePlan && exportHeight > FREE_EXPORT_MAX_HEIGHT) {
+      const scale = FREE_EXPORT_MAX_HEIGHT / exportHeight;
+      exportWidth = Math.max(1, Math.round(exportWidth * scale));
+      exportHeight = FREE_EXPORT_MAX_HEIGHT;
+    }
     const outCanvas = document.createElement('canvas');
-    outCanvas.width = source.width;
-    outCanvas.height = source.height;
+    outCanvas.width = exportWidth;
+    outCanvas.height = exportHeight;
     const outCtx = outCanvas.getContext('2d');
     if (!outCtx) return null;
-    outCtx.drawImage(source, 0, 0);
+    outCtx.imageSmoothingEnabled = true;
+    outCtx.imageSmoothingQuality = 'high';
+    outCtx.drawImage(source, 0, 0, source.width, source.height, 0, 0, exportWidth, exportHeight);
 
     if (planFeatures.watermarkOnExport) {
       const shortEdge = Math.min(outCanvas.width, outCanvas.height);
@@ -2116,10 +2212,11 @@ export default function Home() {
       outCtx.restore();
     }
 
+    const jpegQuality = isFreePlan ? FREE_EXPORT_JPEG_QUALITY : PRO_EXPORT_JPEG_QUALITY;
     return await new Promise<Blob | null>((resolve) => {
-      outCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.99);
+      outCanvas.toBlob((b) => resolve(b), 'image/jpeg', jpegQuality);
     });
-  }, [planFeatures.watermarkOnExport]);
+  }, [isFreePlan, planFeatures.watermarkOnExport]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
@@ -2541,12 +2638,23 @@ export default function Home() {
             <span className="h-5 flex items-center shrink-0 text-white drop-shadow-md">
               <CarkusLogo className="h-full w-auto text-white" />
             </span>
-            <button
-              onClick={stopCamera}
-              className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
-            >
-              {text.finish}
-            </button>
+            <div className="flex items-center gap-2">
+              {retakeSnapshot && (
+                <button
+                  type="button"
+                  onClick={cancelRetakeBackToPreview}
+                  className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
+                >
+                  {text.backToEdit}
+                </button>
+              )}
+              <button
+                onClick={stopCamera}
+                className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
+              >
+                {text.finish}
+              </button>
+            </div>
           </div>
           <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-center gap-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 px-4 bg-gradient-to-t from-black/50 to-transparent">
             <button
@@ -2800,13 +2908,15 @@ export default function Home() {
           <div className="absolute bottom-0 left-0 right-0 z-10 pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-3 pointer-events-none bg-gradient-to-t from-black/85 via-black/60 to-transparent landscape:top-0 landscape:left-auto landscape:right-0 landscape:bottom-0 landscape:w-44 landscape:pt-3 landscape:pb-3 landscape:bg-black/50 landscape:backdrop-blur-2xl landscape:border-l landscape:border-white/20 landscape:overflow-y-auto">
             <div className="pointer-events-auto">
             {detectionFailed && !isProcessing && !manualEditActive && (
-              <button
-                type="button"
-                onClick={handleEditManually}
-                className="mb-2 w-full px-3 py-2 rounded-full text-xs font-medium bg-amber-400/90 text-black hover:bg-amber-300 transition-colors"
-              >
-                {text.editManually}
-              </button>
+              <div className="flex justify-center mb-3">
+                <button
+                  type="button"
+                  onClick={handleEditManually}
+                  className="px-4 py-1.5 rounded-full text-xs font-medium bg-amber-400/90 text-black hover:bg-amber-300 transition-colors"
+                >
+                  {text.editManually}
+                </button>
+              </div>
             )}
             {!isProcessing && (
               <>
@@ -2882,29 +2992,31 @@ export default function Home() {
                   </div>
                 </div>
                 )}
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-white/70 text-xs font-light w-10">{text.angle}</span>
-                  <input
-                    type="range"
-                    min="-30"
-                    max="30"
-                    step="1"
-                    value={editLogoRotation}
-                    onChange={(e) => setEditLogoRotation(Number(e.target.value))}
-                    className="slider-large flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white"
-                  />
-                </div>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-white/70 text-xs font-light w-10">{text.size}</span>
-                  <input
-                    type="range"
-                    min={LOGO_SCALE_MIN}
-                    max={LOGO_SCALE_MAX}
-                    step="0.05"
-                    value={editLogoScale}
-                    onChange={(e) => setEditLogoScale(Number(e.target.value))}
-                    className="slider-large flex-1 h-1.5 bg-white/20 rounded-full appearance-none accent-white"
-                  />
+                <div className="space-y-3 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-white/70 text-xs font-light w-10 shrink-0">{text.angle}</span>
+                    <input
+                      type="range"
+                      min="-30"
+                      max="30"
+                      step="1"
+                      value={editLogoRotation}
+                      onChange={(e) => setEditLogoRotation(Number(e.target.value))}
+                      className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-white/70 text-xs font-light w-10 shrink-0">{text.size}</span>
+                    <input
+                      type="range"
+                      min={LOGO_SCALE_MIN}
+                      max={LOGO_SCALE_MAX}
+                      step="0.05"
+                      value={editLogoScale}
+                      onChange={(e) => setEditLogoScale(Number(e.target.value))}
+                      className="slider-large flex-1 h-2 bg-white/20 rounded-full appearance-none accent-white"
+                    />
+                  </div>
                 </div>
               </>
             )}
