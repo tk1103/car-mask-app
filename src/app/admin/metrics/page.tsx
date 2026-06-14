@@ -79,6 +79,10 @@ function formatJstDateInput(offsetDays = 0): string {
   return `${y}-${m}-${d}`;
 }
 
+function normalizeTokenInput(value: string): string {
+  return value.trim().replace(/[\u200B-\u200D\uFEFF]/g, '');
+}
+
 export default function AdminMetricsPage() {
   const [token, setToken] = useState('');
   const [fromDate, setFromDate] = useState('');
@@ -264,7 +268,8 @@ export default function AdminMetricsPage() {
   }, [chartSeries, granularity]);
 
   const registerOperatorDevice = useCallback(async () => {
-    if (!token.trim()) {
+    const trimmedToken = normalizeTokenInput(token);
+    if (!trimmedToken) {
       setOperatorStatus('先に METRICS_ADMIN_TOKEN を入力してください。');
       return;
     }
@@ -281,13 +286,16 @@ export default function AdminMetricsPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-token': token.trim(),
+          'x-admin-token': trimmedToken,
         },
-        body: JSON.stringify({ deviceId: id }),
+        body: JSON.stringify({ deviceId: id, adminToken: trimmedToken }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(typeof json.error === 'string' ? json.error : `登録失敗 (${res.status})`);
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(TOKEN_STORAGE_KEY, trimmedToken);
       }
       setOperatorStatus(
         typeof json.message === 'string'
@@ -296,6 +304,37 @@ export default function AdminMetricsPage() {
       );
     } catch (e) {
       setOperatorStatus(e instanceof Error ? e.message : '登録に失敗しました');
+    } finally {
+      setOperatorLoading(false);
+    }
+  }, [token]);
+
+  const verifyAdminToken = useCallback(async () => {
+    const trimmedToken = normalizeTokenInput(token);
+    if (!trimmedToken) {
+      setOperatorStatus('先に METRICS_ADMIN_TOKEN を入力してください。');
+      return;
+    }
+    setOperatorLoading(true);
+    setOperatorStatus(null);
+    try {
+      const res = await fetch('/api/admin/metrics?preflight=1', {
+        headers: { 'x-admin-token': trimmedToken },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof json.error === 'string'
+            ? json.error
+            : 'トークンが違います。Vercel → Settings → Environment Variables の METRICS_ADMIN_TOKEN をコピーし直してください。'
+        );
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(TOKEN_STORAGE_KEY, trimmedToken);
+      }
+      setOperatorStatus('トークン OK。この端末を Pro にする、を押してください。');
+    } catch (e) {
+      setOperatorStatus(e instanceof Error ? e.message : 'トークン確認に失敗しました');
     } finally {
       setOperatorLoading(false);
     }
@@ -315,11 +354,15 @@ export default function AdminMetricsPage() {
           <div className="space-y-2">
             <label className="text-xs text-white/70">METRICS_ADMIN_TOKEN</label>
             <input
-              type="password"
+              type="text"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Vercel で設定した METRICS_ADMIN_TOKEN"
-              className="w-full rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40"
+              placeholder="Vercel の METRICS_ADMIN_TOKEN を貼り付け"
+              className="w-full rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40 font-mono"
             />
           </div>
 
@@ -334,11 +377,19 @@ export default function AdminMetricsPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={verifyAdminToken}
+                disabled={operatorLoading || !token.trim()}
+                className="px-4 py-2.5 rounded-full text-sm bg-white/10 border border-white/25 text-white hover:bg-white/15 disabled:opacity-40"
+              >
+                トークンを確認
+              </button>
+              <button
+                type="button"
                 onClick={registerOperatorDevice}
                 disabled={operatorLoading || !token.trim()}
                 className="px-4 py-2.5 rounded-full text-sm bg-emerald-500/25 border border-emerald-400/50 text-emerald-50 hover:bg-emerald-500/35 disabled:opacity-40"
               >
-                {operatorLoading ? '登録中…' : 'この端末を Pro にする'}
+                {operatorLoading ? '処理中…' : 'この端末を Pro にする'}
               </button>
               <button
                 type="button"

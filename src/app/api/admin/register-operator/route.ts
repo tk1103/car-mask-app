@@ -8,15 +8,22 @@ export async function POST(request: NextRequest) {
   if (!process.env.METRICS_ADMIN_TOKEN) {
     return NextResponse.json({ error: 'METRICS_ADMIN_TOKEN is not configured' }, { status: 503 });
   }
-  if (!isMetricsAdminAuthorized(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
 
-  let body: { deviceId?: string } = {};
+  let body: { deviceId?: string; adminToken?: string } = {};
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  if (!isMetricsAdminAuthorized(request, body.adminToken)) {
+    return NextResponse.json(
+      {
+        error:
+          'Unauthorized（トークン不一致）。Vercel の METRICS_ADMIN_TOKEN と同じ値か、「トークンを確認」を押して確認してください。',
+      },
+      { status: 401 }
+    );
   }
 
   const deviceId = body.deviceId?.trim() ?? '';

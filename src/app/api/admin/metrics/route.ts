@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isMetricsAdminAuthorized } from '../../../../lib/admin-auth';
 import { getUsageSummary } from '../../../../lib/usage-metrics';
 
 export const runtime = 'nodejs';
@@ -49,12 +50,7 @@ function listDatesInclusive(from: string, to: string): string[] {
 }
 
 function isAuthorized(request: NextRequest): boolean {
-  const expected = process.env.METRICS_ADMIN_TOKEN;
-  if (!expected) return false;
-  const headerToken = request.headers.get('x-admin-token')?.trim();
-  const queryToken = request.nextUrl.searchParams.get('token')?.trim();
-  const provided = headerToken || queryToken;
-  return Boolean(provided && provided === expected);
+  return isMetricsAdminAuthorized(request);
 }
 
 function buildKvEnvCheck(): PreflightCheck {
