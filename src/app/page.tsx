@@ -618,7 +618,8 @@ const t = {
     plan: 'プラン',
     free: '無料版',
     pro: '課金版',
-    proUnlimitedHint: '課金版は日次無料枠の制限対象外です。',
+    operatorBadge: 'Pro',
+    proUnlimitedHint: 'AI 自動検出は無制限枠です（運営者モード）。',
     planLoading: '判定中',
     customLogo: '独自ロゴ',
     resetLogo: '標準ロゴに戻す',
@@ -720,7 +721,8 @@ const t = {
     plan: 'Plan',
     free: 'Free',
     pro: 'Pro',
-    proUnlimitedHint: 'Pro is not limited by the daily free quota.',
+    operatorBadge: 'Pro',
+    proUnlimitedHint: 'Unlimited AI auto-detections (operator mode).',
     planLoading: 'Loading',
     customLogo: 'Custom logo',
     resetLogo: 'Reset to default',
@@ -979,9 +981,7 @@ export default function Home() {
       if (!res.ok) return;
       const data = await res.json();
       setBillingEnabled(Boolean(data?.billingEnabled));
-      if (!data?.billingEnabled) {
-        setPlan('free');
-      } else if (data?.plan === 'pro' || data?.plan === 'free') {
+      if (data?.plan === 'pro' || data?.plan === 'free') {
         setPlan(data.plan);
       }
       if (data?.features && typeof data.features === 'object') {
@@ -2508,7 +2508,13 @@ export default function Home() {
         </div>
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
           {!billingEnabled ? (
-            <span className="px-3 py-1.5 text-xs bg-white/20 text-white tracking-wide">{text.beta}</span>
+            planResolved && plan === 'pro' ? (
+              <span className="px-3 py-1.5 text-xs bg-emerald-500/30 text-emerald-100 tracking-wide border-l border-white/10">
+                {text.operatorBadge}
+              </span>
+            ) : (
+              <span className="px-3 py-1.5 text-xs bg-white/20 text-white tracking-wide">{text.beta}</span>
+            )
           ) : !planResolved ? (
             <span className="px-3 py-1.5 text-xs text-white/80">{text.planLoading}</span>
           ) : (
@@ -2722,7 +2728,7 @@ export default function Home() {
             </button>
           </div>
           <p className="text-white/55 text-xs font-light text-center max-w-sm leading-relaxed px-2">
-            {text.dailyNote}
+            {plan === 'pro' && !billingEnabled ? text.proUnlimitedHint : text.dailyNote}
           </p>
           <div className="flex flex-col items-center gap-2 max-w-sm text-center">
             <p className="text-white/45 text-[11px] font-light leading-relaxed px-2">{text.contactFeedbackHint}</p>

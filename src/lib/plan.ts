@@ -11,9 +11,9 @@
  *   - 独自ロゴ可 / 透かしなし
  *   - 分あたりレート制限を緩和
  *
- * 課金連携:
- *   - BILLING_ENABLED=true のときのみ Pro 判定・有効化 API が有効
- *   - β公開時は BILLING_ENABLED 未設定（= false）で全員 Free
+ * 運営者 bypass（β 中も有効）:
+ *   - PRO_DEVICE_IDS=uuid,uuid2 … に載せたデバイスだけ Pro（AI 検出無制限等）
+ *   - BILLING_ENABLED 不要。一般ユーザーは Free のまま
  *   - 現状: PLAN_ACTIVATION_CODES + KV で Pro 付与（決済後にコード配布）
  *   - 将来: Stripe Webhook から grantPro() を呼ぶ
  */
@@ -142,17 +142,17 @@ export async function resolvePlanContext(deviceId: string): Promise<PlanContext>
     return { plan, source: 'force', features: getFeatures(plan) };
   }
 
-  if (!isBillingEnabled()) {
-    return { plan: 'free', source: 'billing_disabled', features: getFeatures('free') };
-  }
-
   if (deviceId && isValidDeviceId(deviceId)) {
-    if (await isKvPro(deviceId)) {
-      return { plan: 'pro', source: 'kv', features: getFeatures('pro') };
-    }
     if (getEnvAllowlistPro(deviceId)) {
       return { plan: 'pro', source: 'allowlist', features: getFeatures('pro') };
     }
+    if (isBillingEnabled() && (await isKvPro(deviceId))) {
+      return { plan: 'pro', source: 'kv', features: getFeatures('pro') };
+    }
+  }
+
+  if (!isBillingEnabled()) {
+    return { plan: 'free', source: 'billing_disabled', features: getFeatures('free') };
   }
 
   const plan = normalizePlan(process.env.DEFAULT_PLAN);

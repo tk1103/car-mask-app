@@ -53,6 +53,7 @@ type MetricsRangeResponse = {
 type MetricsResponse = MetricsSingleResponse | MetricsRangeResponse;
 
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
+const DEVICE_ID_KEY = 'carkus_device_id';
 
 function formatJstDateInput(offsetDays = 0): string {
   const now = new Date();
@@ -71,9 +72,12 @@ export default function AdminMetricsPage() {
   const [granularity, setGranularity] = useState<'daily' | 'weekly'>('daily');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deviceId, setDeviceId] = useState('');
+  const [deviceIdCopied, setDeviceIdCopied] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    setDeviceId(window.localStorage.getItem(DEVICE_ID_KEY) ?? '');
     const saved = window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
     if (saved) setToken(saved);
     const today = formatJstDateInput(0);
@@ -251,6 +255,34 @@ export default function AdminMetricsPage() {
             日次のアクセス数（PV/UV）と AI 検出の利用状況を確認できます（JST 基準）。
           </p>
         </header>
+
+        <section className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 md:p-5 space-y-3">
+          <p className="text-sm text-emerald-100/95 font-medium">PRO_DEVICE_IDS（運営者のみ）</p>
+          <p className="text-xs text-white/60 leading-relaxed">
+            下記 ID を Vercel の環境変数 <code className="text-white/80">PRO_DEVICE_IDS</code> に設定すると、この端末だけ
+            AI 自動検出が無制限になります（一般ユーザーは 1 日 3 回のまま）。先に Carkus トップを同じブラウザで開いてから確認してください。
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <code className="flex-1 text-xs break-all rounded-lg bg-black/50 border border-white/10 px-3 py-2 text-white/90">
+              {deviceId || '（未発行）'}
+            </code>
+            <button
+              type="button"
+              disabled={!deviceId}
+              onClick={async () => {
+                if (!deviceId) return;
+                try {
+                  await navigator.clipboard.writeText(deviceId);
+                  setDeviceIdCopied(true);
+                  setTimeout(() => setDeviceIdCopied(false), 2000);
+                } catch (_) {}
+              }}
+              className="shrink-0 px-4 py-2 rounded-full text-xs bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-40"
+            >
+              {deviceIdCopied ? 'コピーしました' : 'ID をコピー'}
+            </button>
+          </div>
+        </section>
 
         <section className="rounded-2xl border border-white/20 bg-white/5 p-4 md:p-5 space-y-4">
           <div className="space-y-2">
