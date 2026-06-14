@@ -194,15 +194,18 @@ const CORNER_POINT_SCHEMA = {
   required: ['x', 'y'],
 } as const;
 
-const NAMED_CORNERS_SCHEMA = {
+const PLATE_CORNERS_SCHEMA = {
   type: 'object',
   properties: {
-    tl: CORNER_POINT_SCHEMA,
-    tr: CORNER_POINT_SCHEMA,
-    br: CORNER_POINT_SCHEMA,
-    bl: CORNER_POINT_SCHEMA,
+    points: {
+      type: 'array',
+      description: 'four corners TL, TR, BR, BL on 0-1000 grid',
+      minItems: 4,
+      maxItems: 4,
+      items: CORNER_POINT_SCHEMA,
+    },
   },
-  required: ['tl', 'tr', 'br', 'bl'],
+  required: ['points'],
 } as const;
 
 const RESPONSE_SCHEMA = {
@@ -213,57 +216,21 @@ const RESPONSE_SCHEMA = {
       description: 'visible license plates, most prominent first; empty if none',
       minItems: 0,
       maxItems: MAX_DETECT_PLATES,
-      items: {
-        type: 'object',
-        properties: {
-          corners: NAMED_CORNERS_SCHEMA,
-        },
-        required: ['corners'],
-      },
+      items: PLATE_CORNERS_SCHEMA,
     },
   },
   required: ['plates'],
 } as const;
 
-function buildDetectPrompt(imageWidth: number, imageHeight: number): string {
-  return `# Role
-You are a precise computer vision and image coordinate extraction assistant. Your sole task is to detect the license plate of a car in the provided image and return its exact four corners in order to apply a perspective warp (Homography).
-
-# Goal
-Output the exact pixel coordinates for the four corners of each visible license plate.
-Even if the plate is skewed, tilted, or viewed from an angle (perspective distortion / trapezoid), you must trace the actual visible boundary lines of the plate. Do NOT return an axis-aligned bounding box.
-
-# Image
-The attached image is exactly ${imageWidth}×${imageHeight} pixels.
-
-# JSON Output Format
-Return ONLY a valid JSON object. No markdown, backticks, or extra text.
-
-{
-  "plates": [
-    {
-      "corners": {
-        "tl": {"x": 0, "y": 0},
-        "tr": {"x": 0, "y": 0},
-        "br": {"x": 0, "y": 0},
-        "bl": {"x": 0, "y": 0}
-      }
-    }
-  ]
-}
-
-# Rules & Constraints
-1. Coordinate System: Use absolute pixel coordinates of the provided ${imageWidth}×${imageHeight} image. (0,0) is top-left.
-2. Strict Corner Ordering:
-   - "tl": Top-Left corner of the license plate.
-   - "tr": Top-Right corner of the license plate.
-   - "br": Bottom-Right corner of the license plate.
-   - "bl": Bottom-Left corner of the license plate.
-   If the plate is heavily rotated, determine orientation from the text direction on the plate.
-3. Follow the Slope: If the plate is slanted, the line connecting "tl" and "tr" must follow the slanted top edge of the plate.
-4. Multiple plates: return up to ${MAX_DETECT_PLATES} entries in "plates", most prominent first.
-5. No plate found: return {"plates": []}.
-6. No explanations or reasoning keys.`;
+function buildDetectPrompt(): string {
+  return [
+    'Detect visible vehicle license plates in the image.',
+    `Return JSON only: {"plates":[{"points":[{x,y}×4]}]}. Up to ${MAX_DETECT_PLATES} plates, most prominent first.`,
+    'Coordinates: integers on a 0-1000 grid where (0,0) is top-left and (1000,1000) is bottom-right.',
+    'Corner order per plate: TL, TR, BR, BL. Trace the visible plate edges; follow perspective (trapezoid/skew).',
+    'Do NOT return an axis-aligned bounding box. If slanted, the TL-TR edge must follow the slanted top edge.',
+    'If no plate is visible, return {"plates":[]}. No other keys.',
+  ].join(' ');
 }
 
 /** 0–1000 正規化座標（クライアント互換） */
@@ -273,60 +240,18 @@ function clampToApiScale(value: unknown): number {
   return Math.max(0, Math.min(1000, rounded));
 }
 
-/** モデル出力ピクセル座標 → 0–1000 正規化 */
-function pixelToApiScale(
-  x: number,
-  y: number,
-  imageWidth: number,
-  imageHeight: number
-): { x: number; y: number } {
-  const xNorm = imageWidth > 0 ? (x / imageWidth) * 1000 : x;
-  const yNorm = imageHeight > 0 ? (y / imageHeight) * 1000 : y;
-  return { x: clampToApiScale(xNorm), y: clampToApiScale(yNorm) };
+function scaleCornersToApi(corners: { x: number; y: number }[]): { x: number; y: number }[] {
+  return corners.map((c) => ({ x: clampToApiScale(c.x), y: clampToApiScale(c.y) }));
 }
 
-/** 旧形式（0–1000 グリッド）かピクセル座標かを推定 */
-function coordsLookLikeNormalizedGrid(
-  corners: { x: number; y: number }[],
-  imageWidth: number,
-  imageHeight: number
-): boolean {
-  const maxDim = Math.max(imageWidth, imageHeight);
-  if (maxDim <= 1000) return false;
-  return corners.every((c) => c.x >= 0 && c.y >= 0 && c.x <= 1000 && c.y <= 1000);
-}
-
-function scaleCornersToApi(
-  corners: { x: number; y: number }[],
-  imageWidth: number,
-  imageHeight: number
-): { x: number; y: number }[] {
-  const useGrid = coordsLookLikeNormalizedGrid(corners, imageWidth, imageHeight);
-  return corners.map((c) =>
-    useGrid
-      ? { x: clampToApiScale(c.x), y: clampToApiScale(c.y) }
-      : pixelToApiScale(c.x, c.y, imageWidth, imageHeight)
-  );
-}
-
-function isNullCorner(value: unknown): boolean {
-  return value == null;
-}
-
-/** { tl, tr, br, bl } → [tl, tr, br, bl]（ピクセル→0–1000） */
-function namedCornersToArray(
-  cornersObj: unknown,
-  imageWidth: number,
-  imageHeight: number
-): { x: number; y: number }[] | null {
+/** { tl, tr, br, bl } → [tl, tr, br, bl]（0–1000 グリッド想定） */
+function namedCornersToArray(cornersObj: unknown): { x: number; y: number }[] | null {
   if (!cornersObj || typeof cornersObj !== 'object') return null;
   const c = cornersObj as Record<string, unknown>;
-  if (isNullCorner(c.tl) && isNullCorner(c.tr) && isNullCorner(c.br) && isNullCorner(c.bl)) {
-    return null;
-  }
+  if (c.tl == null && c.tr == null && c.br == null && c.bl == null) return null;
   const ordered = [c.tl, c.tr, c.br, c.bl];
   if (!ordered.every(isValidCorner)) return null;
-  return scaleCornersToApi(ordered as { x: number; y: number }[], imageWidth, imageHeight);
+  return scaleCornersToApi(ordered as { x: number; y: number }[]);
 }
 
 /** Gemini の返答テキストから JSON 文字列を抽出し、パースしやすく正規化する */
@@ -415,30 +340,21 @@ function isValidCorner(c: unknown): c is { x: number; y: number } {
   );
 }
 
-function plateEntryToCorners(
-  entry: unknown,
-  imageWidth: number,
-  imageHeight: number
-): { x: number; y: number }[] | null {
+function plateEntryToCorners(entry: unknown): { x: number; y: number }[] | null {
   if (!entry || typeof entry !== 'object') return null;
   const row = entry as { points?: unknown; corners?: unknown };
   if (row.corners && typeof row.corners === 'object' && !Array.isArray(row.corners)) {
-    return namedCornersToArray(row.corners, imageWidth, imageHeight);
+    return namedCornersToArray(row.corners);
   }
   const raw = row.points ?? row.corners;
   if (!Array.isArray(raw)) return null;
   const corners = raw.filter(isValidCorner).slice(0, 4);
   if (corners.length !== 4) return null;
-  return scaleCornersToApi(corners, imageWidth, imageHeight);
+  return scaleCornersToApi(corners);
 }
 
 /** parts と text から座標データを抽出。成功時は正規化済みオブジェクト、失敗時は null */
-function tryParsePlateResponse(
-  parts: unknown[],
-  text: string,
-  imageWidth: number,
-  imageHeight: number
-): Record<string, unknown> | null {
+function tryParsePlateResponse(parts: unknown[], text: string): Record<string, unknown> | null {
   for (const p of parts) {
     if (p != null && typeof p === 'object') {
       const po = p as Record<string, unknown>;
@@ -453,7 +369,7 @@ function tryParsePlateResponse(
             : null;
       if (obj) {
         try {
-          return normalizeParsedResponse(obj as Record<string, unknown>, imageWidth, imageHeight);
+          return normalizeParsedResponse(obj as Record<string, unknown>);
         } catch (_) {}
       }
     }
@@ -473,19 +389,15 @@ function tryParsePlateResponse(
         typeof value === 'object' &&
         ('points' in value || 'found' in value || 'plates' in value || 'corners' in value)
       ) {
-        return normalizeParsedResponse(value as Record<string, unknown>, imageWidth, imageHeight);
+        return normalizeParsedResponse(value as Record<string, unknown>);
       }
     } catch (_) {}
   }
   return null;
 }
 
-/** パース結果を正規化。plates[].corners / points → corners に統一し、最大 MAX_DETECT_PLATES 件まで */
-function normalizeParsedResponse(
-  parsed: Record<string, unknown>,
-  imageWidth: number,
-  imageHeight: number
-): Record<string, unknown> {
+/** パース結果を正規化。plates[].points / corners → corners に統一 */
+function normalizeParsedResponse(parsed: Record<string, unknown>): Record<string, unknown> {
   const normalizedPlates: { found: true; corners: { x: number; y: number }[] }[] = [];
 
   const pushCorners = (corners: { x: number; y: number }[]) => {
@@ -495,28 +407,24 @@ function normalizeParsedResponse(
 
   if (Array.isArray(parsed.plates)) {
     for (const entry of parsed.plates) {
-      const corners = plateEntryToCorners(entry, imageWidth, imageHeight);
+      const corners = plateEntryToCorners(entry);
       if (corners) pushCorners(corners);
     }
   }
 
   if (normalizedPlates.length === 0 && parsed.corners && typeof parsed.corners === 'object') {
-    const corners = namedCornersToArray(parsed.corners, imageWidth, imageHeight);
+    const corners = namedCornersToArray(parsed.corners);
     if (corners) pushCorners(corners);
   }
 
   if (normalizedPlates.length === 0 && Array.isArray(parsed.points)) {
     const corners = (parsed.points as unknown[]).filter(isValidCorner).slice(0, 4);
-    if (corners.length === 4) {
-      pushCorners(scaleCornersToApi(corners, imageWidth, imageHeight));
-    }
+    if (corners.length === 4) pushCorners(scaleCornersToApi(corners));
   }
 
   if (normalizedPlates.length === 0 && Array.isArray(parsed.corners)) {
     const corners = (parsed.corners as unknown[]).filter(isValidCorner).slice(0, 4);
-    if (corners.length === 4) {
-      pushCorners(scaleCornersToApi(corners, imageWidth, imageHeight));
-    }
+    if (corners.length === 4) pushCorners(scaleCornersToApi(corners));
   }
 
   const found = normalizedPlates.length > 0;
@@ -637,7 +545,7 @@ export async function POST(request: NextRequest) {
       mimeType,
     });
 
-    const prompt = buildDetectPrompt(imageWidth, imageHeight);
+    const prompt = buildDetectPrompt();
 
     const urlTemplate = (model: string) =>
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -786,7 +694,7 @@ export async function POST(request: NextRequest) {
           })
           .join('') ?? '';
 
-        const parsed = tryParsePlateResponse(parts, text, imageWidth, imageHeight);
+        const parsed = tryParsePlateResponse(parts, text);
         if (parsed) {
           await incrementDetectSuccess(deviceId, planCtx);
           remainingToday = await getDetectRemainingToday(deviceId, planCtx);
