@@ -443,13 +443,48 @@ const FREE_EXPORT_MAX_HEIGHT = 1280;
 const FREE_EXPORT_JPEG_QUALITY = 0.92;
 const PRO_EXPORT_JPEG_QUALITY = 0.99;
 
-// 編集画面のロゴ描画用（quad のアスペクトに合わせて横縮みしない）
-const LOGO_CANVAS_WIDTH = 400;
-
 type Lang = 'ja' | 'en';
 type Plan = 'free' | 'pro';
 type MaskTemplate = 'fit' | 'centered' | 'badge';
 type MaskStyle = 'carkus' | 'black' | 'white' | 'custom';
+
+/** Carkus マスク（黒地+ロゴ）をプレート UV 空間に描画し、drawImageWarpedToQuad で四隅に射影 */
+function renderCarkusMaskCanvas(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  maskTemplate: MaskTemplate,
+  logoImage: HTMLImageElement | null
+) {
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, width, height);
+  if (!logoImage?.complete || !logoImage.naturalWidth || !logoImage.naturalHeight) return;
+
+  const logoAspect = logoImage.naturalWidth / logoImage.naturalHeight;
+  const inset = Math.max(1, height * LOGO_INSET_RATIO_BY_PLATE_HEIGHT);
+  const availableW = Math.max(1, width - inset * 2);
+  const availableH = Math.max(1, height - inset * 2);
+
+  let logoDrawW = availableW;
+  let logoDrawH = logoDrawW / Math.max(0.01, logoAspect);
+  if (logoDrawH > availableH) {
+    logoDrawH = availableH;
+    logoDrawW = logoDrawH * logoAspect;
+  }
+  const templateScale = maskTemplate === 'fit' ? 1 : maskTemplate === 'centered' ? 0.78 : 0.52;
+  logoDrawW *= templateScale;
+  logoDrawH *= templateScale;
+  const templateShiftU = maskTemplate === 'badge' ? availableW * 0.22 : 0;
+
+  const centerX = width / 2 + templateShiftU + LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW;
+  const centerY = height / 2 + LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH;
+
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  drawCarkusLogoAtOrigin(ctx, logoDrawW, logoDrawH, undefined, logoImage);
+  ctx.restore();
+}
 
 type RetakeSnapshot = {
   previewImageUrl: string;
@@ -797,7 +832,7 @@ export default function Home() {
   const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
   const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
-  const logoCanvasRef = useRef<HTMLCanvasElement | null>(null); // 編集画面でマスク画像が無いときのロゴ用オフスクリーン
+  const carkusMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const langRef = useRef<Lang>('ja');
 
   const text = t[lang];
@@ -2071,7 +2106,9 @@ export default function Home() {
           };
         }) as QuadPx;
 
-        // マスク種別ごとの描画
+        // マスク種別ごとの描画（四隅 quadPx に射影ワープ）
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         if (maskStyle === 'custom') {
           if (
             customMaskPreparedImage &&
@@ -2088,99 +2125,34 @@ export default function Home() {
           } else {
             fillQuad(ctx, quadPx, '#000000');
           }
+        } else if (maskStyle === 'carkus') {
+          let carkusMaskCanvas = carkusMaskCanvasRef.current;
+          if (!carkusMaskCanvas) {
+            carkusMaskCanvas = document.createElement('canvas');
+            carkusMaskCanvasRef.current = carkusMaskCanvas;
+          }
+          carkusMaskCanvas.width = PLATE_MASK_WIDTH;
+          carkusMaskCanvas.height = PLATE_MASK_HEIGHT;
+          const mctx = carkusMaskCanvas.getContext('2d');
+          if (mctx) {
+            renderCarkusMaskCanvas(
+              mctx,
+              PLATE_MASK_WIDTH,
+              PLATE_MASK_HEIGHT,
+              maskTemplate,
+              carkusBrandImage
+            );
+            drawImageWarpedToQuad(
+              ctx,
+              carkusMaskCanvas,
+              quadPx,
+              PLATE_MASK_WIDTH,
+              PLATE_MASK_HEIGHT
+            );
+          }
         } else {
           const plateFillColor = maskStyle === 'white' ? '#ffffff' : '#000000';
           fillQuad(ctx, quadPx, plateFillColor);
-
-          if (maskStyle === 'black' || maskStyle === 'white') {
-            // 単色マスクのみ
-          } else if (maskStyle === 'carkus') {
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-
-            const overlayImage = carkusBrandImage;
-            const isLogoImageReady = Boolean(
-              overlayImage &&
-              overlayImage.naturalWidth > 0 &&
-              overlayImage.naturalHeight > 0
-            );
-            if (isLogoImageReady) {
-              const logoAspect = overlayImage!.naturalWidth / overlayImage!.naturalHeight;
-
-              const midLeft = { x: (quadPx[0].x + quadPx[3].x) / 2, y: (quadPx[0].y + quadPx[3].y) / 2 };
-              const midRight = { x: (quadPx[1].x + quadPx[2].x) / 2, y: (quadPx[1].y + quadPx[2].y) / 2 };
-              const midTop = { x: (quadPx[0].x + quadPx[1].x) / 2, y: (quadPx[0].y + quadPx[1].y) / 2 };
-              const midBottom = { x: (quadPx[2].x + quadPx[3].x) / 2, y: (quadPx[2].y + quadPx[3].y) / 2 };
-              const axisUxRaw = midRight.x - midLeft.x;
-              const axisUyRaw = midRight.y - midLeft.y;
-              const axisULen = Math.max(1e-6, Math.hypot(axisUxRaw, axisUyRaw));
-              const axisUx = axisUxRaw / axisULen;
-              const axisUy = axisUyRaw / axisULen;
-              let axisVx = -axisUy;
-              let axisVy = axisUx;
-              const topBottomVecX = midBottom.x - midTop.x;
-              const topBottomVecY = midBottom.y - midTop.y;
-              if (axisVx * topBottomVecX + axisVy * topBottomVecY < 0) {
-                axisVx *= -1;
-                axisVy *= -1;
-              }
-
-              const plateWidthPx = Math.max(1, Math.hypot(midRight.x - midLeft.x, midRight.y - midLeft.y));
-              const plateHeightPx = Math.max(1, Math.abs(topBottomVecX * axisVx + topBottomVecY * axisVy));
-              const insetPx = Math.max(1, plateHeightPx * LOGO_INSET_RATIO_BY_PLATE_HEIGHT);
-              const availableW = Math.max(1, plateWidthPx - insetPx * 2);
-              const availableH = Math.max(1, plateHeightPx - insetPx * 2);
-
-              let logoDrawW = availableW;
-              let logoDrawH = logoDrawW / Math.max(0.01, logoAspect);
-              if (logoDrawH > availableH) {
-                logoDrawH = availableH;
-                logoDrawW = logoDrawH * logoAspect;
-              }
-              const templateScale = maskTemplate === 'fit' ? 1 : maskTemplate === 'centered' ? 0.78 : 0.52;
-              logoDrawW *= templateScale;
-              logoDrawH *= templateScale;
-              const templateShiftU = maskTemplate === 'badge' ? availableW * 0.22 : 0;
-
-              const Lh = 220;
-              const Lw = Math.max(120, Math.round(Lh * logoAspect));
-              let logoCanvas = logoCanvasRef.current;
-              if (!logoCanvas) {
-                logoCanvas = document.createElement('canvas');
-                logoCanvasRef.current = logoCanvas;
-              }
-              logoCanvas.width = Lw;
-              logoCanvas.height = Lh;
-              const lctx = logoCanvas.getContext('2d');
-              if (lctx) {
-                lctx.clearRect(0, 0, Lw, Lh);
-                lctx.save();
-                lctx.translate(Lw / 2, Lh / 2);
-                drawCarkusLogoAtOrigin(lctx, Lw * 0.92, Lh * 0.92, undefined, carkusBrandImage);
-                lctx.restore();
-              }
-
-              const quadCenterX = (quadPx[0].x + quadPx[1].x + quadPx[2].x + quadPx[3].x) / 4;
-              const quadCenterY = (quadPx[0].y + quadPx[1].y + quadPx[2].y + quadPx[3].y) / 4;
-
-              const logoCenterX =
-                quadCenterX +
-                axisUx * templateShiftU +
-                axisUx * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
-                axisVx * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
-              const logoCenterY =
-                quadCenterY +
-                axisUy * templateShiftU +
-                axisUy * (LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW) +
-                axisVy * (LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH);
-              const logoAngle = Math.atan2(axisUy, axisUx);
-              ctx.save();
-              ctx.translate(logoCenterX, logoCenterY);
-              ctx.rotate(logoAngle);
-              ctx.drawImage(logoCanvas, -logoDrawW / 2, -logoDrawH / 2, logoDrawW, logoDrawH);
-              ctx.restore();
-            }
-          }
         }
       });
     }
