@@ -34,3 +34,11 @@ export function getFeedbackMailto(lang: 'ja' | 'en' = 'ja'): string {
 export function getContactLabel(): string {
   return site.contactEmail;
 }
+
+/** SNS 共有シート用キャプション（URL はテキストに含める。アプリによっては無視される） */
+export function getShareCaption(lang: 'ja' | 'en' = 'ja'): string {
+  if (lang === 'en') {
+    return `Plates masked—ready to post. #carkus\n${site.url}`;
+  }
+  return `ナンバー処理してそのまま投稿。#carkus\n${site.url}`;
+}

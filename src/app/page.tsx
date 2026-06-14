@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { getFeedbackMailto } from '../lib/site';
+import { getFeedbackMailto, getShareCaption, site } from '../lib/site';
 import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, ImagePlus, Download as DownloadIcon, Mail } from 'lucide-react';
 
 /** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
@@ -471,6 +471,17 @@ type CustomMaskSetup = {
 
 function isMaskStyle(value: string | null | undefined): value is MaskStyle {
   return value === 'carkus' || value === 'black' || value === 'white' || value === 'custom';
+}
+
+/** 画像共有用 Web Share ペイロード（text / url はアプリによって無視される場合あり） */
+function buildImageShareData(file: File, lang: Lang): ShareData {
+  const text = getShareCaption(lang);
+  const withText: ShareData = { files: [file], title: site.name, text };
+  if (typeof navigator === 'undefined' || !navigator.canShare) return withText;
+  const withUrl: ShareData = { ...withText, url: site.url };
+  if (navigator.canShare(withUrl)) return withUrl;
+  if (navigator.canShare(withText)) return withText;
+  return { files: [file], title: site.name };
 }
 
 function parseCustomMaskSetup(raw: string | null): CustomMaskSetup {
@@ -2230,7 +2241,7 @@ export default function Home() {
         }
         const file = new File([blob], getNextCarkusFilename(), { type: 'image/jpeg' });
         if (navigator.share && navigator.canShare?.({ files: [file] })) {
-          await navigator.share({ files: [file], title: 'Carkus' });
+          await navigator.share(buildImageShareData(file, langRef.current));
           setShowSaveSuccess(true);
           setTimeout(() => setShowSaveSuccess(false), 2500);
         } else {
@@ -2266,18 +2277,7 @@ export default function Home() {
           // これにより、登録されているSNSアプリが直接選択できる
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
             try {
-              // プラットフォームに応じたテキストを設定
-              const shareTexts: Record<string, string> = {
-                facebook: 'Carkusでナンバープレートをマスクしました',
-                twitter: 'Carkusでナンバープレートをマスクしました',
-                instagram: 'Carkusでナンバープレートをマスクしました',
-              };
-
-              await navigator.share({
-                files: [file],
-                title: 'Carkus',
-                text: shareTexts[platform] || 'Carkusでナンバープレートをマスクしました',
-              });
+              await navigator.share(buildImageShareData(file, lang));
               
               setShowShareMenu(false);
               setShowSaveSuccess(true);
@@ -2308,9 +2308,10 @@ export default function Home() {
               const imageUrl = uploadData.url;
 
               // 各SNSの共有URLを構築
+              const shareCaption = getShareCaption(lang);
               const shareUrls: Record<string, string> = {
-                facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(imageUrl)}`,
-                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent('Carkusでナンバープレートをマスクしました')}&url=${encodeURIComponent(imageUrl)}`,
+                facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(site.url)}&quote=${encodeURIComponent(shareCaption)}`,
+                twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareCaption)}`,
                 instagram: `https://www.instagram.com/create/select/`,
               };
 
@@ -2356,7 +2357,7 @@ export default function Home() {
       setIsProcessing(false);
       setCameraError('画像の処理に失敗しました');
     }
-  }, [createTrackedObjectUrl, exportPreviewBlob, revokeTrackedObjectUrl]);
+  }, [createTrackedObjectUrl, exportPreviewBlob, lang, revokeTrackedObjectUrl]);
 
   /** 端末に保存（ダウンロード or 共有シートで「画像を保存」を選択） */
   const handleSaveToDevice = useCallback(async () => {
