@@ -146,7 +146,7 @@ export async function resolvePlanContext(deviceId: string): Promise<PlanContext>
     if (getEnvAllowlistPro(deviceId)) {
       return { plan: 'pro', source: 'allowlist', features: getFeatures('pro') };
     }
-    if (isBillingEnabled() && (await isKvPro(deviceId))) {
+    if (await isKvPro(deviceId)) {
       return { plan: 'pro', source: 'kv', features: getFeatures('pro') };
     }
   }
@@ -200,6 +200,19 @@ export async function incrementDetectSuccess(deviceId: string, ctx: PlanContext)
     }
   }
   memoryDetectCounts.set(key, (memoryDetectCounts.get(key) ?? 0) + 1);
+}
+
+export async function grantOperatorPro(deviceId: string): Promise<void> {
+  if (!isValidDeviceId(deviceId)) {
+    throw new Error('Invalid device id');
+  }
+  const key = `${PRO_KV_PREFIX}${deviceId}`;
+  if (isKvConfigured()) {
+    await kv.set(key, 'lifetime', { ex: KV_TTL_SECONDS });
+    return;
+  }
+  memoryProDevices.add(deviceId);
+  memoryProExpiry.delete(deviceId);
 }
 
 export async function grantPro(

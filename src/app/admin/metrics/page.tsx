@@ -55,6 +55,21 @@ type MetricsResponse = MetricsSingleResponse | MetricsRangeResponse;
 const TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
 const DEVICE_ID_KEY = 'carkus_device_id';
 
+function ensureDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+  let id = window.localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `d-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`;
+    try {
+      window.localStorage.setItem(DEVICE_ID_KEY, id);
+    } catch (_) {}
+  }
+  return id ?? '';
+}
+
 function formatJstDateInput(offsetDays = 0): string {
   const now = new Date();
   const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000 + offsetDays * 24 * 60 * 60 * 1000);
@@ -74,10 +89,12 @@ export default function AdminMetricsPage() {
   const [loading, setLoading] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [deviceIdCopied, setDeviceIdCopied] = useState(false);
+  const [operatorStatus, setOperatorStatus] = useState<string | null>(null);
+  const [operatorLoading, setOperatorLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setDeviceId(window.localStorage.getItem(DEVICE_ID_KEY) ?? '');
+    setDeviceId(ensureDeviceId());
     const saved = window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
     if (saved) setToken(saved);
     const today = formatJstDateInput(0);
@@ -246,6 +263,44 @@ export default function AdminMetricsPage() {
     URL.revokeObjectURL(url);
   }, [chartSeries, granularity]);
 
+  const registerOperatorDevice = useCallback(async () => {
+    if (!token.trim()) {
+      setOperatorStatus('先に METRICS_ADMIN_TOKEN を入力してください。');
+      return;
+    }
+    const id = ensureDeviceId();
+    setDeviceId(id);
+    if (!id) {
+      setOperatorStatus('端末 ID を取得できませんでした。');
+      return;
+    }
+    setOperatorLoading(true);
+    setOperatorStatus(null);
+    try {
+      const res = await fetch('/api/admin/register-operator', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': token.trim(),
+        },
+        body: JSON.stringify({ deviceId: id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof json.error === 'string' ? json.error : `登録失敗 (${res.status})`);
+      }
+      setOperatorStatus(
+        typeof json.message === 'string'
+          ? json.message
+          : '登録しました。Carkus トップを再読み込みしてください。'
+      );
+    } catch (e) {
+      setOperatorStatus(e instanceof Error ? e.message : '登録に失敗しました');
+    } finally {
+      setOperatorLoading(false);
+    }
+  }, [token]);
+
   return (
     <main className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto space-y-6">
@@ -255,34 +310,6 @@ export default function AdminMetricsPage() {
             日次のアクセス数（PV/UV）と AI 検出の利用状況を確認できます（JST 基準）。
           </p>
         </header>
-
-        <section className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 md:p-5 space-y-3">
-          <p className="text-sm text-emerald-100/95 font-medium">PRO_DEVICE_IDS（運営者のみ）</p>
-          <p className="text-xs text-white/60 leading-relaxed">
-            下記 ID を Vercel の環境変数 <code className="text-white/80">PRO_DEVICE_IDS</code> に設定すると、この端末だけ
-            AI 自動検出が無制限になります（一般ユーザーは 1 日 3 回のまま）。先に Carkus トップを同じブラウザで開いてから確認してください。
-          </p>
-          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-            <code className="flex-1 text-xs break-all rounded-lg bg-black/50 border border-white/10 px-3 py-2 text-white/90">
-              {deviceId || '（未発行）'}
-            </code>
-            <button
-              type="button"
-              disabled={!deviceId}
-              onClick={async () => {
-                if (!deviceId) return;
-                try {
-                  await navigator.clipboard.writeText(deviceId);
-                  setDeviceIdCopied(true);
-                  setTimeout(() => setDeviceIdCopied(false), 2000);
-                } catch (_) {}
-              }}
-              className="shrink-0 px-4 py-2 rounded-full text-xs bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-40"
-            >
-              {deviceIdCopied ? 'コピーしました' : 'ID をコピー'}
-            </button>
-          </div>
-        </section>
 
         <section className="rounded-2xl border border-white/20 bg-white/5 p-4 md:p-5 space-y-4">
           <div className="space-y-2">
@@ -296,7 +323,47 @@ export default function AdminMetricsPage() {
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/25 p-4 space-y-3">
+            <p className="text-sm text-emerald-100 font-medium">運営者モード（AI 検出 無制限）</p>
+            <p className="text-xs text-white/60 leading-relaxed">
+              下のボタンを押すだけで、このブラウザだけ Pro になります。Vercel の設定は不要です。
+            </p>
+            <code className="block text-[11px] break-all text-white/75 bg-black/40 rounded px-2 py-1.5">
+              {deviceId || '…'}
+            </code>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={registerOperatorDevice}
+                disabled={operatorLoading || !token.trim()}
+                className="px-4 py-2.5 rounded-full text-sm bg-emerald-500/25 border border-emerald-400/50 text-emerald-50 hover:bg-emerald-500/35 disabled:opacity-40"
+              >
+                {operatorLoading ? '登録中…' : 'この端末を Pro にする'}
+              </button>
+              <button
+                type="button"
+                disabled={!deviceId}
+                onClick={async () => {
+                  if (!deviceId) return;
+                  try {
+                    await navigator.clipboard.writeText(deviceId);
+                    setDeviceIdCopied(true);
+                    setTimeout(() => setDeviceIdCopied(false), 2000);
+                  } catch (_) {}
+                }}
+                className="px-4 py-2.5 rounded-full text-sm bg-white/10 border border-white/20 text-white/85 hover:bg-white/15 disabled:opacity-40"
+              >
+                {deviceIdCopied ? 'コピーしました' : 'ID をコピー'}
+              </button>
+            </div>
+            {operatorStatus && (
+              <p className={`text-xs leading-relaxed ${operatorStatus.includes('失敗') || operatorStatus.includes('Invalid') || operatorStatus.includes('無効') ? 'text-red-300' : 'text-emerald-200'}`}>
+                {operatorStatus}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2 pt-1 border-t border-white/10">
             <label className="text-xs text-white/70">期間（JST）</label>
             <div className="flex flex-wrap items-center gap-2">
               <input
