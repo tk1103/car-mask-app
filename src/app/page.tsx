@@ -2880,8 +2880,10 @@ export default function Home() {
       {screenMode === 'preview_edit' && previewImageUrl && (
         <div className="fixed inset-0 z-0 bg-black">
           {toastMessage && (
-            <div className="fixed top-3 left-3 right-3 landscape:left-auto landscape:right-3 landscape:max-w-xs z-30 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-xl text-white text-xs font-light border border-white/20">
-              {toastMessage}
+            <div className="absolute inset-0 z-30 flex items-center justify-center px-6 pointer-events-none">
+              <div className="max-w-sm px-5 py-4 rounded-2xl bg-black/75 backdrop-blur-xl text-white text-sm font-light text-center leading-relaxed border border-white/20 shadow-2xl">
+                {toastMessage}
+              </div>
             </div>
           )}
           <div
