@@ -83,6 +83,17 @@ function normalizeTokenInput(value: string): string {
   return value.trim().replace(/[\u200B-\u200D\uFEFF]/g, '');
 }
 
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isTokenConfusedWithDeviceId(token: string, deviceId: string): boolean {
+  const t = normalizeTokenInput(token);
+  const d = normalizeTokenInput(deviceId);
+  if (!t || !d) return false;
+  return t === d;
+}
+
 export default function AdminMetricsPage() {
   const [token, setToken] = useState('');
   const [fromDate, setFromDate] = useState('');
@@ -279,11 +290,17 @@ export default function AdminMetricsPage() {
   const registerOperatorDevice = useCallback(async () => {
     const trimmedToken = normalizeTokenInput(token);
     if (!trimmedToken) {
-      setOperatorStatus('先に METRICS_ADMIN_TOKEN を入力してください。');
+      setOperatorStatus('先に管理者トークン（Vercel の METRICS_ADMIN_TOKEN）を貼り付けてください。');
       return;
     }
     const id = ensureDeviceId();
     setDeviceId(id);
+    if (isTokenConfusedWithDeviceId(trimmedToken, id)) {
+      setOperatorStatus(
+        '入力されているのは「端末ID」です。上の欄には Vercel の METRICS_ADMIN_TOKEN（64文字の英数字）を貼ってください。端末IDとは別物です。'
+      );
+      return;
+    }
     if (!id) {
       setOperatorStatus('端末 ID を取得できませんでした。');
       return;
@@ -321,7 +338,14 @@ export default function AdminMetricsPage() {
   const verifyAdminToken = useCallback(async () => {
     const trimmedToken = normalizeTokenInput(token);
     if (!trimmedToken) {
-      setOperatorStatus('先に METRICS_ADMIN_TOKEN を入力してください。');
+      setOperatorStatus('先に管理者トークン（Vercel の METRICS_ADMIN_TOKEN）を貼り付けてください。');
+      return;
+    }
+    const id = ensureDeviceId();
+    if (isTokenConfusedWithDeviceId(trimmedToken, id)) {
+      setOperatorStatus(
+        '入力されているのは「端末ID」です。Vercel → Settings → Environment Variables の METRICS_ADMIN_TOKEN を貼ってください（64文字前後の英数字）。'
+      );
       return;
     }
     setOperatorLoading(true);
@@ -361,7 +385,13 @@ export default function AdminMetricsPage() {
 
         <section className="rounded-2xl border border-white/20 bg-white/5 p-4 md:p-5 space-y-4">
           <div className="space-y-2">
-            <label className="text-xs text-white/70">METRICS_ADMIN_TOKEN</label>
+            <label className="text-xs text-white/70">
+              管理者トークン（Vercel の METRICS_ADMIN_TOKEN）
+            </label>
+            <p className="text-[11px] text-white/50 leading-relaxed">
+              ※下に表示される「端末ID」（UUID）とは<strong className="text-white/70">別の値</strong>
+              です。Vercel ダッシュボードからコピーしてください（だいたい64文字の英数字）。
+            </p>
             <input
               type="text"
               autoComplete="off"
@@ -378,8 +408,17 @@ export default function AdminMetricsPage() {
             />
             {!token.trim() && (
               <p className="text-xs text-amber-200/95 leading-relaxed">
-                ↑ ここにトークンを貼り付けると、下のボタンが使えます（Vercel → Settings → Environment Variables →
-                METRICS_ADMIN_TOKEN）。
+                Vercel → Settings → Environment Variables → METRICS_ADMIN_TOKEN の値を貼り付けてください。
+              </p>
+            )}
+            {token.trim() && isTokenConfusedWithDeviceId(token, deviceId) && (
+              <p className="text-xs text-red-300 leading-relaxed">
+                今入力されているのは端末IDです。管理者トークンは別の値です（Vercel で確認）。
+              </p>
+            )}
+            {token.trim() && isUuidLike(token) && !isTokenConfusedWithDeviceId(token, deviceId) && (
+              <p className="text-xs text-amber-200/90 leading-relaxed">
+                UUID 形式です。管理者トークンは通常 UUID ではなく、長い英数字（hex）です。Vercel の値を再確認してください。
               </p>
             )}
           </div>
@@ -387,8 +426,9 @@ export default function AdminMetricsPage() {
           <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/25 p-4 space-y-3">
             <p className="text-sm text-emerald-100 font-medium">運営者モード（AI 検出 無制限）</p>
             <p className="text-xs text-white/60 leading-relaxed">
-              下のボタンを押すだけで、このブラウザだけ Pro になります。Vercel の設定は不要です。
+              管理者トークンを入力したうえで、下のボタンを押すとこのブラウザだけ Pro になります。
             </p>
+            <p className="text-[11px] text-white/45">この端末の ID（自動・登録用。上のトークンと混同しないでください）</p>
             <code className="block text-[11px] break-all text-white/75 bg-black/40 rounded px-2 py-1.5">
               {deviceId || '…'}
             </code>
