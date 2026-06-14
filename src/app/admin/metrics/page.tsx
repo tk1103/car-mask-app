@@ -99,8 +99,17 @@ export default function AdminMetricsPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setDeviceId(ensureDeviceId());
-    const saved = window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
-    if (saved) setToken(saved);
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = normalizeTokenInput(params.get('token') ?? '');
+    const saved = normalizeTokenInput(window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '');
+    if (urlToken) {
+      setToken(urlToken);
+      try {
+        window.localStorage.setItem(TOKEN_STORAGE_KEY, urlToken);
+      } catch (_) {}
+    } else if (saved) {
+      setToken(saved);
+    }
     const today = formatJstDateInput(0);
     setToDate(today);
     setFromDate(formatJstDateInput(-6));
@@ -361,9 +370,18 @@ export default function AdminMetricsPage() {
               spellCheck={false}
               value={token}
               onChange={(e) => setToken(e.target.value)}
+              onPaste={() => {
+                setTimeout(() => setOperatorStatus(null), 0);
+              }}
               placeholder="Vercel の METRICS_ADMIN_TOKEN を貼り付け"
-              className="w-full rounded-lg bg-black/60 border border-white/20 px-3 py-2 text-sm outline-none focus:border-white/40 font-mono"
+              className="w-full rounded-lg bg-black/60 border border-white/20 px-3 py-3 text-sm outline-none focus:border-emerald-400/60 font-mono"
             />
+            {!token.trim() && (
+              <p className="text-xs text-amber-200/95 leading-relaxed">
+                ↑ ここにトークンを貼り付けると、下のボタンが使えます（Vercel → Settings → Environment Variables →
+                METRICS_ADMIN_TOKEN）。
+              </p>
+            )}
           </div>
 
           <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/25 p-4 space-y-3">
@@ -378,7 +396,7 @@ export default function AdminMetricsPage() {
               <button
                 type="button"
                 onClick={verifyAdminToken}
-                disabled={operatorLoading || !token.trim()}
+                disabled={operatorLoading}
                 className="px-4 py-2.5 rounded-full text-sm bg-white/10 border border-white/25 text-white hover:bg-white/15 disabled:opacity-40"
               >
                 トークンを確認
@@ -386,7 +404,7 @@ export default function AdminMetricsPage() {
               <button
                 type="button"
                 onClick={registerOperatorDevice}
-                disabled={operatorLoading || !token.trim()}
+                disabled={operatorLoading}
                 className="px-4 py-2.5 rounded-full text-sm bg-emerald-500/25 border border-emerald-400/50 text-emerald-50 hover:bg-emerald-500/35 disabled:opacity-40"
               >
                 {operatorLoading ? '処理中…' : 'この端末を Pro にする'}
