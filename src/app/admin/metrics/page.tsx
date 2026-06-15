@@ -95,7 +95,7 @@ function isTokenConfusedWithDeviceId(token: string, deviceId: string): boolean {
 }
 
 function buildOperatorProUrl(origin: string, adminToken: string): string {
-  const url = new URL('/admin/metrics', origin);
+  const url = new URL('/operator', origin);
   url.searchParams.set('token', normalizeTokenInput(adminToken));
   url.searchParams.set('auto', 'pro');
   return url.toString();
@@ -127,8 +127,14 @@ export default function AdminMetricsPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setDeviceId(ensureDeviceId());
     const params = new URLSearchParams(window.location.search);
+    if (params.get('from') === 'app') {
+      params.delete('from');
+      const qs = params.toString();
+      window.location.replace(`/operator${qs ? `?${qs}` : ''}`);
+      return;
+    }
+    setDeviceId(ensureDeviceId());
     const urlToken = normalizeTokenInput(params.get('token') ?? '');
     const saved = normalizeTokenInput(window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '');
     if (urlToken) {

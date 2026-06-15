@@ -19,9 +19,9 @@ if [[ -z "$TOKEN" ]]; then
 fi
 
 ENCODED="$(node -e "console.log(encodeURIComponent(process.argv[1]))" "$TOKEN")"
-URL="${SITE%/}/admin/metrics?token=${ENCODED}&auto=pro"
+URL="${SITE%/}/operator?token=${ENCODED}&auto=pro"
 
 echo "$URL"
 echo ""
-echo "↑ スマホの Safari / Chrome に貼って開く → 自動で Pro 登録されます。" >&2
-echo "※ ホーム画面の Carkus から撮影する場合は、その Carkus 内の「運営者: Pro設定」から登録してください。" >&2
+echo "↑ この URL を、撮影に使うのと同じアプリ（Safari / Chrome / ホーム画面の Carkus）で開く → 自動で Pro 有効化。" >&2
+echo "※ ホーム画面の Carkus から撮影する場合は、Carkus 内の「運営者: 無制限にする」から開いてください。" >&2

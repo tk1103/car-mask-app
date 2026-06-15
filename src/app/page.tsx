@@ -614,8 +614,8 @@ const t = {
     quotaManualHint: 'サーバーが混雑しています。再試行せず手動でロゴ位置を合わせてください。',
     dailyFreeLimitManualOnly: '本日の自動検出枠を使い切りました。手動で枠を調整してください。',
     dailyFreeLimitOperatorHint:
-      'Pro登録済みでも、Safari/Chrome とホーム画面アイコンは別端末です。撮影に使うこの画面から「運営者: Pro設定」で登録し直してください。',
-    operatorSetupLink: '運営者: Pro設定',
+      '撮影に使うこの画面から「運営者: 無制限にする」を開き、PCでコピーしたパスワードを貼ってください。',
+    operatorSetupLink: '運営者: 無制限にする',
     freeQuotaLabel: '本日の無料自動検出',
     freeWatermarkNote: '無料版の保存画像には Carkus 透かしが入ります。',
     plan: 'プラン',
@@ -720,8 +720,8 @@ const t = {
     quotaManualHint: 'The server is busy. Skip retry and place the logo manually.',
     dailyFreeLimitManualOnly: 'Daily auto-detect limit reached. Adjust the frame manually.',
     dailyFreeLimitOperatorHint:
-      'Pro registration in Safari/Chrome does not apply to the home-screen app (different device ID). Use Operator setup from this same app.',
-    operatorSetupLink: 'Operator: Pro setup',
+      'Open “Operator: unlimited” from this same app and paste the password from your PC.',
+    operatorSetupLink: 'Operator: unlimited',
     freeQuotaLabel: 'Daily free auto-detections',
     freeWatermarkNote: 'Saved images on Free plan include a Carkus watermark.',
     plan: 'Plan',
@@ -2745,15 +2745,17 @@ export default function Home() {
               {text.pickPhoto}
             </button>
           </div>
+          {planResolved && plan === 'free' && (
+            <Link
+              href="/operator"
+              className="inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-emerald-500/15 border border-emerald-400/35 text-emerald-100/90 text-xs font-light hover:bg-emerald-500/25 transition-colors"
+            >
+              {text.operatorSetupLink}
+            </Link>
+          )}
           <p className="text-white/55 text-xs font-light text-center max-w-sm leading-relaxed px-2">
             {plan === 'pro' && !billingEnabled ? text.proUnlimitedHint : text.dailyNote}
           </p>
-          <a
-            href="/admin/metrics?from=app"
-            className="text-white/45 text-[11px] font-light underline underline-offset-2 hover:text-white/75"
-          >
-            {text.operatorSetupLink}
-          </a>
           <div className="flex flex-col items-center gap-2 max-w-sm text-center">
             <p className="text-white/45 text-[11px] font-light leading-relaxed px-2">{text.contactFeedbackHint}</p>
             <a
