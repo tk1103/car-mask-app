@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { SeoOriginContext } from '../../components/SeoOriginContext';
 import { getContactLabel, getContactMailto, site } from '../../lib/site';
 
 export const metadata: Metadata = {
@@ -12,7 +13,7 @@ export default function PrivacyPage() {
   const contactMailto = getContactMailto();
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="relative min-h-screen bg-zinc-950 text-zinc-100">
       <div className="max-w-2xl mx-auto px-4 py-8 pb-16">
         <header className="mb-8">
           <Link href="/" className="text-sm text-sky-400 hover:text-sky-300">
@@ -140,6 +141,7 @@ export default function PrivacyPage() {
             </p>
           </section>
         </div>
+        <SeoOriginContext />
       </div>
     </div>
   );

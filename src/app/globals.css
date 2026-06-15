@@ -42,6 +42,20 @@
   background-color: #426aeb;
 }
 
+/* 画面上は非表示。HTML に文脈を残す（プレスキット・規約フッター等） */
+.seo-origin-context {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .bg-custom-blue:hover {
   background-color: #3558d4;
 }
