@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type MetricsSingleResponse = {
   mode: 'single';
@@ -94,6 +94,22 @@ function isTokenConfusedWithDeviceId(token: string, deviceId: string): boolean {
   return t === d;
 }
 
+function buildOperatorProUrl(origin: string, adminToken: string): string {
+  const url = new URL('/admin/metrics', origin);
+  url.searchParams.set('token', normalizeTokenInput(adminToken));
+  url.searchParams.set('auto', 'pro');
+  return url.toString();
+}
+
+function stripSensitiveQueryFromUrl(): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('token');
+  url.searchParams.delete('auto');
+  const next = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : '');
+  window.history.replaceState({}, '', next);
+}
+
 export default function AdminMetricsPage() {
   const [token, setToken] = useState('');
   const [fromDate, setFromDate] = useState('');
@@ -106,6 +122,8 @@ export default function AdminMetricsPage() {
   const [deviceIdCopied, setDeviceIdCopied] = useState(false);
   const [operatorStatus, setOperatorStatus] = useState<string | null>(null);
   const [operatorLoading, setOperatorLoading] = useState(false);
+  const [phoneUrlCopied, setPhoneUrlCopied] = useState(false);
+  const autoProTriggered = useRef(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -328,10 +346,43 @@ export default function AdminMetricsPage() {
           ? json.message
           : '登録しました。Carkus トップを再読み込みしてください。'
       );
+      stripSensitiveQueryFromUrl();
     } catch (e) {
       setOperatorStatus(e instanceof Error ? e.message : '登録に失敗しました');
     } finally {
       setOperatorLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auto') !== 'pro') return;
+    if (autoProTriggered.current) return;
+    const trimmedToken = normalizeTokenInput(token);
+    if (!trimmedToken) return;
+    const id = ensureDeviceId();
+    setDeviceId(id);
+    if (isTokenConfusedWithDeviceId(trimmedToken, id)) return;
+    autoProTriggered.current = true;
+    void registerOperatorDevice();
+  }, [token, registerOperatorDevice]);
+
+  const copyPhoneOperatorUrl = useCallback(async () => {
+    const trimmedToken = normalizeTokenInput(token);
+    if (!trimmedToken) {
+      setOperatorStatus('先に管理者トークンを入力するか、PC で scripts/operator-pro-link.sh を実行してください。');
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    const url = buildOperatorProUrl(window.location.origin, trimmedToken);
+    try {
+      await navigator.clipboard.writeText(url);
+      setPhoneUrlCopied(true);
+      setTimeout(() => setPhoneUrlCopied(false), 2500);
+      setOperatorStatus('スマホ用 URL をコピーしました。メモ / LINE / AirDrop でスマホに送って開いてください。');
+    } catch (_) {
+      setOperatorStatus(url);
     }
   }, [token]);
 
@@ -389,8 +440,7 @@ export default function AdminMetricsPage() {
               管理者トークン（Vercel の METRICS_ADMIN_TOKEN）
             </label>
             <p className="text-[11px] text-white/50 leading-relaxed">
-              ※下に表示される「端末ID」（UUID）とは<strong className="text-white/70">別の値</strong>
-              です。Vercel ダッシュボードからコピーしてください（だいたい64文字の英数字）。
+              ※下の「端末ID」（UUID）とは別の値です。64文字前後の英数字（Vercel または .metrics-admin-token.local）。
             </p>
             <input
               type="text"
@@ -421,12 +471,24 @@ export default function AdminMetricsPage() {
                 UUID 形式です。管理者トークンは通常 UUID ではなく、長い英数字（hex）です。Vercel の値を再確認してください。
               </p>
             )}
+            {token.trim() && !isTokenConfusedWithDeviceId(token, deviceId) && !isUuidLike(token) && (
+              <button
+                type="button"
+                onClick={copyPhoneOperatorUrl}
+                className="w-full text-left px-3 py-2.5 rounded-lg text-xs bg-sky-500/15 border border-sky-400/35 text-sky-100 hover:bg-sky-500/25"
+              >
+                {phoneUrlCopied ? '✓ スマホ用 URL をコピーしました' : '📱 スマホ用 URL をコピー（開くだけで Pro 登録）'}
+              </button>
+            )}
           </div>
 
           <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/25 p-4 space-y-3">
             <p className="text-sm text-emerald-100 font-medium">運営者モード（AI 検出 無制限）</p>
             <p className="text-xs text-white/60 leading-relaxed">
               管理者トークンを入力したうえで、下のボタンを押すとこのブラウザだけ Pro になります。
+              <span className="block mt-1 text-amber-200/90">
+                撮影に使うのと同じアプリ（Safari / Chrome / ホーム画面の Carkus）から開いて登録してください。別ブラウザで登録しても撮影側には効きません。
+              </span>
             </p>
             <p className="text-[11px] text-white/45">この端末の ID（自動・登録用。上のトークンと混同しないでください）</p>
             <code className="block text-[11px] break-all text-white/75 bg-black/40 rounded px-2 py-1.5">

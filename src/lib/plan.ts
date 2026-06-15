@@ -206,13 +206,13 @@ export async function grantOperatorPro(deviceId: string): Promise<void> {
   if (!isValidDeviceId(deviceId)) {
     throw new Error('Invalid device id');
   }
-  const key = `${PRO_KV_PREFIX}${deviceId}`;
-  if (isKvConfigured()) {
-    await kv.set(key, 'lifetime', { ex: KV_TTL_SECONDS });
-    return;
+  if (!isKvConfigured()) {
+    throw new Error(
+      'KV が未設定のため Pro 登録を保存できません。Vercel の KV_REST_API_URL / KV_REST_API_TOKEN を確認してください。'
+    );
   }
-  memoryProDevices.add(deviceId);
-  memoryProExpiry.delete(deviceId);
+  const key = `${PRO_KV_PREFIX}${deviceId}`;
+  await kv.set(key, 'lifetime', { ex: KV_TTL_SECONDS });
 }
 
 export async function grantPro(
