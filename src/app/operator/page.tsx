@@ -69,8 +69,8 @@ export default function OperatorPage() {
     }
   }, [runActivate]);
 
-  const confused = password.trim() && isTokenConfusedWithDeviceId(password, deviceId);
-  const uuidWarning = password.trim() && isUuidLike(password) && !confused;
+  const confused = Boolean(password.trim() && isTokenConfusedWithDeviceId(password, deviceId));
+  const uuidWarning = Boolean(password.trim() && isUuidLike(password) && !confused);
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6">
