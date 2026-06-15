@@ -20,7 +20,7 @@ export default function PrivacyPage() {
             ← トップに戻る
           </Link>
           <h1 className="text-3xl font-light text-white mt-4 tracking-wide">{site.name} プライバシーポリシー</h1>
-          <p className="text-zinc-500 text-base mt-2">最終更新日: 2026年6月12日</p>
+          <p className="text-zinc-500 text-base mt-2">最終更新日: 2026年6月15日</p>
         </header>
 
         <div className="space-y-8 text-base font-light text-zinc-300 leading-relaxed">
@@ -101,21 +101,32 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-medium text-white mb-2">6. セキュリティ</h2>
+            <h2 className="text-xl font-medium text-white mb-2">7. 利用者コンテンツに関する注意</h2>
+            <p>
+              利用者がアップロードまたは本サービスで編集した画像・ロゴ等の権利処理（著作権、商標権、肖像権等）の確認は、利用者自身の責任で行ってください。当社は、利用者が外部（SNS 等）に掲載・共有した内容について、第三者の権利侵害に関する一切の責任を負いません。詳細は
+              <Link href="/terms" className="text-sky-400 hover:text-sky-300 underline underline-offset-2 mx-1">
+                利用規約
+              </Link>
+              をご確認ください。
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-medium text-white mb-2">8. セキュリティ</h2>
             <p>
               当社は、HTTPS 通信の利用、API キーのサーバー側管理、レート制限等により、合理的な範囲で情報の保護に努めます。ただし、インターネット上の通信において完全な安全性を保証するものではありません。
             </p>
           </section>
 
           <section>
-            <h2 className="text-xl font-medium text-white mb-2">7. β版について</h2>
+            <h2 className="text-xl font-medium text-white mb-2">9. β版について</h2>
             <p>
               本サービスは β 版として提供されています。機能・制限（1 日あたりの自動検出回数等）は予告なく変更される場合があります。現時点では有料プランの販売は行っていません。
             </p>
           </section>
 
           <section>
-            <h2 className="text-xl font-medium text-white mb-2">8. お問い合わせ</h2>
+            <h2 className="text-xl font-medium text-white mb-2">10. お問い合わせ</h2>
             <p>
               本ポリシーに関するお問い合わせは、下記までご連絡ください。
             </p>
@@ -135,7 +146,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-medium text-white mb-2">9. 改定</h2>
+            <h2 className="text-xl font-medium text-white mb-2">11. 改定</h2>
             <p>
               当社は、必要に応じて本ポリシーを改定できます。改定後の内容は本ページに掲示した時点で効力を生じます。
             </p>

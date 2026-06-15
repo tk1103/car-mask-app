@@ -657,7 +657,7 @@ const t = {
     logoTypeError: 'PNG / JPEG / WebP / SVG を選択してください。',
     logoTooLarge: 'ロゴ画像は 5MB 以下にしてください。',
     logoCopyrightConfirm:
-      '著作権・商標権など第三者の権利を侵害しない画像のみアップロードしてください。権利侵害に関する責任は利用者が負います。続行しますか？',
+      '著作権・商標権・肖像権など第三者の権利を侵害しない画像のみアップロードしてください。SNS等への掲載・共有内容に関する責任は利用者にあり、当社は一切負いません。続行しますか？',
     editManually: '手動で編集',
     aiInferenceDetected: 'AI推論で角を補完した可能性があります。必要に応じて手動で微調整してください。',
     upsellTitle: '課金版で使える機能です',
@@ -763,7 +763,7 @@ const t = {
     logoTypeError: 'Please select PNG, JPEG, WebP, or SVG.',
     logoTooLarge: 'Logo image must be 5MB or smaller.',
     logoCopyrightConfirm:
-      'Upload only images that do not infringe copyrights, trademarks, or other third-party rights. You are responsible for rights violations. Continue?',
+      'Upload only images that do not infringe copyrights, trademarks, portrait rights, or other third-party rights. You are solely responsible for anything you post or share (including on SNS); we accept no liability. Continue?',
     editManually: 'Edit Manually',
     aiInferenceDetected: 'AI likely inferred hidden/out-of-frame corners. Fine-tune manually if needed.',
     upsellTitle: 'Available on Pro plan',
