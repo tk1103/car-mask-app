@@ -104,10 +104,14 @@ export async function activateOperatorPro(token: string): Promise<ActivateOperat
 
   const snapshot = await fetchPlanSnapshot(deviceId);
   if (snapshot.plan !== 'pro') {
+    const source = snapshot.planSource ? ` / ${snapshot.planSource}` : '';
     throw new Error(
-      `登録APIは成功しましたが、サーバーはまだ「${snapshot.plan ?? 'free'}」と返しています。` +
+      `登録APIは成功しましたが、サーバーはまだ「${snapshot.plan ?? 'free'}」${source} と返しています。` +
         ` 端末ID: ${deviceId}` +
-        (snapshot.hasValidDeviceId === false ? '（端末IDがサーバーで無効と判定されています）' : '')
+        (snapshot.hasValidDeviceId === false ? '（端末IDがサーバーで無効と判定されています）' : '') +
+        (snapshot.planSource === 'force'
+          ? ' — Vercel に FORCE_PLAN が設定されています。削除するかデプロイを更新してください。'
+          : '')
     );
   }
 

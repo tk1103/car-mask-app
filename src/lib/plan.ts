@@ -137,11 +137,7 @@ async function isKvPro(deviceId: string): Promise<boolean> {
 }
 
 export async function resolvePlanContext(deviceId: string): Promise<PlanContext> {
-  if (process.env.FORCE_PLAN?.trim()) {
-    const plan = normalizePlan(process.env.FORCE_PLAN);
-    return { plan, source: 'force', features: getFeatures(plan) };
-  }
-
+  // 運営者・明示 Pro は FORCE_PLAN（開発用）より優先する
   if (deviceId && isValidDeviceId(deviceId)) {
     if (getEnvAllowlistPro(deviceId)) {
       return { plan: 'pro', source: 'allowlist', features: getFeatures('pro') };
@@ -149,6 +145,11 @@ export async function resolvePlanContext(deviceId: string): Promise<PlanContext>
     if (await isKvPro(deviceId)) {
       return { plan: 'pro', source: 'kv', features: getFeatures('pro') };
     }
+  }
+
+  if (process.env.FORCE_PLAN?.trim()) {
+    const plan = normalizePlan(process.env.FORCE_PLAN);
+    return { plan, source: 'force', features: getFeatures(plan) };
   }
 
   if (!isBillingEnabled()) {
@@ -213,6 +214,8 @@ export async function grantOperatorPro(deviceId: string): Promise<void> {
   }
   const key = `${PRO_KV_PREFIX}${deviceId}`;
   await kv.set(key, 'lifetime', { ex: KV_TTL_SECONDS });
+  memoryProDevices.add(deviceId);
+  memoryProExpiry.delete(deviceId);
 }
 
 export async function grantPro(

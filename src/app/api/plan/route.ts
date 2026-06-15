@@ -8,6 +8,7 @@ import {
 } from '../../../lib/plan';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const deviceId =
@@ -18,13 +19,20 @@ export async function GET(request: NextRequest) {
   const ctx = await resolvePlanContext(deviceId);
   const remainingDetectionsToday = await getDetectRemainingToday(deviceId, ctx);
 
-  return NextResponse.json({
-    plan: ctx.plan,
-    planSource: ctx.source,
-    features: ctx.features,
-    remainingDetectionsToday,
-    limits: getPlanLimitsForDocs(),
-    hasValidDeviceId: Boolean(deviceId && isValidDeviceId(deviceId)),
-    billingEnabled: isBillingEnabled(),
-  });
+  return NextResponse.json(
+    {
+      plan: ctx.plan,
+      planSource: ctx.source,
+      features: ctx.features,
+      remainingDetectionsToday,
+      limits: getPlanLimitsForDocs(),
+      hasValidDeviceId: Boolean(deviceId && isValidDeviceId(deviceId)),
+      billingEnabled: isBillingEnabled(),
+    },
+    {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
+    }
+  );
 }

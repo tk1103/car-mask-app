@@ -37,6 +37,22 @@ export async function POST(request: NextRequest) {
   try {
     await grantOperatorPro(deviceId);
     const ctx = await resolvePlanContext(deviceId);
+    if (ctx.plan !== 'pro') {
+      const forcePlan = process.env.FORCE_PLAN?.trim();
+      return NextResponse.json(
+        {
+          error:
+            `Pro 登録は KV に保存しましたが、プラン解決が ${ctx.plan} (${ctx.source}) のままです。` +
+            (forcePlan
+              ? ` Vercel の FORCE_PLAN=${forcePlan} を削除するか、デプロイを最新にしてください。`
+              : ' デプロイを最新にして再試行してください。'),
+          deviceId,
+          plan: ctx.plan,
+          planSource: ctx.source,
+        },
+        { status: 500 }
+      );
+    }
     return NextResponse.json({
       ok: true,
       deviceId,
