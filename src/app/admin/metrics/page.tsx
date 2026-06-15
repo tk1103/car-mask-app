@@ -122,6 +122,7 @@ export default function AdminMetricsPage() {
   const [deviceIdCopied, setDeviceIdCopied] = useState(false);
   const [operatorStatus, setOperatorStatus] = useState<string | null>(null);
   const [operatorLoading, setOperatorLoading] = useState(false);
+  const [operatorRegistered, setOperatorRegistered] = useState(false);
   const [phoneUrlCopied, setPhoneUrlCopied] = useState(false);
   const autoProTriggered = useRef(false);
 
@@ -347,11 +348,14 @@ export default function AdminMetricsPage() {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(TOKEN_STORAGE_KEY, trimmedToken);
       }
+      const planLabel = json.plan === 'pro' ? 'Pro' : String(json.plan ?? '');
+      const sourceLabel = typeof json.planSource === 'string' ? ` (${json.planSource})` : '';
       setOperatorStatus(
         typeof json.message === 'string'
-          ? json.message
-          : '登録しました。Carkus トップを再読み込みしてください。'
+          ? `${json.message}${planLabel ? ` [${planLabel}${sourceLabel}]` : ''}`
+          : '登録しました。下の「カメラを開く」から撮影してください。'
       );
+      setOperatorRegistered(true);
       stripSensitiveQueryFromUrl();
     } catch (e) {
       setOperatorStatus(e instanceof Error ? e.message : '登録に失敗しました');
@@ -534,9 +538,17 @@ export default function AdminMetricsPage() {
               </button>
             </div>
             {operatorStatus && (
-              <p className={`text-xs leading-relaxed ${operatorStatus.includes('失敗') || operatorStatus.includes('Invalid') || operatorStatus.includes('無効') ? 'text-red-300' : 'text-emerald-200'}`}>
+              <p className={`text-xs leading-relaxed ${operatorStatus.includes('失敗') || operatorStatus.includes('Invalid') || operatorStatus.includes('無効') || operatorStatus.includes('Unauthorized') ? 'text-red-300' : 'text-emerald-200'}`}>
                 {operatorStatus}
               </p>
+            )}
+            {operatorRegistered && (
+              <a
+                href="/"
+                className="inline-flex w-full items-center justify-center rounded-full bg-emerald-500/30 border border-emerald-400/55 px-5 py-3 text-sm text-emerald-50 hover:bg-emerald-500/40"
+              >
+                カメラを開く（このアプリのまま）
+              </a>
             )}
           </div>
 

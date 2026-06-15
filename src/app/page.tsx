@@ -87,7 +87,17 @@ type DetectApiResponse = {
   errorType?: DetectErrorType;
   requestId?: string;
   retryAfterSeconds?: number;
-  remainingToday?: number;
+  remainingToday?: number | null;
+  plan?: string;
+};
+
+type PlanApiSnapshot = {
+  plan?: string;
+  planSource?: string;
+  features?: Partial<PlanFeatures> & Record<string, unknown>;
+  remainingDetectionsToday?: number | null;
+  remainingToday?: number | null;
+  billingEnabled?: boolean;
 };
 
 /** ダウンロードファイル名用の連番を取得しインクリメント。Carkus-001.jpg, Carkus-002.jpg ... */
@@ -863,9 +873,58 @@ export default function Home() {
 
   const hasAutoDetectQuota = useCallback(() => {
     if (!isFreePlan) return true;
+    if (planFeatures.dailyDetectLimit <= 0) return true;
     if (dailyRemaining === null) return true;
     return dailyRemaining > 0;
-  }, [isFreePlan, dailyRemaining]);
+  }, [isFreePlan, dailyRemaining, planFeatures.dailyDetectLimit]);
+
+  const applyPlanFromApi = useCallback((data: PlanApiSnapshot) => {
+    if (typeof data.billingEnabled === 'boolean') setBillingEnabled(data.billingEnabled);
+    if (data.plan === 'pro' || data.plan === 'free') setPlan(data.plan);
+    if (data.features && typeof data.features === 'object') {
+      setPlanFeatures({
+        customLogo: Boolean(data.features.customLogo),
+        watermarkOnExport: Boolean(data.features.watermarkOnExport),
+        dailyDetectLimit: Number(data.features.dailyDetectLimit) || DEFAULT_PLAN_FEATURES.dailyDetectLimit,
+        rateLimitPerMinute: Number(data.features.rateLimitPerMinute) || DEFAULT_PLAN_FEATURES.rateLimitPerMinute,
+      });
+    }
+    const remaining =
+      data.remainingDetectionsToday !== undefined ? data.remainingDetectionsToday : data.remainingToday;
+    if (remaining === null || typeof remaining === 'number') {
+      setDailyRemaining(remaining);
+    }
+    setPlanResolved(true);
+  }, []);
+
+  const refreshPlanFromServer = useCallback(async (): Promise<PlanApiSnapshot | null> => {
+    try {
+      const deviceId = getDeviceId();
+      const res = await fetch('/api/plan', {
+        cache: 'no-store',
+        headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as PlanApiSnapshot;
+      applyPlanFromApi(data);
+      return data;
+    } catch {
+      return null;
+    }
+  }, [applyPlanFromApi]);
+
+  /** 撮影直前にサーバーでプラン・残枠を再取得（Pro 登録直後の古い「0枚」表示を防ぐ） */
+  const canAutoDetectNow = useCallback(async (): Promise<boolean> => {
+    const data = await refreshPlanFromServer();
+    if (!data) return hasAutoDetectQuota();
+    if (data.plan === 'pro') return true;
+    const limit = Number(data.features?.dailyDetectLimit ?? DEFAULT_PLAN_FEATURES.dailyDetectLimit);
+    if (limit <= 0) return true;
+    const remaining = data.remainingDetectionsToday ?? data.remainingToday;
+    if (remaining === null) return true;
+    if (typeof remaining === 'number') return remaining > 0;
+    return true;
+  }, [hasAutoDetectQuota, refreshPlanFromServer]);
 
   const createTrackedObjectUrl = useCallback((blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -979,34 +1038,13 @@ export default function Home() {
 
   const fetchPlan = useCallback(async () => {
     try {
-      const deviceId = getDeviceId();
-      const res = await fetch('/api/plan', {
-        cache: 'no-store',
-        headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      setBillingEnabled(Boolean(data?.billingEnabled));
-      if (data?.plan === 'pro' || data?.plan === 'free') {
-        setPlan(data.plan);
-      }
-      if (data?.features && typeof data.features === 'object') {
-        setPlanFeatures({
-          customLogo: Boolean(data.features.customLogo),
-          watermarkOnExport: Boolean(data.features.watermarkOnExport),
-          dailyDetectLimit: Number(data.features.dailyDetectLimit) || DEFAULT_PLAN_FEATURES.dailyDetectLimit,
-          rateLimitPerMinute: Number(data.features.rateLimitPerMinute) || DEFAULT_PLAN_FEATURES.rateLimitPerMinute,
-        });
-      }
-      if (data?.remainingDetectionsToday === null || typeof data?.remainingDetectionsToday === 'number') {
-        setDailyRemaining(data.remainingDetectionsToday);
-      }
+      await refreshPlanFromServer();
     } catch (_) {
       // フェイルセーフ: free のまま継続
     } finally {
       setPlanResolved(true);
     }
-  }, []);
+  }, [refreshPlanFromServer]);
 
   useEffect(() => {
     fetchPlan();
@@ -1044,14 +1082,15 @@ export default function Home() {
     try {
       const deviceId = getDeviceId();
       const res = await fetch('/api/detect', {
+        cache: 'no-store',
         headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
       });
       if (res.ok) {
-        const data = await res.json();
-        if (typeof data.remainingToday === 'number') setDailyRemaining(data.remainingToday);
+        const data = (await res.json()) as PlanApiSnapshot;
+        applyPlanFromApi(data);
       }
     } catch (_) {}
-  }, []);
+  }, [applyPlanFromApi]);
 
   useEffect(() => {
     if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
@@ -1107,7 +1146,7 @@ export default function Home() {
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, _retryAfterSeconds?: number) => {
     switch (errorType) {
       case 'daily_limit':
-        return tx('dailyFreeLimitManualOnly');
+        return `${tx('dailyFreeLimitManualOnly')} ${tx('dailyFreeLimitOperatorHint')}`;
       case 'quota':
       case 'rate_limited':
         return tx('quotaManualHint');
@@ -1525,7 +1564,7 @@ export default function Home() {
         return fd;
       };
 
-      if (!hasAutoDetectQuota()) {
+      if (!(await canAutoDetectNow())) {
         setIsProcessing(false);
         setToastMessage(`${tx('dailyFreeLimitManualOnly')} ${tx('dailyFreeLimitOperatorHint')}`);
         showManualHelpAfterFailure();
@@ -1555,7 +1594,8 @@ export default function Home() {
             console.info('Plate detection reasoning:', result.reasoning);
           }
           const remaining = result.remainingToday;
-          if (remaining !== undefined) setDailyRemaining(remaining);
+          if (remaining === null || typeof remaining === 'number') setDailyRemaining(remaining);
+          if (result.plan === 'pro' || result.plan === 'free') setPlan(result.plan);
           if (!res.ok) {
             const errPayload = result.error;
             const msg = typeof errPayload === 'string' ? errPayload : result.userMessage || tx('autoDetectFailedManual');
@@ -1614,7 +1654,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, discardRetakeSnapshot, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
+  }, [canAutoDetectNow, createTrackedObjectUrl, discardRetakeSnapshot, getMessageByErrorType, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
 
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
@@ -1625,17 +1665,9 @@ export default function Home() {
     activeDetectRequestIdRef.current = requestId;
     const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
 
-    // 撮影前に残数チェック（UI 上の目安表示用）。サーバー側では日次ブロックは行わない。
+    // 撮影前にサーバーからプラン・残枠を再取得
     try {
-      const deviceId = getDeviceId();
-      const quotaRes = await fetch('/api/detect', {
-        headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
-      });
-      if (quotaRes.ok) {
-        const quotaData = await quotaRes.json();
-        const remaining = quotaData.remainingToday;
-        if (typeof remaining === 'number') setDailyRemaining(remaining);
-      }
+      await refreshPlanFromServer();
     } catch (_) {}
 
     // フラッシュ効果を表示
@@ -1816,7 +1848,8 @@ export default function Home() {
         console.groupEnd();
 
         const remaining = result.remainingToday;
-        if (remaining !== undefined) setDailyRemaining(remaining);
+        if (remaining === null || typeof remaining === 'number') setDailyRemaining(remaining);
+        if (result.plan === 'pro' || result.plan === 'free') setPlan(result.plan);
         if (!res.ok) {
           const errorPayload = result.error;
           const detailedError =
@@ -1871,7 +1904,7 @@ export default function Home() {
         }
       };
 
-      if (!hasAutoDetectQuota()) {
+      if (!(await canAutoDetectNow())) {
         setIsProcessing(false);
         setToastMessage(`${tx('dailyFreeLimitManualOnly')} ${tx('dailyFreeLimitOperatorHint')}`);
         showManualHelpAfterFailure();
@@ -1952,7 +1985,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [createTrackedObjectUrl, detectBrightness, discardRetakeSnapshot, getMessageByErrorType, hasAutoDetectQuota, showManualHelpAfterFailure, tx]);
+  }, [canAutoDetectNow, createTrackedObjectUrl, detectBrightness, discardRetakeSnapshot, getMessageByErrorType, refreshPlanFromServer, showManualHelpAfterFailure, tx]);
 
   const retake = useCallback(async () => {
     activeDetectControllerRef.current?.abort();
