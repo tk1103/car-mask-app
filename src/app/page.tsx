@@ -49,6 +49,9 @@ type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRig
 
 const DEVICE_ID_KEY = 'carkus_device_id';
 const CARKUS_DOWNLOAD_COUNT_KEY = 'carkus_download_count';
+const OPERATOR_UI_STORAGE_KEY = 'carkus_operator_ui_unlocked';
+const OPERATOR_LOGO_TAP_UNLOCK = 5;
+const OPERATOR_LOGO_TAP_WINDOW_MS = 2500;
 
 type DetectErrorType =
   | 'rate_limited'
@@ -839,6 +842,8 @@ export default function Home() {
   const [plan, setPlan] = useState<Plan>('free');
   const [planResolved, setPlanResolved] = useState(false);
   const [billingEnabled, setBillingEnabled] = useState(false);
+  const [operatorUiUnlocked, setOperatorUiUnlocked] = useState(false);
+  const operatorLogoTapRef = useRef<{ count: number; resetAt: number }>({ count: 0, resetAt: 0 });
   const videoRef = useRef<HTMLVideoElement>(null);
   const photoPickerRef = useRef<HTMLInputElement>(null);
   const customLogoPickerRef = useRef<HTMLInputElement>(null);
@@ -856,9 +861,41 @@ export default function Home() {
 
   const text = t[lang];
   const isFreePlan = plan === 'free';
+  const showOperatorSetup =
+    isFreePlan &&
+    (operatorUiUnlocked || process.env.NEXT_PUBLIC_OPERATOR_UI === 'true');
 
   const tx = useCallback((key: keyof typeof t.ja): string => t[langRef.current][key], []);
   const upgradeUrl = process.env.NEXT_PUBLIC_UPGRADE_URL || '';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      setOperatorUiUnlocked(window.sessionStorage.getItem(OPERATOR_UI_STORAGE_KEY) === '1');
+    } catch (_) {}
+  }, []);
+
+  const unlockOperatorUi = useCallback(() => {
+    setOperatorUiUnlocked(true);
+    try {
+      window.sessionStorage.setItem(OPERATOR_UI_STORAGE_KEY, '1');
+    } catch (_) {}
+  }, []);
+
+  const handleOperatorLogoTap = useCallback(() => {
+    const now = Date.now();
+    const slot = operatorLogoTapRef.current;
+    if (now > slot.resetAt) {
+      slot.count = 0;
+    }
+    slot.count += 1;
+    slot.resetAt = now + OPERATOR_LOGO_TAP_WINDOW_MS;
+    if (slot.count >= OPERATOR_LOGO_TAP_UNLOCK) {
+      slot.count = 0;
+      slot.resetAt = 0;
+      unlockOperatorUi();
+    }
+  }, [unlockOperatorUi]);
 
   const trackPlanEvent = useCallback((event: 'upgrade_click' | 'feature_blocked_by_plan') => {
     const deviceId = getDeviceId();
@@ -2577,17 +2614,7 @@ export default function Home() {
                 {text.operatorBadge}
               </span>
             ) : (
-              <>
-                <span className="px-3 py-1.5 text-xs bg-white/20 text-white tracking-wide">{text.beta}</span>
-                {planResolved && (
-                  <Link
-                    href="/operator"
-                    className="px-3 py-1.5 text-xs text-emerald-200/95 border-l border-white/15 hover:bg-emerald-500/15"
-                  >
-                    {text.operatorSetupShort}
-                  </Link>
-                )}
-              </>
+              <span className="px-3 py-1.5 text-xs bg-white/20 text-white tracking-wide">{text.beta}</span>
             )
           ) : !planResolved ? (
             <span className="px-3 py-1.5 text-xs text-white/80">{text.planLoading}</span>
@@ -2606,9 +2633,14 @@ export default function Home() {
       {screenMode === 'idle' && (
         <header className="sticky top-0 z-10 bg-black/40 backdrop-blur-xl border-b border-white/20">
           <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center">
-            <span className="h-6 flex items-center shrink-0 text-white">
+            <button
+              type="button"
+              onClick={handleOperatorLogoTap}
+              className="h-6 flex items-center shrink-0 text-white bg-transparent border-0 p-0 cursor-default"
+              aria-label="Carkus"
+            >
               <CarkusLogo className="h-full w-auto text-white" />
-            </span>
+            </button>
           </div>
         </header>
       )}
@@ -2801,7 +2833,7 @@ export default function Home() {
               {text.pickPhoto}
             </button>
           </div>
-          {planResolved && plan === 'free' && (
+          {planResolved && showOperatorSetup && (
             <Link
               href="/operator"
               className="inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-emerald-500/15 border border-emerald-400/35 text-emerald-100/90 text-xs font-light hover:bg-emerald-500/25 transition-colors"
@@ -2943,12 +2975,6 @@ export default function Home() {
             <div className="absolute inset-0 z-30 flex items-center justify-center px-6 bg-black/40">
               <div className="max-w-sm w-full px-5 py-5 rounded-2xl bg-black/85 backdrop-blur-xl text-white text-sm font-light text-center leading-relaxed border border-white/20 shadow-2xl space-y-4">
                 <p>{tx('dailyFreeLimitManualOnly')}</p>
-                <Link
-                  href="/operator"
-                  className="inline-flex w-full items-center justify-center rounded-full bg-emerald-500/35 border border-emerald-400/55 px-4 py-3 text-sm text-emerald-50 hover:bg-emerald-500/45"
-                >
-                  {text.operatorSetupLink}
-                </Link>
                 <button
                   type="button"
                   onClick={() => {
