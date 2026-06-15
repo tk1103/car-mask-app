@@ -2938,7 +2938,7 @@ export default function Home() {
       )}
 
       {screenMode === 'preview_edit' && previewImageUrl && (
-        <div className="fixed inset-0 z-0 bg-black">
+        <div className="fixed inset-0 z-0 bg-black flex flex-col landscape:flex-row">
           {showDailyLimitOverlay && (
             <div className="absolute inset-0 z-30 flex items-center justify-center px-6 bg-black/40">
               <div className="max-w-sm w-full px-5 py-5 rounded-2xl bg-black/85 backdrop-blur-xl text-white text-sm font-light text-center leading-relaxed border border-white/20 shadow-2xl space-y-4">
@@ -2970,7 +2970,7 @@ export default function Home() {
             </div>
           )}
           <div
-            className="absolute inset-0 z-[1] touch-none"
+            className="relative flex-1 min-h-0 min-w-0"
             onTouchStart={onPreviewTouchStart}
             onTouchMove={onPreviewTouchMove}
             onTouchEnd={onPreviewTouchEnd}
@@ -2978,7 +2978,7 @@ export default function Home() {
           >
             <canvas
               ref={previewCanvasRef}
-              className="absolute inset-0 w-full h-full object-contain"
+              className="absolute inset-0 w-full h-full object-contain object-top"
               style={{ touchAction: 'none' }}
             />
             {isProcessing && (
@@ -2991,8 +2991,8 @@ export default function Home() {
               </div>
             )}
           </div>
-          <div className="absolute bottom-0 left-0 right-0 z-10 pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] px-3 pointer-events-none bg-gradient-to-t from-black/85 via-black/60 to-transparent landscape:top-0 landscape:left-auto landscape:right-0 landscape:bottom-0 landscape:w-44 landscape:pt-3 landscape:pb-3 landscape:bg-black/50 landscape:backdrop-blur-2xl landscape:border-l landscape:border-white/20 landscape:overflow-y-auto">
-            <div className="pointer-events-auto">
+          <div className="relative z-10 flex-shrink-0 w-full landscape:w-44 landscape:h-full landscape:overflow-y-auto px-3 pt-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] landscape:pt-3 landscape:pb-3 bg-black/90 backdrop-blur-xl border-t border-white/15 landscape:border-t-0 landscape:border-l landscape:border-white/15">
+            <div>
             {detectionFailed && !isProcessing && !manualEditActive && (
               <div className="flex justify-center mb-3">
                 <button
