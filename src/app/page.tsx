@@ -622,10 +622,10 @@ const t = {
     imageReadFailed: '画像の読み取りに失敗しました。撮り直すか、手動で位置を合わせてください。',
     serverBusyRetry: 'サーバーが混み合っています。手動で位置を合わせてください。',
     quotaManualHint: 'サーバーが混雑しています。再試行せず手動でロゴ位置を合わせてください。',
-    dailyFreeLimitManualOnly: '本日の自動検出枠を使い切りました。手動で枠を調整してください。',
-    dailyFreeLimitOperatorHint:
-      '撮影に使うこの画面から「運営者: 無制限にする」を開き、PCでコピーしたパスワードを貼ってください。',
+    dailyFreeLimitManualOnly: '本日の自動検出枠を使い切りました。手動で枠を合わせるか、下のボタンから無制限化してください。',
+    dailyFreeLimitOperatorHint: '',
     operatorSetupLink: '運営者: 無制限にする',
+    operatorSetupShort: '無制限にする',
     freeQuotaLabel: '本日の無料自動検出',
     freeWatermarkNote: '無料版の保存画像には Carkus 透かしが入ります。',
     plan: 'プラン',
@@ -728,10 +728,10 @@ const t = {
     imageReadFailed: 'Failed to read image. Retake or adjust manually.',
     serverBusyRetry: 'Server is busy. Please adjust the logo position manually.',
     quotaManualHint: 'The server is busy. Skip retry and place the logo manually.',
-    dailyFreeLimitManualOnly: 'Daily auto-detect limit reached. Adjust the frame manually.',
-    dailyFreeLimitOperatorHint:
-      'Open “Operator: unlimited” from this same app and paste the password from your PC.',
+    dailyFreeLimitManualOnly: 'Daily auto-detect limit reached. Adjust manually or use the button below.',
+    dailyFreeLimitOperatorHint: '',
     operatorSetupLink: 'Operator: unlimited',
+    operatorSetupShort: 'Go unlimited',
     freeQuotaLabel: 'Daily free auto-detections',
     freeWatermarkNote: 'Saved images on Free plan include a Carkus watermark.',
     plan: 'Plan',
@@ -813,6 +813,7 @@ export default function Home() {
   const [manualEditActive, setManualEditActive] = useState(false);
   const [retryStatusText, setRetryStatusText] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showDailyLimitOverlay, setShowDailyLimitOverlay] = useState(false);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null);
   const [planFeatures, setPlanFeatures] = useState<PlanFeatures>(DEFAULT_PLAN_FEATURES);
   const [carkusBrandImage, setCarkusBrandImage] = useState<HTMLImageElement | null>(null);
@@ -1139,6 +1140,12 @@ export default function Home() {
     ensureDefaultCorners();
   }, [ensureDefaultCorners]);
 
+  const showDailyLimitBlocked = useCallback(() => {
+    setShowDailyLimitOverlay(true);
+    setToastMessage(null);
+    showManualHelpAfterFailure();
+  }, [showManualHelpAfterFailure]);
+
   const handleEditManually = useCallback(() => {
     activateManualEdit();
   }, [activateManualEdit]);
@@ -1146,7 +1153,7 @@ export default function Home() {
   const getMessageByErrorType = useCallback((errorType?: DetectErrorType, fallbackMessage?: string, _retryAfterSeconds?: number) => {
     switch (errorType) {
       case 'daily_limit':
-        return `${tx('dailyFreeLimitManualOnly')} ${tx('dailyFreeLimitOperatorHint')}`;
+        return tx('dailyFreeLimitManualOnly');
       case 'quota':
       case 'rate_limited':
         return tx('quotaManualHint');
@@ -1566,8 +1573,7 @@ export default function Home() {
 
       if (!(await canAutoDetectNow())) {
         setIsProcessing(false);
-        setToastMessage(`${tx('dailyFreeLimitManualOnly')} ${tx('dailyFreeLimitOperatorHint')}`);
-        showManualHelpAfterFailure();
+        showDailyLimitBlocked();
         return;
       }
 
@@ -1599,8 +1605,12 @@ export default function Home() {
           if (!res.ok) {
             const errPayload = result.error;
             const msg = typeof errPayload === 'string' ? errPayload : result.userMessage || tx('autoDetectFailedManual');
-            setToastMessage(getMessageByErrorType(result.errorType, msg, result.retryAfterSeconds));
-            showManualHelpAfterFailure();
+            if (result.errorType === 'daily_limit') {
+              showDailyLimitBlocked();
+            } else {
+              setToastMessage(getMessageByErrorType(result.errorType, msg, result.retryAfterSeconds));
+              showManualHelpAfterFailure();
+            }
           } else if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
             const platesCorners: Corners[] = result.plates
               .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
@@ -1654,7 +1664,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [canAutoDetectNow, createTrackedObjectUrl, discardRetakeSnapshot, getMessageByErrorType, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
+  }, [canAutoDetectNow, createTrackedObjectUrl, discardRetakeSnapshot, getMessageByErrorType, showDailyLimitBlocked, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
 
   const captureAndDetect = useCallback(async () => {
     const video = videoRef.current;
@@ -1866,8 +1876,12 @@ export default function Home() {
           const backendMessage = result.userMessage;
           const retryAfterSeconds = result.retryAfterSeconds;
           const message = getMessageByErrorType(result.errorType, backendMessage || rawMessage, retryAfterSeconds);
-          setToastMessage(message);
-          showManualHelpAfterFailure();
+          if (result.errorType === 'daily_limit') {
+            showDailyLimitBlocked();
+          } else {
+            setToastMessage(message);
+            showManualHelpAfterFailure();
+          }
           return;
         }
         if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
@@ -1906,8 +1920,7 @@ export default function Home() {
 
       if (!(await canAutoDetectNow())) {
         setIsProcessing(false);
-        setToastMessage(`${tx('dailyFreeLimitManualOnly')} ${tx('dailyFreeLimitOperatorHint')}`);
-        showManualHelpAfterFailure();
+        showDailyLimitBlocked();
         return;
       }
 
@@ -1985,7 +1998,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [canAutoDetectNow, createTrackedObjectUrl, detectBrightness, discardRetakeSnapshot, getMessageByErrorType, refreshPlanFromServer, showManualHelpAfterFailure, tx]);
+  }, [canAutoDetectNow, createTrackedObjectUrl, detectBrightness, discardRetakeSnapshot, getMessageByErrorType, refreshPlanFromServer, showDailyLimitBlocked, showManualHelpAfterFailure, tx]);
 
   const retake = useCallback(async () => {
     activeDetectControllerRef.current?.abort();
@@ -2560,11 +2573,21 @@ export default function Home() {
         <div className="flex items-center rounded-full bg-black/60 border border-white/20 overflow-hidden">
           {!billingEnabled ? (
             planResolved && plan === 'pro' ? (
-              <span className="px-3 py-1.5 text-xs bg-emerald-500/30 text-emerald-100 tracking-wide border-l border-white/10">
+              <span className="px-3 py-1.5 text-xs bg-emerald-500/30 text-emerald-100 tracking-wide">
                 {text.operatorBadge}
               </span>
             ) : (
-              <span className="px-3 py-1.5 text-xs bg-white/20 text-white tracking-wide">{text.beta}</span>
+              <>
+                <span className="px-3 py-1.5 text-xs bg-white/20 text-white tracking-wide">{text.beta}</span>
+                {planResolved && (
+                  <Link
+                    href="/operator"
+                    className="px-3 py-1.5 text-xs text-emerald-200/95 border-l border-white/15 hover:bg-emerald-500/15"
+                  >
+                    {text.operatorSetupShort}
+                  </Link>
+                )}
+              </>
             )
           ) : !planResolved ? (
             <span className="px-3 py-1.5 text-xs text-white/80">{text.planLoading}</span>
@@ -2916,7 +2939,30 @@ export default function Home() {
 
       {screenMode === 'preview_edit' && previewImageUrl && (
         <div className="fixed inset-0 z-0 bg-black">
-          {toastMessage && (
+          {showDailyLimitOverlay && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center px-6 bg-black/40">
+              <div className="max-w-sm w-full px-5 py-5 rounded-2xl bg-black/85 backdrop-blur-xl text-white text-sm font-light text-center leading-relaxed border border-white/20 shadow-2xl space-y-4">
+                <p>{tx('dailyFreeLimitManualOnly')}</p>
+                <Link
+                  href="/operator"
+                  className="inline-flex w-full items-center justify-center rounded-full bg-emerald-500/35 border border-emerald-400/55 px-4 py-3 text-sm text-emerald-50 hover:bg-emerald-500/45"
+                >
+                  {text.operatorSetupLink}
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDailyLimitOverlay(false);
+                    handleEditManually();
+                  }}
+                  className="inline-flex w-full items-center justify-center rounded-full bg-amber-400/90 px-4 py-3 text-sm text-black hover:bg-amber-300"
+                >
+                  {text.editManually}
+                </button>
+              </div>
+            </div>
+          )}
+          {toastMessage && !showDailyLimitOverlay && (
             <div className="absolute inset-0 z-30 flex items-center justify-center px-6 pointer-events-none">
               <div className="max-w-sm px-5 py-4 rounded-2xl bg-black/75 backdrop-blur-xl text-white text-sm font-light text-center leading-relaxed border border-white/20 shadow-2xl">
                 {toastMessage}
