@@ -11,6 +11,7 @@ import {
   normalizeOperatorToken,
   OPERATOR_TOKEN_STORAGE_KEY,
 } from '../../lib/operator-client';
+import { requestPlanRefresh } from '../../lib/device-id';
 
 function stripSensitiveQueryFromUrl(): void {
   if (typeof window === 'undefined') return;
@@ -28,6 +29,10 @@ export default function OperatorPage() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const [successDetail, setSuccessDetail] = useState<{
+    deviceId: string;
+    planSource?: string;
+  } | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const autoTriggered = useRef(false);
 
@@ -38,10 +43,15 @@ export default function OperatorPage() {
     setMessage(null);
     try {
       const result = await activateOperatorPro(trimmed);
+      setSuccessDetail({
+        deviceId: result.deviceId ?? ensureDeviceId(),
+        planSource: result.verifiedPlanSource ?? result.planSource,
+      });
       setStatus('success');
       setMessage(result.message);
       stripSensitiveQueryFromUrl();
     } catch (e) {
+      setSuccessDetail(null);
       setStatus('error');
       setMessage(e instanceof Error ? e.message : '登録に失敗しました');
     } finally {
@@ -94,8 +104,18 @@ export default function OperatorPage() {
           <div className="rounded-2xl border border-emerald-400/40 bg-emerald-950/30 p-6 text-center space-y-4">
             <p className="text-3xl">✓</p>
             <p className="text-emerald-100 text-sm leading-relaxed">{message}</p>
+            <p className="text-emerald-200/80 text-xs leading-relaxed">
+              右上が緑の「Pro」になっているか確認してください。
+            </p>
+            {successDetail && (
+              <p className="text-[11px] text-white/45 font-mono break-all leading-relaxed">
+                端末ID: {successDetail.deviceId}
+                {successDetail.planSource ? ` / ${successDetail.planSource}` : ''}
+              </p>
+            )}
             <Link
               href="/"
+              onClick={() => requestPlanRefresh()}
               className="inline-flex w-full items-center justify-center rounded-full bg-emerald-500/25 border border-emerald-400/50 px-5 py-3.5 text-sm text-emerald-50 hover:bg-emerald-500/35"
             >
               カメラに戻る
@@ -174,7 +194,7 @@ export default function OperatorPage() {
                 <strong className="text-white/70">手入力:</strong> Vercel → Settings → Environment Variables →{' '}
                 METRICS_ADMIN_TOKEN の値（64文字前後）を上の欄に貼る。
               </p>
-              <p className="text-white/40">端末ID（自動）: {deviceId || '…'}</p>
+              <p className="text-white/40">端末ID（この端末）: {deviceId || '…'}</p>
             </div>
           )}
         </div>

@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { getFeedbackMailto, getShareCaption, site } from '../lib/site';
+import {
+  clearOperatorProPending,
+  getStableDeviceId,
+  hasOperatorProPending,
+  PLAN_REFRESH_EVENT,
+} from '../lib/device-id';
 import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, ImagePlus, Download as DownloadIcon, Mail } from 'lucide-react';
 
 /** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
@@ -47,7 +53,6 @@ declare global {
 }
 type Corners = [Corner, Corner, Corner, Corner]; // topLeft, topRight, bottomRight, bottomLeft
 
-const DEVICE_ID_KEY = 'carkus_device_id';
 const CARKUS_DOWNLOAD_COUNT_KEY = 'carkus_download_count';
 const OPERATOR_UI_STORAGE_KEY = 'carkus_operator_ui_unlocked';
 const OPERATOR_LOGO_TAP_UNLOCK = 5;
@@ -113,21 +118,6 @@ function getNextCarkusFilename(): string {
     window.localStorage.setItem(CARKUS_DOWNLOAD_COUNT_KEY, String(n + 1));
   } catch (_) {}
   return `Carkus-${String(n).padStart(3, '0')}.jpg`;
-}
-
-/** デバイス単位の識別用。サーバー側の日次ブロックは行わず、あくまで利用状況の参考にのみ使用する。 */
-function getDeviceId(): string {
-  if (typeof window === 'undefined' || !window.localStorage) return '';
-  let id = window.localStorage.getItem(DEVICE_ID_KEY);
-  if (!id) {
-    id = typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `d-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`;
-    try {
-      window.localStorage.setItem(DEVICE_ID_KEY, id);
-    } catch (_) {}
-  }
-  return id ?? '';
 }
 
 function parsePlanLimit(value: unknown, fallback: number): number {
@@ -904,7 +894,7 @@ export default function Home() {
   }, [unlockOperatorUi]);
 
   const trackPlanEvent = useCallback((event: 'upgrade_click' | 'feature_blocked_by_plan') => {
-    const deviceId = getDeviceId();
+    const deviceId = getStableDeviceId();
     fetch('/api/metrics-event', {
       method: 'POST',
       headers: {
@@ -935,6 +925,7 @@ export default function Home() {
     }
     if (data.plan === 'pro') {
       setDailyRemaining(null);
+      clearOperatorProPending();
     } else {
       const remaining =
         data.remainingDetectionsToday !== undefined ? data.remainingDetectionsToday : data.remainingToday;
@@ -947,7 +938,7 @@ export default function Home() {
 
   const refreshPlanFromServer = useCallback(async (): Promise<PlanApiSnapshot | null> => {
     try {
-      const deviceId = getDeviceId();
+      const deviceId = getStableDeviceId();
       const res = await fetch('/api/plan', {
         cache: 'no-store',
         headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
@@ -1096,6 +1087,11 @@ export default function Home() {
   }, [refreshPlanFromServer]);
 
   useEffect(() => {
+    if (hasOperatorProPending()) {
+      setPlan('pro');
+      setDailyRemaining(null);
+      setPlanResolved(true);
+    }
     fetchPlan();
   }, [fetchPlan]);
 
@@ -1103,11 +1099,16 @@ export default function Home() {
     const refreshPlan = () => {
       if (document.visibilityState === 'visible') fetchPlan();
     };
+    const onPlanRefresh = () => {
+      void fetchPlan();
+    };
     document.addEventListener('visibilitychange', refreshPlan);
     window.addEventListener('focus', refreshPlan);
+    window.addEventListener(PLAN_REFRESH_EVENT, onPlanRefresh);
     return () => {
       document.removeEventListener('visibilitychange', refreshPlan);
       window.removeEventListener('focus', refreshPlan);
+      window.removeEventListener(PLAN_REFRESH_EVENT, onPlanRefresh);
     };
   }, [fetchPlan]);
 
@@ -1129,7 +1130,7 @@ export default function Home() {
   /** 画面表示用に残り回数を取得（APIは消費しない） */
   const fetchRemainingQuota = useCallback(async () => {
     try {
-      const deviceId = getDeviceId();
+      const deviceId = getStableDeviceId();
       const res = await fetch('/api/detect', {
         cache: 'no-store',
         headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
@@ -1631,7 +1632,7 @@ export default function Home() {
       activeDetectControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), 25_000);
       try {
-        const deviceId = getDeviceId();
+        const deviceId = getStableDeviceId();
         const res = await fetch('/api/detect', {
           method: 'POST',
           body: createFormData(false),
@@ -1987,7 +1988,7 @@ export default function Home() {
         activeDetectControllerRef.current = controller;
         const timeoutId = setTimeout(() => controller.abort(), 25_000);
         try {
-          const deviceId = getDeviceId();
+          const deviceId = getStableDeviceId();
           const res = await fetch('/api/detect', {
             method: 'POST',
             body: createFormData(false),

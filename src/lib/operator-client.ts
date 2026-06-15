@@ -1,19 +1,22 @@
-export const DEVICE_ID_KEY = 'carkus_device_id';
+import {
+  DEVICE_ID_KEY,
+  getStableDeviceId,
+  markOperatorProPending,
+  requestPlanRefresh,
+} from './device-id';
+
+export { DEVICE_ID_KEY };
 export const OPERATOR_TOKEN_STORAGE_KEY = 'carkus_metrics_admin_token';
 
+export type PlanApiSnapshot = {
+  plan?: string;
+  planSource?: string;
+  hasValidDeviceId?: boolean;
+};
+
+/** @deprecated use getStableDeviceId */
 export function ensureDeviceId(): string {
-  if (typeof window === 'undefined') return '';
-  let id = window.localStorage.getItem(DEVICE_ID_KEY);
-  if (!id) {
-    id =
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `d-${Date.now()}-${Math.random().toString(36).slice(2, 15)}`;
-    try {
-      window.localStorage.setItem(DEVICE_ID_KEY, id);
-    } catch (_) {}
-  }
-  return id ?? '';
+  return getStableDeviceId();
 }
 
 export function normalizeOperatorToken(value: string): string {
@@ -46,9 +49,30 @@ export function isStandaloneApp(): boolean {
   );
 }
 
-export async function activateOperatorPro(token: string): Promise<{ message: string; plan?: string }> {
+export async function fetchPlanSnapshot(deviceId?: string): Promise<PlanApiSnapshot> {
+  const id = deviceId ?? getStableDeviceId();
+  const res = await fetch('/api/plan', {
+    cache: 'no-store',
+    headers: id ? { 'X-Device-Id': id } : undefined,
+  });
+  if (!res.ok) {
+    throw new Error(`プラン確認に失敗しました (${res.status})`);
+  }
+  return (await res.json()) as PlanApiSnapshot;
+}
+
+export type ActivateOperatorProResult = {
+  message: string;
+  plan?: string;
+  planSource?: string;
+  deviceId?: string;
+  verifiedPlan?: string;
+  verifiedPlanSource?: string;
+};
+
+export async function activateOperatorPro(token: string): Promise<ActivateOperatorProResult> {
   const trimmedToken = normalizeOperatorToken(token);
-  const deviceId = ensureDeviceId();
+  const deviceId = getStableDeviceId();
   if (!trimmedToken) {
     throw new Error('運営者パスワードを入力してください。');
   }
@@ -78,8 +102,24 @@ export async function activateOperatorPro(token: string): Promise<{ message: str
     window.localStorage.setItem(OPERATOR_TOKEN_STORAGE_KEY, trimmedToken);
   } catch (_) {}
 
+  const snapshot = await fetchPlanSnapshot(deviceId);
+  if (snapshot.plan !== 'pro') {
+    throw new Error(
+      `登録APIは成功しましたが、サーバーはまだ「${snapshot.plan ?? 'free'}」と返しています。` +
+        ` 端末ID: ${deviceId}` +
+        (snapshot.hasValidDeviceId === false ? '（端末IDがサーバーで無効と判定されています）' : '')
+    );
+  }
+
+  markOperatorProPending();
+  requestPlanRefresh();
+
   return {
     message: typeof json.message === 'string' ? json.message : 'この端末で Pro を有効にしました。',
     plan: typeof json.plan === 'string' ? json.plan : undefined,
+    planSource: typeof json.planSource === 'string' ? json.planSource : undefined,
+    deviceId: typeof json.deviceId === 'string' ? json.deviceId : deviceId,
+    verifiedPlan: snapshot.plan,
+    verifiedPlanSource: snapshot.planSource,
   };
 }
