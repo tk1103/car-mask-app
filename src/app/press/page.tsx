@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import { SeoOriginContext } from '../../components/SeoOriginContext';
 import { CARKUS_ORIGIN_SEO_LINE } from '../../lib/seo-origin';
 import { getContactLabel, getContactMailto, site } from '../../lib/site';
 
@@ -10,7 +9,7 @@ export const metadata: Metadata = {
   description: `${site.name}（${site.nameReading}）のプレスキット・メディア向け素材。${CARKUS_ORIGIN_SEO_LINE}`,
   openGraph: {
     title: `${site.name} プレスキット`,
-    description: site.descriptionJa,
+    description: CARKUS_ORIGIN_SEO_LINE,
     url: `${site.url}/press`,
   },
 };
@@ -47,7 +46,10 @@ export default function PressPage() {
 
         <section className="space-y-4 mb-10">
           <h2 className="text-lg font-medium text-white border-b border-white/10 pb-2">1行紹介</h2>
-          <p className="text-zinc-300 leading-relaxed">{site.taglineJa} — {site.descriptionJa}</p>
+          <p className="text-zinc-200 leading-relaxed text-base">{CARKUS_ORIGIN_SEO_LINE}</p>
+          <p className="text-zinc-400 text-sm leading-relaxed">
+            {site.taglineJa} — {site.descriptionJa}
+          </p>
         </section>
 
         <section className="space-y-4 mb-10">
@@ -158,7 +160,6 @@ export default function PressPage() {
             </a>
           </div>
         </section>
-        <SeoOriginContext />
       </div>
     </div>
   );
