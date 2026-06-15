@@ -130,6 +130,12 @@ function getDeviceId(): string {
   return id ?? '';
 }
 
+function parsePlanLimit(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 // API座標をクライアント座標に変換（0-1000 → 0-1）。画像の幅・高さに依存しない正規化座標（portrait/landscape 共通）
 function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
   const normalize = (value: number) => {
@@ -626,7 +632,7 @@ const t = {
     serverBusyRetry: 'サーバーが混み合っています。手動で位置を合わせてください。',
     quotaManualHint: 'サーバーが混雑しています。再試行せず手動でロゴ位置を合わせてください。',
     dailyFreeLimitManualOnly: '本日の自動検出枠を使い切りました。手動で枠を合わせるか、下のボタンから無制限化してください。',
-    dailyFreeLimitOperatorHint: '',
+    dailyFreeLimitProHint: '右上が「Pro」でない場合、この端末は無料枠のままです。ロゴを5回タップして運営者設定から登録してください。',
     operatorSetupLink: '運営者: 無制限にする',
     operatorSetupShort: '無制限にする',
     freeQuotaLabel: '本日の無料自動検出',
@@ -732,7 +738,7 @@ const t = {
     serverBusyRetry: 'Server is busy. Please adjust the logo position manually.',
     quotaManualHint: 'The server is busy. Skip retry and place the logo manually.',
     dailyFreeLimitManualOnly: 'Daily auto-detect limit reached. Adjust manually or use the button below.',
-    dailyFreeLimitOperatorHint: '',
+    dailyFreeLimitProHint: 'If the top-right badge is not Pro, this device is still on the free quota. Tap the logo 5 times for operator setup.',
     operatorSetupLink: 'Operator: unlimited',
     operatorSetupShort: 'Go unlimited',
     freeQuotaLabel: 'Daily free auto-detections',
@@ -923,14 +929,18 @@ export default function Home() {
       setPlanFeatures({
         customLogo: Boolean(data.features.customLogo),
         watermarkOnExport: Boolean(data.features.watermarkOnExport),
-        dailyDetectLimit: Number(data.features.dailyDetectLimit) || DEFAULT_PLAN_FEATURES.dailyDetectLimit,
-        rateLimitPerMinute: Number(data.features.rateLimitPerMinute) || DEFAULT_PLAN_FEATURES.rateLimitPerMinute,
+        dailyDetectLimit: parsePlanLimit(data.features.dailyDetectLimit, DEFAULT_PLAN_FEATURES.dailyDetectLimit),
+        rateLimitPerMinute: parsePlanLimit(data.features.rateLimitPerMinute, DEFAULT_PLAN_FEATURES.rateLimitPerMinute),
       });
     }
-    const remaining =
-      data.remainingDetectionsToday !== undefined ? data.remainingDetectionsToday : data.remainingToday;
-    if (remaining === null || typeof remaining === 'number') {
-      setDailyRemaining(remaining);
+    if (data.plan === 'pro') {
+      setDailyRemaining(null);
+    } else {
+      const remaining =
+        data.remainingDetectionsToday !== undefined ? data.remainingDetectionsToday : data.remainingToday;
+      if (remaining === null || typeof remaining === 'number') {
+        setDailyRemaining(remaining);
+      }
     }
     setPlanResolved(true);
   }, []);
@@ -954,15 +964,16 @@ export default function Home() {
   /** 撮影直前にサーバーでプラン・残枠を再取得（Pro 登録直後の古い「0枚」表示を防ぐ） */
   const canAutoDetectNow = useCallback(async (): Promise<boolean> => {
     const data = await refreshPlanFromServer();
+    if (data?.plan === 'pro') return true;
+    if (!data && planResolved && plan === 'pro') return true;
     if (!data) return hasAutoDetectQuota();
-    if (data.plan === 'pro') return true;
-    const limit = Number(data.features?.dailyDetectLimit ?? DEFAULT_PLAN_FEATURES.dailyDetectLimit);
+    const limit = parsePlanLimit(data.features?.dailyDetectLimit, DEFAULT_PLAN_FEATURES.dailyDetectLimit);
     if (limit <= 0) return true;
     const remaining = data.remainingDetectionsToday ?? data.remainingToday;
     if (remaining === null) return true;
     if (typeof remaining === 'number') return remaining > 0;
     return true;
-  }, [hasAutoDetectQuota, refreshPlanFromServer]);
+  }, [hasAutoDetectQuota, plan, planResolved, refreshPlanFromServer]);
 
   const createTrackedObjectUrl = useCallback((blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -1500,10 +1511,12 @@ export default function Home() {
     const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
 
     setIsProcessing(true);
+    setShowDailyLimitOverlay(false);
     setCameraError(null);
     setDetectionFailed(false);
     setManualEditActive(false);
     setRetryStatusText(null);
+    setToastMessage(null);
 
     try {
       const pickedUrl = createTrackedObjectUrl(file);
@@ -1713,6 +1726,8 @@ export default function Home() {
     const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
 
     // 撮影前にサーバーからプラン・残枠を再取得
+    setShowDailyLimitOverlay(false);
+    setToastMessage(null);
     try {
       await refreshPlanFromServer();
     } catch (_) {}
@@ -2975,6 +2990,9 @@ export default function Home() {
             <div className="absolute inset-0 z-30 flex items-center justify-center px-6 bg-black/40">
               <div className="max-w-sm w-full px-5 py-5 rounded-2xl bg-black/85 backdrop-blur-xl text-white text-sm font-light text-center leading-relaxed border border-white/20 shadow-2xl space-y-4">
                 <p>{tx('dailyFreeLimitManualOnly')}</p>
+                {!showOperatorSetup && (
+                  <p className="text-xs text-white/55 leading-relaxed">{tx('dailyFreeLimitProHint')}</p>
+                )}
                 <button
                   type="button"
                   onClick={() => {
