@@ -593,6 +593,8 @@ const t = {
     cameraLaunchHint: 'カメラを起動して撮影してください',
     dailyNote: 'β版: AI 自動検出は 1日3回までです。枠を使い切っても手動編集・保存はできます。',
     autoDetectFailedManual: '自動検出に失敗しました。手動で位置を合わせてください。',
+    detectPartialFiltered: '一部の誤検出を除外しました。ナンバーが漏れている場合は手動で編集してください。',
+    detectLowConfidenceManual: '自動検出の精度が低い可能性があります。位置を確認するか手動で編集してください。',
     timeoutManual: '解析がタイムアウトしました。位置を手動で調整してください。',
     imageFileOnly: '画像ファイルを選択してください。',
     imageLoadFailed: '画像の読み込みに失敗しました',
@@ -699,6 +701,8 @@ const t = {
     cameraLaunchHint: 'Open camera and take a photo',
     dailyNote: 'Beta: 3 AI auto-detections per day. Manual edit and save still work after the limit.',
     autoDetectFailedManual: 'Auto-detection failed. Please adjust position manually.',
+    detectPartialFiltered: 'Some false detections were removed. Edit manually if a plate is still visible.',
+    detectLowConfidenceManual: 'Auto-detection may be inaccurate. Check placement or edit manually.',
     timeoutManual: 'Detection timed out. Please adjust position manually.',
     imageFileOnly: 'Please select an image file.',
     imageLoadFailed: 'Failed to load image.',
@@ -1209,7 +1213,7 @@ export default function Home() {
 
   const applyDetectOutcome = useCallback(
     (outcome: DetectRunOutcome) => {
-      const { result, corners, status } = outcome;
+      const { result, corners, status, filteredPlateCount, lowCoverage } = outcome;
       const resOk = status >= 200 && status < 300;
       if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
         console.info('Plate detection reasoning:', result.reasoning);
@@ -1238,8 +1242,17 @@ export default function Home() {
         setEditLogoOffset({ x: 0, y: 0 });
         setEditLogoScale(1);
         setEditLogoRotation(0);
-        setDetectionFailed(false);
         setManualEditActive(false);
+        if (filteredPlateCount > 0) {
+          setToastMessage(tx('detectPartialFiltered'));
+          setDetectionFailed(true);
+        } else if (lowCoverage) {
+          setToastMessage(tx('detectLowConfidenceManual'));
+          setDetectionFailed(true);
+        } else {
+          setDetectionFailed(false);
+          setToastMessage(null);
+        }
         return;
       }
 

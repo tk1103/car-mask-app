@@ -5,7 +5,9 @@ import {
   type PlateSearchCrop,
 } from './detect-image';
 import {
+  filterPlateCornersList,
   getPlateBaseAngle,
+  hasLowCoveragePlateCorners,
   normalizeCornersOrder,
   refinePlateCorners,
   refinePlateCornersList,
@@ -33,6 +35,9 @@ export type DetectRunOutcome = {
   result: DetectApiResponse;
   corners: Corners[] | null;
   usedCrop: boolean;
+  rawPlateCount: number;
+  filteredPlateCount: number;
+  lowCoverage: boolean;
 };
 
 function plateApiToFullCorners(
@@ -44,34 +49,54 @@ function plateApiToFullCorners(
   return remapApiPlateCornersToFullImage(apiCorners, crop, imageW, imageH) as Corners;
 }
 
+function collectRefinedCornersFromResult(
+  result: DetectApiResponse,
+  crop: PlateSearchCrop | null,
+  imageW: number,
+  imageH: number
+): Corners[] {
+  const refined: Corners[] = [];
+
+  if (result.plates && Array.isArray(result.plates)) {
+    for (const plate of result.plates) {
+      if (!plate.corners || !Array.isArray(plate.corners) || plate.corners.length !== 4) continue;
+      refined.push(
+        refinePlateCorners(
+          normalizeCornersOrder(plateApiToFullCorners(plate.corners, crop, imageW, imageH)),
+          imageW,
+          imageH
+        )
+      );
+    }
+    return refined;
+  }
+
+  if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
+    refined.push(
+      refinePlateCorners(
+        normalizeCornersOrder(plateApiToFullCorners(result.corners, crop, imageW, imageH)),
+        imageW,
+        imageH
+      )
+    );
+  }
+
+  return refined;
+}
+
 function parseCornersFromResult(
   result: DetectApiResponse,
   crop: PlateSearchCrop | null,
   imageW: number,
   imageH: number
-): Corners[] | null {
-  if (result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
-    const platesCorners: Corners[] = result.plates
-      .filter((plate) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
-      .map((plate) =>
-        refinePlateCorners(
-          normalizeCornersOrder(plateApiToFullCorners(plate.corners!, crop, imageW, imageH)),
-          imageW,
-          imageH
-        )
-      );
-    return platesCorners.length > 0 ? platesCorners : null;
-  }
-  if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
-    return [
-      refinePlateCorners(
-        normalizeCornersOrder(plateApiToFullCorners(result.corners, crop, imageW, imageH)),
-        imageW,
-        imageH
-      ),
-    ];
-  }
-  return null;
+): Pick<DetectRunOutcome, 'corners' | 'rawPlateCount' | 'filteredPlateCount' | 'lowCoverage'> {
+  const refined = collectRefinedCornersFromResult(result, crop, imageW, imageH);
+  const rawPlateCount = refined.length;
+  const filtered = filterPlateCornersList(refined, imageW, imageH);
+  const filteredPlateCount = Math.max(0, rawPlateCount - filtered.length);
+  const corners = filtered.length > 0 ? filtered : null;
+  const lowCoverage = corners ? hasLowCoveragePlateCorners(corners, imageW, imageH) : false;
+  return { corners, rawPlateCount, filteredPlateCount, lowCoverage };
 }
 
 async function postDetect(
@@ -100,6 +125,33 @@ async function postDetect(
   return { status: res.status, result };
 }
 
+function buildOutcome(
+  status: number,
+  result: DetectApiResponse,
+  crop: PlateSearchCrop | null,
+  imageW: number,
+  imageH: number,
+  usedCrop: boolean
+): DetectRunOutcome {
+  const parsed =
+    status >= 200 && status < 300
+      ? parseCornersFromResult(result, crop, imageW, imageH)
+      : {
+          corners: null as Corners[] | null,
+          rawPlateCount: 0,
+          filteredPlateCount: 0,
+          lowCoverage: false,
+        };
+
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    result,
+    usedCrop,
+    ...parsed,
+  };
+}
+
 /** 下部クロップ優先 → 失敗時は原画像全体で再試行 */
 export async function runPlateDetection(
   fullResCanvas: HTMLCanvasElement,
@@ -112,21 +164,21 @@ export async function runPlateDetection(
   const croppedPayload = await buildDetectImageBlob(fullResCanvas, imageW, imageH, crop);
   let { status, result } = await postDetect(croppedPayload.blob, croppedPayload.width, croppedPayload.height, deviceId, signal);
 
-  let corners = status >= 200 && status < 300 ? parseCornersFromResult(result, crop, imageW, imageH) : null;
-  if (corners) {
-    return { ok: true, status, result, corners, usedCrop: true };
+  let outcome = buildOutcome(status, result, crop, imageW, imageH, true);
+  if (outcome.corners) {
+    return outcome;
   }
 
   if (!signal?.aborted) {
     const fullPayload = await buildDetectImageBlob(fullResCanvas, imageW, imageH, null);
     ({ status, result } = await postDetect(fullPayload.blob, fullPayload.width, fullPayload.height, deviceId, signal));
-    corners = status >= 200 && status < 300 ? parseCornersFromResult(result, null, imageW, imageH) : null;
-    if (corners) {
-      return { ok: true, status, result, corners, usedCrop: false };
+    outcome = buildOutcome(status, result, null, imageW, imageH, false);
+    if (outcome.corners) {
+      return outcome;
     }
   }
 
-  return { ok: status >= 200 && status < 300, status, result, corners: null, usedCrop: true };
+  return outcome;
 }
 
-export { getPlateBaseAngle, refinePlateCornersList };
+export { getPlateBaseAngle, filterPlateCornersList, refinePlateCornersList };
