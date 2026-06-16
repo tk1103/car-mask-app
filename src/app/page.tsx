@@ -9,6 +9,11 @@ import {
   hasOperatorProPending,
   PLAN_REFRESH_EVENT,
 } from '../lib/device-id';
+import { runPlateDetection, type DetectRunOutcome } from '../lib/detect-client';
+import {
+  getDefaultCenterCorners,
+  getPlateBaseAngle,
+} from '../lib/plate-corners';
 import { Camera, Loader2, CheckCircle, RotateCcw, Share2, Facebook, Twitter, Instagram, Copy, Download, Monitor, ImagePlus, Download as DownloadIcon, Mail } from 'lucide-react';
 
 /** ヘッダー用。ファイル読み込みに依存せず常に表示するインラインSVG */
@@ -84,21 +89,6 @@ const DEFAULT_PLAN_FEATURES: PlanFeatures = {
   rateLimitPerMinute: 5,
 };
 
-type DetectApiResponse = {
-  found?: boolean;
-  plates?: Array<{ corners?: Array<{ x: number; y: number }> }>;
-  corners?: Array<{ x: number; y: number }>;
-  reasoning?: string;
-  inferred?: boolean;
-  error?: unknown;
-  userMessage?: string;
-  errorType?: DetectErrorType;
-  requestId?: string;
-  retryAfterSeconds?: number;
-  remainingToday?: number | null;
-  plan?: string;
-};
-
 type PlanApiSnapshot = {
   plan?: string;
   planSource?: string;
@@ -124,117 +114,6 @@ function parsePlanLimit(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-// API座標をクライアント座標に変換（0-1000 → 0-1）。画像の幅・高さに依存しない正規化座標（portrait/landscape 共通）
-function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Corners {
-  const normalize = (value: number) => {
-    if (!Number.isFinite(value)) return 0;
-    return Math.max(0, Math.min(1, value / 1000));
-  };
-  return plate.corners.map((c) => ({
-    x: normalize(c.x),
-    y: normalize(c.y),
-  })) as Corners;
-}
-
-/** 編集用デフォルト四角（正規化座標 0-1）。解析失敗時やAPIエラー時に使用。一般的なナンバープレート位置（画像下部中央） */
-function getDefaultCenterCorners(): Corners {
-  const cx = 0.5;
-  const cy = 0.82;
-  // 正面向きの愛車写真でナンバーが占めるおおよその大きさ（幅 ~8%, 高さ ~4%）
-  const halfW = 0.042;
-  const halfH = 0.021;
-  return [
-    { x: cx - halfW, y: cy - halfH },
-    { x: cx + halfW, y: cy - halfH },
-    { x: cx + halfW, y: cy + halfH },
-    { x: cx - halfW, y: cy + halfH },
-  ];
-}
-
-/** 四隅からプレート幅・高さ（px）を推定 */
-function measureQuadPlateSize(corners: Corners, imageW: number, imageH: number) {
-  const plateWidthTop = Math.hypot((corners[1].x - corners[0].x) * imageW, (corners[1].y - corners[0].y) * imageH);
-  const plateWidthBottom = Math.hypot((corners[2].x - corners[3].x) * imageW, (corners[2].y - corners[3].y) * imageH);
-  const plateWidth = (plateWidthTop + plateWidthBottom) / 2;
-  const plateHeightLeft = Math.hypot((corners[3].x - corners[0].x) * imageW, (corners[3].y - corners[0].y) * imageH);
-  const plateHeightRight = Math.hypot((corners[2].x - corners[1].x) * imageW, (corners[2].y - corners[1].y) * imageH);
-  const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
-  const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
-  const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
-  return { plateWidth, plateHeight, centerNx, centerNy };
-}
-
-/**
- * AI やデフォルト枠が横長になりすぎると 2:1 マスクが潰れて見える。
- * 中心を保ち、2:1 に近づける（8% 以上ズレている場合のみ）。
- */
-function fitCornersToPlateAspect(
-  corners: Corners,
-  imageW: number,
-  imageH: number,
-  targetAspect = PLATE_ASPECT_RATIO
-): Corners {
-  if (imageW <= 0 || imageH <= 0) return corners;
-  const { plateWidth, plateHeight, centerNx, centerNy } = measureQuadPlateSize(corners, imageW, imageH);
-  if (plateWidth <= 0 || plateHeight <= 0) return corners;
-
-  const currentAspect = plateWidth / plateHeight;
-  let scaleX = 1;
-  let scaleY = 1;
-  if (currentAspect > targetAspect * 1.08) {
-    scaleX = (plateHeight * targetAspect) / plateWidth;
-  } else if (currentAspect < targetAspect / 1.08) {
-    scaleY = plateWidth / targetAspect / plateHeight;
-  }
-  if (scaleX === 1 && scaleY === 1) return corners;
-
-  return corners.map((c) => ({
-    x: centerNx + (c.x - centerNx) * scaleX,
-    y: centerNy + (c.y - centerNy) * scaleY,
-  })) as Corners;
-}
-
-function refinePlateCorners(corners: Corners, imageW: number, imageH: number): Corners {
-  let next = fitCornersToPlateAspect(normalizeCornersOrder(corners), imageW, imageH);
-  const { plateWidth, plateHeight, centerNx, centerNy } = measureQuadPlateSize(next, imageW, imageH);
-  const maxWidthRatio = 0.14;
-  const maxHeightRatio = 0.075;
-  const widthRatio = plateWidth / imageW;
-  const heightRatio = plateHeight / imageH;
-  let shrink = 1;
-  if (widthRatio > maxWidthRatio) shrink = Math.min(shrink, maxWidthRatio / widthRatio);
-  if (heightRatio > maxHeightRatio) shrink = Math.min(shrink, maxHeightRatio / heightRatio);
-  if (shrink < 1) {
-    next = next.map((c) => ({
-      x: centerNx + (c.x - centerNx) * shrink,
-      y: centerNy + (c.y - centerNy) * shrink,
-    })) as Corners;
-  }
-  return next;
-}
-
-function refinePlateCornersList(cornersList: Corners[], imageW: number, imageH: number): Corners[] {
-  return cornersList.map((corners) => refinePlateCorners(corners, imageW, imageH));
-}
-
-function normalizeCornersOrder(corners: Corners): Corners {
-  return corners;
-}
-
-function getPlateBaseAngle(corners: Corners): number {
-  const topDx = corners[1].x - corners[0].x;
-  const topDy = corners[1].y - corners[0].y;
-  const bottomDx = corners[2].x - corners[3].x;
-  const bottomDy = corners[2].y - corners[3].y;
-  const angleTop = Math.atan2(topDy, topDx);
-  const angleBottom = Math.atan2(bottomDy, bottomDx);
-  let baseAngle = (angleTop + angleBottom) / 2;
-  if (Math.abs(angleTop - angleBottom) > Math.PI) {
-    baseAngle += Math.PI;
-  }
-  return baseAngle;
 }
 
 // 3点対応のアフィン行列を算出（srcTri → dstTri）。setTransform(a,b,c,d,e,f) に渡す配列を返す。
@@ -506,7 +385,6 @@ const CUSTOM_MASK_PREPARED_KEY = 'carkus_custom_mask_prepared';
 const CUSTOM_MASK_SETUP_KEY = 'carkus_custom_mask_setup';
 const MASK_STYLE_STORAGE_KEY = 'carkus_mask_style';
 /** 日本のナンバープレート近似アスペクト（幅:高さ = 2:1） */
-const PLATE_ASPECT_RATIO = 2;
 const PLATE_MASK_WIDTH = 520;
 const PLATE_MASK_HEIGHT = 260;
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
@@ -857,8 +735,7 @@ function fillI18nTemplate(template: string, vars: Record<string, string | number
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>('ja');
-  const [screenMode, setScreenMode] = useState<'idle' | 'camera' | 'preview_edit'>('idle');
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [screenMode, setScreenMode] = useState<'idle' | 'preview_edit'>('idle');
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -873,7 +750,6 @@ export default function Home() {
   const [maskTemplate, setMaskTemplate] = useState<MaskTemplate>('fit');
   const [maskStyle, setMaskStyle] = useState<MaskStyle>('carkus');
   const [previewImageLoaded, setPreviewImageLoaded] = useState(false);
-  const [showFlash, setShowFlash] = useState(false); // フラッシュ効果用
   const [showShareMenu, setShowShareMenu] = useState(false); // SNS共有メニュー表示用
   const [isBlurWarning, setIsBlurWarning] = useState(false);
   const [detectionFailed, setDetectionFailed] = useState(false);
@@ -908,15 +784,13 @@ export default function Home() {
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [operatorUiUnlocked, setOperatorUiUnlocked] = useState(false);
   const operatorLogoTapRef = useRef<{ count: number; resetAt: number }>({ count: 0, resetAt: 0 });
-  const videoRef = useRef<HTMLVideoElement>(null);
   const photoPickerRef = useRef<HTMLInputElement>(null);
+  const cameraCaptureRef = useRef<HTMLInputElement>(null);
   const customLogoPickerRef = useRef<HTMLInputElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const activeDetectControllerRef = useRef<AbortController | null>(null);
   const activeDetectRequestIdRef = useRef(0);
   const objectUrlRegistryRef = useRef<Set<string>>(new Set());
-  const playAttemptCountRef = useRef(0);
   const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
   const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
@@ -1211,7 +1085,7 @@ export default function Home() {
   }, [applyPlanFromApi]);
 
   useEffect(() => {
-    if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
+    if (screenMode === 'idle') fetchRemainingQuota();
   }, [screenMode, fetchRemainingQuota]);
 
   useEffect(() => {
@@ -1289,25 +1163,58 @@ export default function Home() {
     }
   }, [tx]);
 
-  const startCamera = useCallback(async () => {
+  const applyDetectOutcome = useCallback(
+    (outcome: DetectRunOutcome) => {
+      const { result, corners, status } = outcome;
+      const resOk = status >= 200 && status < 300;
+      if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
+        console.info('Plate detection reasoning:', result.reasoning);
+      }
+      const remaining = result.remainingToday;
+      if (remaining === null || typeof remaining === 'number') setDailyRemaining(remaining);
+      if (result.plan === 'pro' || result.plan === 'free') setPlan(result.plan);
+
+      if (!resOk) {
+        const errPayload = result.error;
+        const msg = typeof errPayload === 'string' ? errPayload : result.userMessage || tx('autoDetectFailedManual');
+        if (result.errorType === 'daily_limit') {
+          showDailyLimitBlocked();
+        } else {
+          setToastMessage(
+            getMessageByErrorType(result.errorType as DetectErrorType | undefined, msg, result.retryAfterSeconds)
+          );
+          showManualHelpAfterFailure();
+        }
+        return;
+      }
+
+      if (corners && corners.length > 0) {
+        setDetectedCorners(corners);
+        setDetectedBaseAngles(corners.map((c) => getPlateBaseAngle(c)));
+        setEditLogoOffset({ x: 0, y: 0 });
+        setEditLogoScale(1);
+        setEditLogoRotation(0);
+        setDetectionFailed(false);
+        setManualEditActive(false);
+        return;
+      }
+
+      setToastMessage(
+        getMessageByErrorType(
+          result.errorType as DetectErrorType | undefined,
+          result.userMessage || tx('autoDetectFailedManual'),
+          result.retryAfterSeconds
+        )
+      );
+      showManualHelpAfterFailure();
+    },
+    [getMessageByErrorType, showDailyLimitBlocked, showManualHelpAfterFailure, tx]
+  );
+
+  const handleOpenCamera = useCallback(() => {
     setCameraError(null);
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError(tx('cameraHttpsRequired'));
-      return;
-    }
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: false,
-      });
-      streamRef.current = s;
-      setStream(s);
-      setScreenMode('camera');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setCameraError(msg.includes('Permission') ? tx('cameraPermissionError') : tx('cameraStartFailed'));
-    }
-  }, [tx]);
+    cameraCaptureRef.current?.click();
+  }, []);
 
   const discardRetakeSnapshot = useCallback(() => {
     setRetakeSnapshot((prev) => {
@@ -1315,82 +1222,6 @@ export default function Home() {
       return null;
     });
   }, [revokeTrackedObjectUrl]);
-
-  const stopCamera = useCallback(() => {
-    discardRetakeSnapshot();
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setStream(null);
-    setScreenMode('idle');
-    setCameraError(null);
-    setPreviewImageUrl(null);
-    setDetectedCorners([]);
-    setDetectedBaseAngles([]);
-    setEditLogoOffset({ x: 0, y: 0 });
-    setEditLogoScale(1);
-    setEditLogoRotation(0);
-    playAttemptCountRef.current = 0;
-    setManualEditActive(false);
-    setDetectionFailed(false);
-  }, [discardRetakeSnapshot]);
-
-  useEffect(() => {
-    if (!stream || !videoRef.current) return;
-    const video = videoRef.current;
-    const t = setTimeout(() => {
-      video.srcObject = stream;
-      video.play().catch(() => {});
-    }, 100);
-    return () => clearTimeout(t);
-  }, [stream]);
-
-  // カメラ画面に戻ったとき（撮り直し含む）にストリームを再設定する。プレビューで video がアンマウントされるため必須。
-  useEffect(() => {
-    if (screenMode !== 'camera' || !videoRef.current) return;
-    const v = videoRef.current;
-    const streamToUse = streamRef.current;
-    if (streamToUse) {
-      v.srcObject = streamToUse;
-    }
-    playAttemptCountRef.current = 0;
-    const tryPlay = () => {
-      if (playAttemptCountRef.current < 5) {
-        playAttemptCountRef.current++;
-        v.play().catch(() => {});
-      }
-    };
-    const t = setTimeout(() => {
-      tryPlay();
-      const id = setInterval(tryPlay, 400);
-      setTimeout(() => clearInterval(id), 2000);
-    }, 150);
-    return () => clearTimeout(t);
-  }, [screenMode]);
-
-  // 画像の明るさを検知（0-255の平均輝度を返す）
-  const detectBrightness = useCallback((canvas: HTMLCanvasElement): number => {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return 128; // デフォルト値（中間の明るさ）
-    
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    let sum = 0;
-    
-    // RGB値から輝度を計算（サンプリング：10ピクセルごと）
-    for (let i = 0; i < data.length; i += 40) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      // 輝度計算式: 0.299*R + 0.587*G + 0.114*B
-      const brightness = r * 0.299 + g * 0.587 + b * 0.114;
-      sum += brightness;
-    }
-    
-    return sum / (data.length / 40);
-  }, []);
 
   const handlePickImageFromDevice = useCallback(() => {
     photoPickerRef.current?.click();
@@ -1612,53 +1443,6 @@ export default function Home() {
         fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
       });
 
-      const maxApiLongEdge = 1024;
-      const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
-      const apiW = Math.round(originalW * apiScale);
-      const apiH = Math.round(originalH * apiScale);
-      const apiCanvas = document.createElement('canvas');
-      apiCanvas.width = apiW;
-      apiCanvas.height = apiH;
-      const apiCtx = apiCanvas.getContext('2d');
-      if (!apiCtx) throw new Error('Canvas error');
-      apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'high';
-      apiCtx.filter = 'contrast(1.4) brightness(1.1)';
-      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
-      apiCtx.filter = 'none';
-
-      const MAX_VERCEL_BODY_BYTES = Math.floor(4.5 * 1024 * 1024);
-      const encodeCanvasToJpeg = (canvas: HTMLCanvasElement, quality: number) =>
-        new Promise<Blob>((resolve, reject) => {
-          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', quality);
-        });
-      const compressCanvasToLimit = async (canvas: HTMLCanvasElement, initialQuality: number, minQuality = 0.45, qualityStep = 0.08): Promise<Blob> => {
-        const tryCompress = async (quality: number): Promise<Blob> => {
-          const blob = await encodeCanvasToJpeg(canvas, quality);
-          if (blob.size <= MAX_VERCEL_BODY_BYTES || quality <= minQuality) return blob;
-          return tryCompress(Math.max(minQuality, quality - qualityStep));
-        };
-        return tryCompress(initialQuality);
-      };
-      const apiBlob = await compressCanvasToLimit(apiCanvas, 0.88);
-
-      const maxApiLongEdgeSmall = 512;
-      const apiScaleSmall = Math.min(maxApiLongEdgeSmall / Math.max(originalW, originalH), 1);
-      const apiWSmall = Math.round(originalW * apiScaleSmall);
-      const apiHSmall = Math.round(originalH * apiScaleSmall);
-      const apiCanvasSmall = document.createElement('canvas');
-      apiCanvasSmall.width = apiWSmall;
-      apiCanvasSmall.height = apiHSmall;
-      const apiCtxSmall = apiCanvasSmall.getContext('2d');
-      if (apiCtxSmall) {
-        apiCtxSmall.imageSmoothingEnabled = true;
-        apiCtxSmall.imageSmoothingQuality = 'high';
-        apiCtxSmall.filter = 'contrast(1.4) brightness(1.1)';
-        apiCtxSmall.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiWSmall, apiHSmall);
-        apiCtxSmall.filter = 'none';
-      }
-      const apiBlobSmall = await compressCanvasToLimit(apiCanvasSmall, 0.85);
-
       discardRetakeSnapshot();
       setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
       setScreenMode('preview_edit');
@@ -1672,23 +1456,15 @@ export default function Home() {
       setIsProcessing(true);
 
       setTimeout(() => {
-        const blurScore = getBlurScore(apiCanvas);
-        setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
-      }, 0);
-
-      const createFormData = (useSmallImage = false) => {
-        const fd = new FormData();
-        if (useSmallImage) {
-          fd.append('image', apiBlobSmall, 'photo-small.jpg');
-          fd.append('width', apiWSmall.toString());
-          fd.append('height', apiHSmall.toString());
-        } else {
-          fd.append('image', apiBlob, 'photo.jpg');
-          fd.append('width', apiW.toString());
-          fd.append('height', apiH.toString());
+        const blurCanvas = document.createElement('canvas');
+        blurCanvas.width = Math.min(480, originalW);
+        blurCanvas.height = Math.max(1, Math.round(blurCanvas.width * (originalH / originalW)));
+        const blurCtx = blurCanvas.getContext('2d');
+        if (blurCtx) {
+          blurCtx.drawImage(fullResCanvas, 0, 0, blurCanvas.width, blurCanvas.height);
+          setIsBlurWarning(getBlurScore(blurCanvas) < BLUR_SCORE_THRESHOLD);
         }
-        return fd;
-      };
+      }, 0);
 
       if (!(await canAutoDetectNow())) {
         setIsProcessing(false);
@@ -1701,70 +1477,18 @@ export default function Home() {
       const timeoutId = setTimeout(() => controller.abort(), 25_000);
       try {
         const deviceId = getStableDeviceId();
-        const res = await fetch('/api/detect', {
-          method: 'POST',
-          body: createFormData(false),
-          signal: controller.signal,
-          headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
-        });
-        let result: DetectApiResponse = {};
-        try {
-          result = await res.json();
-        } catch (_) {
-          result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
-        }
-
+        const outcome = await runPlateDetection(fullResCanvas, originalW, originalH, deviceId, controller.signal);
         if (isLatestRequest()) {
-          if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
-            console.info('Plate detection reasoning:', result.reasoning);
-          }
-          const remaining = result.remainingToday;
-          if (remaining === null || typeof remaining === 'number') setDailyRemaining(remaining);
-          if (result.plan === 'pro' || result.plan === 'free') setPlan(result.plan);
-          if (!res.ok) {
-            const errPayload = result.error;
-            const msg = typeof errPayload === 'string' ? errPayload : result.userMessage || tx('autoDetectFailedManual');
-            if (result.errorType === 'daily_limit') {
-              showDailyLimitBlocked();
-            } else {
-              setToastMessage(getMessageByErrorType(result.errorType, msg, result.retryAfterSeconds));
-              showManualHelpAfterFailure();
-            }
-          } else if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
-            const platesCorners: Corners[] = result.plates
-              .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
-              .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
-            if (platesCorners.length > 0) {
-              const refined = refinePlateCornersList(platesCorners, originalW, originalH);
-              setDetectedCorners(refined);
-              setDetectedBaseAngles(refined.map((corners) => getPlateBaseAngle(corners)));
-              setEditLogoOffset({ x: 0, y: 0 });
-              setEditLogoScale(1);
-              setEditLogoRotation(0);
-              setDetectionFailed(false);
-              setManualEditActive(false);
-            } else {
-              setToastMessage(tx('autoDetectFailedManual'));
-              showManualHelpAfterFailure();
-            }
-          } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
-            const single = refinePlateCorners(
-              normalizeCornersOrder(apiCornersToClient({ corners: result.corners })),
-              originalW,
-              originalH
-            );
-            setDetectedCorners([single]);
-            setDetectedBaseAngles([getPlateBaseAngle(single)]);
-            setEditLogoOffset({ x: 0, y: 0 });
-            setEditLogoScale(1);
-            setEditLogoRotation(0);
-            setDetectionFailed(false);
-            setManualEditActive(false);
-          } else {
-            setToastMessage(tx('autoDetectFailedManual'));
-            showManualHelpAfterFailure();
-          }
+          applyDetectOutcome(outcome);
         }
+      } catch (fetchErr: unknown) {
+        if (!isLatestRequest()) return;
+        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+          setToastMessage(tx('processingSlow'));
+        } else {
+          setToastMessage(tx('autoDetectFailedManual'));
+        }
+        showManualHelpAfterFailure();
       } finally {
         clearTimeout(timeoutId);
         if (activeDetectControllerRef.current === controller) {
@@ -1788,348 +1512,8 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [canAutoDetectNow, createTrackedObjectUrl, discardRetakeSnapshot, getMessageByErrorType, showDailyLimitBlocked, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
+  }, [canAutoDetectNow, applyDetectOutcome, createTrackedObjectUrl, discardRetakeSnapshot, showDailyLimitBlocked, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
 
-  const captureAndDetect = useCallback(async () => {
-    const video = videoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) return;
-    activeDetectControllerRef.current?.abort();
-    activeDetectControllerRef.current = null;
-    const requestId = activeDetectRequestIdRef.current + 1;
-    activeDetectRequestIdRef.current = requestId;
-    const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
-
-    // 撮影前にサーバーからプラン・残枠を再取得
-    setShowDailyLimitOverlay(false);
-    setToastMessage(null);
-    try {
-      await refreshPlanFromServer();
-    } catch (_) {}
-
-    // フラッシュ効果を表示
-    setShowFlash(true);
-    setTimeout(() => setShowFlash(false), 200);
-
-    // 明るさを検知してフラッシュの必要性を判定
-    const brightnessCanvas = document.createElement('canvas');
-    brightnessCanvas.width = Math.min(video.videoWidth, 320);
-    brightnessCanvas.height = Math.min(video.videoHeight, 240);
-    const brightnessCtx = brightnessCanvas.getContext('2d');
-    if (brightnessCtx) {
-      brightnessCtx.drawImage(video, 0, 0, brightnessCanvas.width, brightnessCanvas.height);
-    }
-    const avgBrightness = detectBrightness(brightnessCanvas);
-    const isDark = avgBrightness < 100; // 閾値100（0-255の範囲で、100以下は暗いと判定）
-
-    // 実際のカメラフラッシュを有効化（暗い場合のみ、API能力を活かすため）
-    const videoTrack = streamRef.current?.getVideoTracks()[0];
-    let flashEnabled = false;
-    if (isDark && videoTrack && 'applyConstraints' in videoTrack) {
-      try {
-        await videoTrack.applyConstraints({
-          advanced: [{ torch: true } as any],
-        });
-        flashEnabled = true;
-        console.log(`Flash enabled (brightness: ${avgBrightness.toFixed(1)})`);
-      } catch (e) {
-        // フラッシュがサポートされていない場合は無視
-        console.log('Flash not supported:', e);
-      }
-    } else {
-      console.log(`Flash skipped (brightness: ${avgBrightness.toFixed(1)}, threshold: 100)`);
-    }
-
-    setIsProcessing(true);
-    setCameraError(null);
-    setDetectionFailed(false);
-    setManualEditActive(false);
-    setRetryStatusText(null);
-
-    try {
-      const originalW = video.videoWidth;
-      const originalH = video.videoHeight;
-      
-      // 高解像度画像を保存用にキャプチャ（後で使用）
-      const fullResCanvas = document.createElement('canvas');
-      fullResCanvas.width = originalW;
-      fullResCanvas.height = originalH;
-      const fullResCtx = fullResCanvas.getContext('2d');
-      if (!fullResCtx) throw new Error('Canvas error');
-      
-      // フラッシュを有効化した後、少し待ってからキャプチャ（フラッシュが点灯する時間を確保）
-      if (flashEnabled) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      
-      fullResCtx.drawImage(video, 0, 0, originalW, originalH);
-      
-      // キャプチャ後、フラッシュをオフ
-      if (flashEnabled && videoTrack && 'applyConstraints' in videoTrack) {
-        try {
-          await videoTrack.applyConstraints({
-            advanced: [{ torch: false } as any],
-          });
-        } catch (e) {
-          console.log('Failed to disable flash:', e);
-        }
-      }
-      
-      const fullResBlob = await new Promise<Blob>((resolve, reject) => {
-        fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
-      });
-
-      // API送信: 長辺は必ず1024px以下に抑える（Gemini無料枠の負荷軽減）
-      const maxApiLongEdge = 1024;
-      const apiScale = Math.min(maxApiLongEdge / Math.max(originalW, originalH), 1);
-      const apiW = Math.round(originalW * apiScale);
-      const apiH = Math.round(originalH * apiScale);
-      const apiCanvas = document.createElement('canvas');
-      apiCanvas.width = apiW;
-      apiCanvas.height = apiH;
-      const apiCtx = apiCanvas.getContext('2d');
-      if (!apiCtx) throw new Error('Canvas error');
-      apiCtx.imageSmoothingEnabled = true;
-      apiCtx.imageSmoothingQuality = 'high';
-      apiCtx.filter = 'contrast(1.4) brightness(1.1)';
-      apiCtx.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiW, apiH);
-      apiCtx.filter = 'none';
-
-      const MAX_VERCEL_BODY_BYTES = Math.floor(4.5 * 1024 * 1024); // 4.5MB
-      const encodeCanvasToJpeg = (canvas: HTMLCanvasElement, quality: number) =>
-        new Promise<Blob>((resolve, reject) => {
-          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', quality);
-        });
-
-      const compressCanvasToLimit = async (
-        canvas: HTMLCanvasElement,
-        initialQuality: number,
-        minQuality = 0.45,
-        qualityStep = 0.08
-      ): Promise<Blob> => {
-        const tryCompress = async (quality: number): Promise<Blob> => {
-          const blob = await encodeCanvasToJpeg(canvas, quality);
-          if (blob.size <= MAX_VERCEL_BODY_BYTES || quality <= minQuality) {
-            if (blob.size > MAX_VERCEL_BODY_BYTES) {
-              console.warn('Image still exceeds Vercel payload limit at minimum quality.', {
-                size: blob.size,
-                quality,
-                limit: MAX_VERCEL_BODY_BYTES,
-              });
-            }
-            return blob;
-          }
-          return tryCompress(Math.max(minQuality, quality - qualityStep));
-        };
-        return tryCompress(initialQuality);
-      };
-
-      const apiBlob = await compressCanvasToLimit(apiCanvas, 0.88);
-
-      const maxApiLongEdgeSmall = 512;
-      const apiScaleSmall = Math.min(maxApiLongEdgeSmall / Math.max(originalW, originalH), 1);
-      const apiWSmall = Math.round(originalW * apiScaleSmall);
-      const apiHSmall = Math.round(originalH * apiScaleSmall);
-      const apiCanvasSmall = document.createElement('canvas');
-      apiCanvasSmall.width = apiWSmall;
-      apiCanvasSmall.height = apiHSmall;
-      const apiCtxSmall = apiCanvasSmall.getContext('2d');
-      if (apiCtxSmall) {
-        apiCtxSmall.imageSmoothingEnabled = true;
-        apiCtxSmall.imageSmoothingQuality = 'high';
-        apiCtxSmall.filter = 'contrast(1.4) brightness(1.1)';
-        apiCtxSmall.drawImage(fullResCanvas, 0, 0, originalW, originalH, 0, 0, apiWSmall, apiHSmall);
-        apiCtxSmall.filter = 'none';
-      }
-      const apiBlobSmall = await compressCanvasToLimit(apiCanvasSmall, 0.85);
-
-      // 投機的実行: 即座に編集画面へ移行し、中央にデフォルトロゴを表示。API はバックグラウンドで実行
-      discardRetakeSnapshot();
-      setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
-      setScreenMode('preview_edit');
-      const defaultCorners = getDefaultCenterCorners();
-      setDetectedCorners([defaultCorners]);
-      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
-      setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
-      setEditLogoRotation(0);
-      setEditLogoRotation(0);
-      setCameraError(null);
-      setToastMessage(null);
-      setIsProcessing(true);
-
-      setTimeout(() => {
-        const blurScore = getBlurScore(apiCanvas);
-        setIsBlurWarning(blurScore < BLUR_SCORE_THRESHOLD);
-      }, 0);
-
-      const createFormData = (useSmallImage = false) => {
-        const fd = new FormData();
-        if (useSmallImage) {
-          fd.append('image', apiBlobSmall, 'photo-small.jpg');
-          fd.append('width', apiWSmall.toString());
-          fd.append('height', apiHSmall.toString());
-        } else {
-          fd.append('image', apiBlob, 'photo.jpg');
-          fd.append('width', apiW.toString());
-          fd.append('height', apiH.toString());
-        }
-        return fd;
-      };
-
-      const applyResult = (result: DetectApiResponse, res: Response) => {
-        console.group('Carkus API Debug');
-        console.log('status:', res.status);
-        console.log('statusText:', res.statusText);
-        console.log('result:', result);
-        console.groupEnd();
-
-        const remaining = result.remainingToday;
-        if (remaining === null || typeof remaining === 'number') setDailyRemaining(remaining);
-        if (result.plan === 'pro' || result.plan === 'free') setPlan(result.plan);
-        if (!res.ok) {
-          const errorPayload = result.error;
-          const detailedError =
-            typeof errorPayload === 'object' && errorPayload !== null
-              ? (errorPayload as { code?: string | number; message?: string; details?: unknown })
-              : {
-                  code: res.status,
-                  message: typeof errorPayload === 'string' ? errorPayload : res.statusText || 'Unknown error',
-                  details: errorPayload,
-                };
-          const rawMessage = String(detailedError?.message ?? '');
-          const rawCode = detailedError?.code ?? res.status;
-          const errorCode = String(rawCode || 'UNKNOWN');
-          const backendMessage = result.userMessage;
-          const retryAfterSeconds = result.retryAfterSeconds;
-          const message = getMessageByErrorType(result.errorType, backendMessage || rawMessage, retryAfterSeconds);
-          if (result.errorType === 'daily_limit') {
-            showDailyLimitBlocked();
-          } else {
-            setToastMessage(message);
-            showManualHelpAfterFailure();
-          }
-          return;
-        }
-        if (typeof result.reasoning === 'string' && result.reasoning.trim()) {
-          console.info('Plate detection reasoning:', result.reasoning.trim());
-        }
-        if (result.found && result.plates && Array.isArray(result.plates) && result.plates.length > 0) {
-          const platesCorners: Corners[] = result.plates
-            .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
-            .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
-          if (platesCorners.length > 0) {
-            const refined = refinePlateCornersList(platesCorners, originalW, originalH);
-            setDetectedCorners(refined);
-            setDetectedBaseAngles(refined.map((corners) => getPlateBaseAngle(corners)));
-            setEditLogoOffset({ x: 0, y: 0 });
-            setEditLogoScale(1);
-            setEditLogoRotation(0);
-            setDetectionFailed(false);
-            setManualEditActive(false);
-          } else {
-            setToastMessage(tx('autoDetectFailedManual'));
-            showManualHelpAfterFailure();
-          }
-        } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
-          const single = refinePlateCorners(
-            normalizeCornersOrder(apiCornersToClient({ corners: result.corners })),
-            originalW,
-            originalH
-          );
-          setDetectedCorners([single]);
-          setDetectedBaseAngles([getPlateBaseAngle(single)]);
-          setEditLogoOffset({ x: 0, y: 0 });
-          setEditLogoScale(1);
-          setEditLogoRotation(0);
-          setDetectionFailed(false);
-          setManualEditActive(false);
-        } else {
-          setToastMessage(tx('autoDetectFailedManual'));
-          showManualHelpAfterFailure();
-        }
-      };
-
-      if (!(await canAutoDetectNow())) {
-        setIsProcessing(false);
-        showDailyLimitBlocked();
-        return;
-      }
-
-      (async () => {
-        const videoTrack = streamRef.current?.getVideoTracks()[0];
-        if (videoTrack && 'applyConstraints' in videoTrack) {
-          try {
-            await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
-          } catch (_) {}
-        }
-        const controller = new AbortController();
-        activeDetectControllerRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 25_000);
-        try {
-          const deviceId = getStableDeviceId();
-          const res = await fetch('/api/detect', {
-            method: 'POST',
-            body: createFormData(false),
-            signal: controller.signal,
-            headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
-          });
-
-          let result: DetectApiResponse = {};
-          try {
-            result = await res.json();
-          } catch (_) {
-            result = { error: { code: 'INVALID_JSON', message: 'Invalid JSON response' } };
-          }
-
-          if (isLatestRequest()) {
-            applyResult(result, res);
-          }
-        } catch (fetchErr: unknown) {
-          if (!isLatestRequest()) return;
-          if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-            setToastMessage(tx('processingSlow'));
-            showManualHelpAfterFailure();
-            return;
-          }
-          console.error('detect-plate fetch failed:', fetchErr);
-          const fetchErrMessage =
-            fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-          setToastMessage(
-            fetchErr instanceof Error && fetchErr.name === 'AbortError'
-              ? `自動検出がタイムアウトしました: ${fetchErrMessage}`
-              : `自動検出に失敗しました: ${fetchErrMessage}`
-          );
-          showManualHelpAfterFailure();
-        } finally {
-          clearTimeout(timeoutId);
-          if (activeDetectControllerRef.current === controller) {
-            activeDetectControllerRef.current = null;
-          }
-          if (isLatestRequest()) {
-            setIsProcessing(false);
-            setRetryStatusText(null);
-          }
-        }
-      })();
-    } catch (e) {
-      const videoTrack = streamRef.current?.getVideoTracks()[0];
-      if (videoTrack && 'applyConstraints' in videoTrack) {
-        try {
-          await videoTrack.applyConstraints({ advanced: [{ torch: false } as any] });
-        } catch (_) {}
-      }
-      const defaultCorners = getDefaultCenterCorners();
-      setDetectedCorners([defaultCorners]);
-      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
-      setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
-      setEditLogoRotation(0);
-      setToastMessage(tx('autoDetectFailedManual'));
-      showManualHelpAfterFailure();
-      setIsProcessing(false);
-      setRetryStatusText(null);
-    }
-  }, [canAutoDetectNow, createTrackedObjectUrl, detectBrightness, discardRetakeSnapshot, getMessageByErrorType, refreshPlanFromServer, showDailyLimitBlocked, showManualHelpAfterFailure, tx]);
 
   const retake = useCallback(async () => {
     activeDetectControllerRef.current?.abort();
@@ -2161,13 +1545,7 @@ export default function Home() {
     setDetectionFailed(false);
     setManualEditActive(false);
     setIsProcessing(false);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setStream(null);
-    await startCamera();
+    handleOpenCamera();
   }, [
     detectionFailed,
     detectedBaseAngles,
@@ -2175,22 +1553,16 @@ export default function Home() {
     editLogoOffset,
     editLogoRotation,
     editLogoScale,
+    handleOpenCamera,
     manualEditActive,
     maskTemplate,
     previewImageUrl,
-    startCamera,
   ]);
 
   const cancelRetakeBackToPreview = useCallback(() => {
     if (!retakeSnapshot) return;
     activeDetectControllerRef.current?.abort();
     activeDetectControllerRef.current = null;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setStream(null);
     setPreviewImageUrl(retakeSnapshot.previewImageUrl);
     setDetectedCorners(retakeSnapshot.detectedCorners);
     setDetectedBaseAngles(retakeSnapshot.detectedBaseAngles);
@@ -2263,7 +1635,7 @@ export default function Home() {
 
       // 複数プレート対応: 各検出座標に対して fillQuad とロゴ描画を一括適用
       detectedCorners.forEach((corners, plateIndex) => {
-        const plateCorners = refinePlateCorners(corners, w, h);
+        const plateCorners = corners;
         // 正規化座標 0-1 をそのまま画像ピクセルにマッピング（portrait/landscape 共通で w,h が画像実寸）
         const centerNx = (plateCorners[0].x + plateCorners[1].x + plateCorners[2].x + plateCorners[3].x) / 4;
         const centerNy = (plateCorners[0].y + plateCorners[1].y + plateCorners[2].y + plateCorners[3].y) / 4;
@@ -2685,6 +2057,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
+      <input ref={cameraCaptureRef} type="file" accept="image/*" capture="environment" onChange={handleImageFileSelected} className="hidden" />
       <input ref={photoPickerRef} type="file" accept="image/*" onChange={handleImageFileSelected} className="hidden" />
       <input ref={customLogoPickerRef} type="file" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleCustomLogoSelected} className="hidden" />
       <div className="fixed top-3 right-3 z-[120] flex flex-col items-end gap-2">
@@ -2793,74 +2166,6 @@ export default function Home() {
         </div>
       )}
 
-      {screenMode === 'camera' && (
-        <div className="fixed inset-0 z-0 bg-black">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-          {showFlash && (
-            <div className="absolute inset-0 bg-white z-30 pointer-events-none" style={{ animation: 'flash 0.2s ease-out' }} />
-          )}
-          {isProcessing && (
-            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex flex-col items-center justify-center z-10">
-              <Loader2 className="animate-spin text-white" size={44} strokeWidth={2.5} />
-              <p className="text-white/90 font-light text-sm mt-3">{text.processing}</p>
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
-                <div className="h-full bg-white/80 processing-sweep" />
-              </div>
-            </div>
-          )}
-          <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
-            <span className="h-5 flex items-center shrink-0 text-white drop-shadow-md">
-              <CarkusLogo className="h-full w-auto text-white" />
-            </span>
-            <div className="flex items-center gap-2">
-              {retakeSnapshot && (
-                <button
-                  type="button"
-                  onClick={cancelRetakeBackToPreview}
-                  className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
-                >
-                  {text.backToEdit}
-                </button>
-              )}
-              <button
-                onClick={stopCamera}
-                className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
-              >
-                {text.finish}
-              </button>
-            </div>
-          </div>
-          <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-center gap-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 px-4 bg-gradient-to-t from-black/50 to-transparent">
-            <button
-              onClick={handlePickImageFromDevice}
-              disabled={isProcessing}
-              className="w-11 h-11 rounded-full bg-black/40 backdrop-blur-sm border border-white/25 text-white flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
-              aria-label={text.pickPhoto}
-            >
-              <ImagePlus size={20} strokeWidth={1.8} />
-            </button>
-            <button
-              onClick={captureAndDetect}
-              disabled={isProcessing}
-              className="w-[4.5rem] h-[4.5rem] rounded-full bg-white/15 backdrop-blur-sm border-2 border-white/40 flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
-              aria-label={text.capture}
-            >
-              {isProcessing ? (
-                <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
-              ) : (
-                <span className="w-12 h-12 rounded-full bg-white/90" />
-              )}
-            </button>
-            <div className="w-11" aria-hidden />
-          </div>
-        </div>
-      )}
 
       {screenMode === 'idle' && (
         <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-6 px-6">
@@ -2914,7 +2219,7 @@ export default function Home() {
           </div>
           <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
-              onClick={startCamera}
+              onClick={handleOpenCamera}
               className="flex items-center justify-center gap-2 px-4 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-wide border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
             >
               <Camera size={20} strokeWidth={1.5} />

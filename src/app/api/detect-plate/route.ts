@@ -224,12 +224,11 @@ const RESPONSE_SCHEMA = {
 
 function buildDetectPrompt(): string {
   return [
-    'Detect visible vehicle license plates in the image.',
-    `Return JSON only: {"plates":[{"points":[{x,y}×4]}]}. Up to ${MAX_DETECT_PLATES} plates, most prominent first.`,
-    'Coordinates: integers on a 0-1000 grid where (0,0) is top-left and (1000,1000) is bottom-right.',
-    'Corner order per plate: TL, TR, BR, BL. Trace the visible plate edges; follow perspective (trapezoid/skew).',
-    'Do NOT return an axis-aligned bounding box. If slanted, the TL-TR edge must follow the slanted top edge.',
-    'If no plate is visible, return {"plates":[]}. No other keys.',
+    'Locate visible vehicle license plates in this image.',
+    `Reply with JSON only: {"plates":[{"points":[{x,y}×4]}]}. Up to ${MAX_DETECT_PLATES} plates.`,
+    'Use a 0–1000 grid: (0,0)=top-left, (1000,1000)=bottom-right.',
+    'Each plate: 4 points in order top-left, top-right, bottom-right, bottom-left.',
+    'Fit the plate edges. If none, return {"plates":[]}.',
   ].join(' ');
 }
 
