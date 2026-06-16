@@ -141,15 +141,82 @@ function apiCornersToClient(plate: { corners: { x: number; y: number }[] }): Cor
 /** 編集用デフォルト四角（正規化座標 0-1）。解析失敗時やAPIエラー時に使用。一般的なナンバープレート位置（画像下部中央） */
 function getDefaultCenterCorners(): Corners {
   const cx = 0.5;
-  const cy = 0.8;
-  const halfW = 0.11;
-  const halfH = 0.05;
+  const cy = 0.82;
+  // 正面向きの愛車写真でナンバーが占めるおおよその大きさ（幅 ~8%, 高さ ~4%）
+  const halfW = 0.042;
+  const halfH = 0.021;
   return [
     { x: cx - halfW, y: cy - halfH },
     { x: cx + halfW, y: cy - halfH },
     { x: cx + halfW, y: cy + halfH },
     { x: cx - halfW, y: cy + halfH },
   ];
+}
+
+/** 四隅からプレート幅・高さ（px）を推定 */
+function measureQuadPlateSize(corners: Corners, imageW: number, imageH: number) {
+  const plateWidthTop = Math.hypot((corners[1].x - corners[0].x) * imageW, (corners[1].y - corners[0].y) * imageH);
+  const plateWidthBottom = Math.hypot((corners[2].x - corners[3].x) * imageW, (corners[2].y - corners[3].y) * imageH);
+  const plateWidth = (plateWidthTop + plateWidthBottom) / 2;
+  const plateHeightLeft = Math.hypot((corners[3].x - corners[0].x) * imageW, (corners[3].y - corners[0].y) * imageH);
+  const plateHeightRight = Math.hypot((corners[2].x - corners[1].x) * imageW, (corners[2].y - corners[1].y) * imageH);
+  const plateHeight = (plateHeightLeft + plateHeightRight) / 2;
+  const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+  const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+  return { plateWidth, plateHeight, centerNx, centerNy };
+}
+
+/**
+ * AI やデフォルト枠が横長になりすぎると 2:1 マスクが潰れて見える。
+ * 中心を保ち、2:1 に近づける（8% 以上ズレている場合のみ）。
+ */
+function fitCornersToPlateAspect(
+  corners: Corners,
+  imageW: number,
+  imageH: number,
+  targetAspect = PLATE_ASPECT_RATIO
+): Corners {
+  if (imageW <= 0 || imageH <= 0) return corners;
+  const { plateWidth, plateHeight, centerNx, centerNy } = measureQuadPlateSize(corners, imageW, imageH);
+  if (plateWidth <= 0 || plateHeight <= 0) return corners;
+
+  const currentAspect = plateWidth / plateHeight;
+  let scaleX = 1;
+  let scaleY = 1;
+  if (currentAspect > targetAspect * 1.08) {
+    scaleX = (plateHeight * targetAspect) / plateWidth;
+  } else if (currentAspect < targetAspect / 1.08) {
+    scaleY = plateWidth / targetAspect / plateHeight;
+  }
+  if (scaleX === 1 && scaleY === 1) return corners;
+
+  return corners.map((c) => ({
+    x: centerNx + (c.x - centerNx) * scaleX,
+    y: centerNy + (c.y - centerNy) * scaleY,
+  })) as Corners;
+}
+
+function refinePlateCorners(corners: Corners, imageW: number, imageH: number): Corners {
+  let next = fitCornersToPlateAspect(normalizeCornersOrder(corners), imageW, imageH);
+  const { plateWidth, plateHeight, centerNx, centerNy } = measureQuadPlateSize(next, imageW, imageH);
+  const maxWidthRatio = 0.14;
+  const maxHeightRatio = 0.075;
+  const widthRatio = plateWidth / imageW;
+  const heightRatio = plateHeight / imageH;
+  let shrink = 1;
+  if (widthRatio > maxWidthRatio) shrink = Math.min(shrink, maxWidthRatio / widthRatio);
+  if (heightRatio > maxHeightRatio) shrink = Math.min(shrink, maxHeightRatio / heightRatio);
+  if (shrink < 1) {
+    next = next.map((c) => ({
+      x: centerNx + (c.x - centerNx) * shrink,
+      y: centerNy + (c.y - centerNy) * shrink,
+    })) as Corners;
+  }
+  return next;
+}
+
+function refinePlateCornersList(cornersList: Corners[], imageW: number, imageH: number): Corners[] {
+  return cornersList.map((corners) => refinePlateCorners(corners, imageW, imageH));
 }
 
 function normalizeCornersOrder(corners: Corners): Corners {
@@ -439,6 +506,7 @@ const CUSTOM_MASK_PREPARED_KEY = 'carkus_custom_mask_prepared';
 const CUSTOM_MASK_SETUP_KEY = 'carkus_custom_mask_setup';
 const MASK_STYLE_STORAGE_KEY = 'carkus_mask_style';
 /** 日本のナンバープレート近似アスペクト（幅:高さ = 2:1） */
+const PLATE_ASPECT_RATIO = 2;
 const PLATE_MASK_WIDTH = 520;
 const PLATE_MASK_HEIGHT = 260;
 const LOGO_INSET_RATIO_BY_PLATE_HEIGHT = 0.08; // 高さ基準の固定Inset
@@ -1667,8 +1735,9 @@ export default function Home() {
               .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
               .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
             if (platesCorners.length > 0) {
-              setDetectedCorners(platesCorners);
-              setDetectedBaseAngles(platesCorners.map((corners) => getPlateBaseAngle(corners)));
+              const refined = refinePlateCornersList(platesCorners, originalW, originalH);
+              setDetectedCorners(refined);
+              setDetectedBaseAngles(refined.map((corners) => getPlateBaseAngle(corners)));
               setEditLogoOffset({ x: 0, y: 0 });
               setEditLogoScale(1);
               setEditLogoRotation(0);
@@ -1679,7 +1748,11 @@ export default function Home() {
               showManualHelpAfterFailure();
             }
           } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
-            const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
+            const single = refinePlateCorners(
+              normalizeCornersOrder(apiCornersToClient({ corners: result.corners })),
+              originalW,
+              originalH
+            );
             setDetectedCorners([single]);
             setDetectedBaseAngles([getPlateBaseAngle(single)]);
             setEditLogoOffset({ x: 0, y: 0 });
@@ -1945,8 +2018,9 @@ export default function Home() {
             .filter((plate: any) => plate.corners && Array.isArray(plate.corners) && plate.corners.length === 4)
             .map((plate: any) => normalizeCornersOrder(apiCornersToClient(plate)));
           if (platesCorners.length > 0) {
-            setDetectedCorners(platesCorners);
-            setDetectedBaseAngles(platesCorners.map((corners) => getPlateBaseAngle(corners)));
+            const refined = refinePlateCornersList(platesCorners, originalW, originalH);
+            setDetectedCorners(refined);
+            setDetectedBaseAngles(refined.map((corners) => getPlateBaseAngle(corners)));
             setEditLogoOffset({ x: 0, y: 0 });
             setEditLogoScale(1);
             setEditLogoRotation(0);
@@ -1957,7 +2031,11 @@ export default function Home() {
             showManualHelpAfterFailure();
           }
         } else if (result.found && result.corners && Array.isArray(result.corners) && result.corners.length === 4) {
-          const single = normalizeCornersOrder(apiCornersToClient({ corners: result.corners }));
+          const single = refinePlateCorners(
+            normalizeCornersOrder(apiCornersToClient({ corners: result.corners })),
+            originalW,
+            originalH
+          );
           setDetectedCorners([single]);
           setDetectedBaseAngles([getPlateBaseAngle(single)]);
           setEditLogoOffset({ x: 0, y: 0 });
@@ -2165,8 +2243,8 @@ export default function Home() {
     if (!img || !img.width) return;
 
     const canvas = previewCanvasRef.current;
-    const w = img.width;
-    const h = img.height;
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
     // キャンバスを画像実寸に合わせ、API の 0-1000 正規化座標を画像ピクセルに正確にマッピング
     // object-contain で表示するため、表示範囲と画像データが一致し座標ズレが発生しない
     if (canvas.width !== w || canvas.height !== h) {
@@ -2185,13 +2263,14 @@ export default function Home() {
 
       // 複数プレート対応: 各検出座標に対して fillQuad とロゴ描画を一括適用
       detectedCorners.forEach((corners, plateIndex) => {
+        const plateCorners = refinePlateCorners(corners, w, h);
         // 正規化座標 0-1 をそのまま画像ピクセルにマッピング（portrait/landscape 共通で w,h が画像実寸）
-        const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
-        const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+        const centerNx = (plateCorners[0].x + plateCorners[1].x + plateCorners[2].x + plateCorners[3].x) / 4;
+        const centerNy = (plateCorners[0].y + plateCorners[1].y + plateCorners[2].y + plateCorners[3].y) / 4;
         const centerX = centerNx * w;
         const centerY = centerNy * h;
 
-        const scaled: Corners = corners.map((c) => ({
+        const scaled: Corners = plateCorners.map((c) => ({
           x: centerNx + (c.x - centerNx) * scale,
           y: centerNy + (c.y - centerNy) * scale,
         })) as Corners;
