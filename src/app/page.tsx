@@ -116,124 +116,112 @@ function parsePlanLimit(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-// 3点対応のアフィン行列を算出（srcTri → dstTri）。setTransform(a,b,c,d,e,f) に渡す配列を返す。
-// Canvas 2D は射影変換を直接サポートしないため、四角を2三角形に分割しそれぞれアフィンで描画してパースを近似する。
-function getAffineFromTri(
-  src: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ],
-  dst: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ]
-): [ number, number, number, number, number, number ] {
-  const [ s0, s1, s2 ] = src;
-  const [ d0, d1, d2 ] = dst;
-  const M = [
-    [ s0.x, s0.y, 1 ],
-    [ s1.x, s1.y, 1 ],
-    [ s2.x, s2.y, 1 ],
-  ];
-  const det = M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) - M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) + M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]);
-  if (Math.abs(det) < 1e-10) return [ 1, 0, 0, 1, 0, 0 ];
-  const inv = [
-    [ (M[1][1]*M[2][2]-M[1][2]*M[2][1])/det, -(M[0][1]*M[2][2]-M[0][2]*M[2][1])/det, (M[0][1]*M[1][2]-M[0][2]*M[1][1])/det ],
-    [ -(M[1][0]*M[2][2]-M[1][2]*M[2][0])/det, (M[0][0]*M[2][2]-M[0][2]*M[2][0])/det, -(M[0][0]*M[1][2]-M[0][2]*M[1][0])/det ],
-    [ (M[1][0]*M[2][1]-M[1][1]*M[2][0])/det, -(M[0][0]*M[2][1]-M[0][1]*M[2][0])/det, (M[0][0]*M[1][1]-M[0][1]*M[1][0])/det ],
-  ];
-  const a = inv[0][0]*d0.x + inv[0][1]*d1.x + inv[0][2]*d2.x;
-  const c = inv[1][0]*d0.x + inv[1][1]*d1.x + inv[1][2]*d2.x;
-  const e = inv[2][0]*d0.x + inv[2][1]*d1.x + inv[2][2]*d2.x;
-  const b = inv[0][0]*d0.y + inv[0][1]*d1.y + inv[0][2]*d2.y;
-  const d = inv[1][0]*d0.y + inv[1][1]*d1.y + inv[1][2]*d2.y;
-  const f = inv[2][0]*d0.y + inv[2][1]*d1.y + inv[2][2]*d2.y;
-  return [ a, b, c, d, e, f ];
-}
-
 type QuadPx = [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ];
 const imageVisualBoundsCache = new WeakMap<HTMLImageElement, { sx: number; sy: number; sw: number; sh: number }>();
 
-// 四角形を黒で塗りつぶし（マスク）
-function fillQuad(ctx: CanvasRenderingContext2D, quad: QuadPx, fillStyle: string) {
+type RigidPlatePlacement = {
+  cx: number;
+  cy: number;
+  angle: number;
+  width: number;
+  height: number;
+};
+
+/** 四隅から中心・回転・2:1固定サイズを算出（非一様スケールによるロゴ潰れを防ぐ） */
+function quadToRigidPlacement(quad: QuadPx, aspectRatio = 2): RigidPlatePlacement {
+  const [TL, TR, BR, BL] = quad;
+  const cx = (TL.x + TR.x + BR.x + BL.x) / 4;
+  const cy = (TL.y + TR.y + BR.y + BL.y) / 4;
+
+  const topWidth = Math.hypot(TR.x - TL.x, TR.y - TL.y);
+  const bottomWidth = Math.hypot(BR.x - BL.x, BR.y - BL.y);
+  const leftHeight = Math.hypot(BL.x - TL.x, BL.y - TL.y);
+  const rightHeight = Math.hypot(BR.x - TR.x, BR.y - TR.y);
+
+  const plateWidth = (topWidth + bottomWidth) / 2;
+  const plateHeight = (leftHeight + rightHeight) / 2;
+
+  const angleTop = Math.atan2(TR.y - TL.y, TR.x - TL.x);
+  const angleBottom = Math.atan2(BR.y - BL.y, BR.x - BL.x);
+  let angle = (angleTop + angleBottom) / 2;
+  if (Math.abs(angleTop - angleBottom) > Math.PI) {
+    angle += Math.PI;
+  }
+
+  let width = Math.max(plateWidth, plateHeight * aspectRatio);
+  let height = width / aspectRatio;
+  if (height < plateHeight) {
+    height = plateHeight;
+    width = height * aspectRatio;
+  }
+
+  return { cx, cy, angle, width, height };
+}
+
+function fillRigidPlate(ctx: CanvasRenderingContext2D, quad: QuadPx, fillStyle: string) {
+  const { cx, cy, angle, width, height } = quadToRigidPlacement(quad);
   ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
   ctx.fillStyle = fillStyle;
-  ctx.beginPath();
-  ctx.moveTo(quad[0].x, quad[0].y);
-  ctx.lineTo(quad[1].x, quad[1].y);
-  ctx.lineTo(quad[2].x, quad[2].y);
-  ctx.lineTo(quad[3].x, quad[3].y);
-  ctx.closePath();
-  ctx.fill();
+  ctx.fillRect(-width / 2, -height / 2, width, height);
   ctx.restore();
 }
 
-// 画像を四角形に射影変換（2三角形アフィン近似）でワープして描画
-function drawImageWarpedToQuad(
+/** マスク画像をアスペクト固定のまま回転・等倍スケールのみで配置（ワープなし） */
+function drawImageRigidOnPlate(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement | HTMLCanvasElement,
   quad: QuadPx,
-  logoW: number,
-  logoH: number
+  srcW: number,
+  srcH: number
 ) {
-  const [ TL, TR, BR, BL ] = quad;
-  // 三角形1: TL, TR, BR（画像の (0,0)-(logoW,0)-(logoW,logoH) をマッピング）
-  const srcTri1: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [
-    { x: 0, y: 0 },
-    { x: logoW, y: 0 },
-    { x: logoW, y: logoH },
-  ];
-  const dstTri1: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [ TL, TR, BR ];
-  const t1 = getAffineFromTri(srcTri1, dstTri1);
+  const { cx, cy, angle, width, height } = quadToRigidPlacement(quad);
   ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(TL.x, TL.y);
-  ctx.lineTo(TR.x, TR.y);
-  ctx.lineTo(BR.x, BR.y);
-  ctx.closePath();
-  ctx.clip();
-  ctx.setTransform(t1[0], t1[1], t1[2], t1[3], t1[4], t1[5]);
-  ctx.drawImage(img, 0, 0, logoW, logoH, 0, 0, logoW, logoH);
-  ctx.restore();
-  // 三角形2: TL, BR, BL（画像の (0,0)-(logoW,logoH)-(0,logoH) をマッピング）
-  const srcTri2: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [
-    { x: 0, y: 0 },
-    { x: logoW, y: logoH },
-    { x: 0, y: logoH },
-  ];
-  const dstTri2: [ { x: number; y: number }, { x: number; y: number }, { x: number; y: number } ] = [ TL, BR, BL ];
-  const t2 = getAffineFromTri(srcTri2, dstTri2);
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(TL.x, TL.y);
-  ctx.lineTo(BR.x, BR.y);
-  ctx.lineTo(BL.x, BL.y);
-  ctx.closePath();
-  ctx.clip();
-  ctx.setTransform(t2[0], t2[1], t2[2], t2[3], t2[4], t2[5]);
-  ctx.drawImage(img, 0, 0, logoW, logoH, 0, 0, logoW, logoH);
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, srcW, srcH, -width / 2, -height / 2, width, height);
   ctx.restore();
 }
 
-function mapUvToQuad(quad: QuadPx, u: number, v: number): { x: number; y: number } {
-  const [tl, tr, br, bl] = quad;
-  const oneMinusU = 1 - u;
-  const oneMinusV = 1 - v;
-  return {
-    x:
-      oneMinusU * oneMinusV * tl.x +
-      u * oneMinusV * tr.x +
-      u * v * br.x +
-      oneMinusU * v * bl.x,
-    y:
-      oneMinusU * oneMinusV * tl.y +
-      u * oneMinusV * tr.y +
-      u * v * br.y +
-      oneMinusU * v * bl.y,
-  };
-}
+const EXPORT_WATERMARK_TEXT = 'Made with Carkus';
 
-function buildInnerQuadFromRect(quad: QuadPx, x0: number, y0: number, x1: number, y1: number): QuadPx {
-  return [
-    mapUvToQuad(quad, x0, y0),
-    mapUvToQuad(quad, x1, y0),
-    mapUvToQuad(quad, x1, y1),
-    mapUvToQuad(quad, x0, y1),
-  ];
+function drawCarkusExportWatermark(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) {
+  const shortEdge = Math.min(canvasWidth, canvasHeight);
+  const padding = Math.max(12, Math.round(shortEdge * 0.024));
+  const fontSize = Math.max(13, Math.round(shortEdge * 0.028));
+  const text = EXPORT_WATERMARK_TEXT;
+
+  ctx.save();
+  ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
+  const textW = ctx.measureText(text).width;
+  const textH = fontSize * 1.2;
+  const x = canvasWidth - padding;
+  const y = canvasHeight - padding;
+  const pillPadX = Math.round(fontSize * 0.45);
+  const pillPadY = Math.round(fontSize * 0.28);
+  const pillW = textW + pillPadX * 2;
+  const pillH = textH + pillPadY * 2;
+  const pillX = x - pillW;
+  const pillY = y - pillH;
+  const radius = Math.min(pillH / 2, 8);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.58)';
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(pillX, pillY, pillW, pillH, radius);
+  } else {
+    ctx.rect(pillX, pillY, pillW, pillH);
+  }
+  ctx.fill();
+
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.fillText(text, x - pillPadX, y - pillPadY);
+  ctx.restore();
 }
 
 // 黒マスクの真ん中に Carkus ロゴを配置（座標系の原点 0,0 が中央）
@@ -392,7 +380,7 @@ const LOGO_VISUAL_CENTER_OFFSET = { x: 0, y: 0 }; // ロゴ実体の視覚中心
 const LOGO_SCALE_MIN = 0.12;
 const LOGO_SCALE_MAX = 2;
 /** 手動編集・解析失敗時のマスク初期スケール（検出成功時は 1） */
-const DEFAULT_MANUAL_MASK_SCALE = 0.5;
+const DEFAULT_MANUAL_MASK_SCALE = 1;
 /** Free プラン書き出し時の最大高さ（px） */
 const FREE_EXPORT_MAX_HEIGHT = 1280;
 const FREE_EXPORT_JPEG_QUALITY = 0.92;
@@ -403,7 +391,7 @@ type Plan = 'free' | 'pro';
 type MaskTemplate = 'fit' | 'centered' | 'badge';
 type MaskStyle = 'carkus' | 'black' | 'white' | 'custom';
 
-/** Carkus マスク（黒地+ロゴ）をプレート UV 空間に描画し、drawImageWarpedToQuad で四隅に射影 */
+/** Carkus マスク（黒地+ロゴ）を 2:1 UV 空間に描画し、剛体配置で貼り付け */
 function renderCarkusMaskCanvas(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -735,7 +723,8 @@ function fillI18nTemplate(template: string, vars: Record<string, string | number
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>('ja');
-  const [screenMode, setScreenMode] = useState<'idle' | 'preview_edit'>('idle');
+  const [screenMode, setScreenMode] = useState<'idle' | 'camera' | 'preview_edit'>('idle');
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -784,10 +773,11 @@ export default function Home() {
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [operatorUiUnlocked, setOperatorUiUnlocked] = useState(false);
   const operatorLogoTapRef = useRef<{ count: number; resetAt: number }>({ count: 0, resetAt: 0 });
+  const videoRef = useRef<HTMLVideoElement>(null);
   const photoPickerRef = useRef<HTMLInputElement>(null);
-  const cameraCaptureRef = useRef<HTMLInputElement>(null);
   const customLogoPickerRef = useRef<HTMLInputElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const activeDetectControllerRef = useRef<AbortController | null>(null);
   const activeDetectRequestIdRef = useRef(0);
   const objectUrlRegistryRef = useRef<Set<string>>(new Set());
@@ -1085,7 +1075,7 @@ export default function Home() {
   }, [applyPlanFromApi]);
 
   useEffect(() => {
-    if (screenMode === 'idle') fetchRemainingQuota();
+    if (screenMode === 'idle' || screenMode === 'camera') fetchRemainingQuota();
   }, [screenMode, fetchRemainingQuota]);
 
   useEffect(() => {
@@ -1129,6 +1119,9 @@ export default function Home() {
   const showManualHelpAfterFailure = useCallback(() => {
     setDetectionFailed(true);
     ensureDefaultCorners();
+    setEditLogoScale(1);
+    setEditLogoOffset({ x: 0, y: 0 });
+    setEditLogoRotation(0);
   }, [ensureDefaultCorners]);
 
   const showDailyLimitBlocked = useCallback(() => {
@@ -1211,17 +1204,193 @@ export default function Home() {
     [getMessageByErrorType, showDailyLimitBlocked, showManualHelpAfterFailure, tx]
   );
 
-  const handleOpenCamera = useCallback(() => {
-    setCameraError(null);
-    cameraCaptureRef.current?.click();
-  }, []);
-
   const discardRetakeSnapshot = useCallback(() => {
     setRetakeSnapshot((prev) => {
       if (prev?.previewImageUrl) revokeTrackedObjectUrl(prev.previewImageUrl);
       return null;
     });
   }, [revokeTrackedObjectUrl]);
+
+  const beginDetectFromCanvas = useCallback(
+    async (fullResCanvas: HTMLCanvasElement, originalW: number, originalH: number, isLatestRequest: () => boolean) => {
+      const fullResBlob = await new Promise<Blob>((resolve, reject) => {
+        fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
+      });
+
+      discardRetakeSnapshot();
+      setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
+      setScreenMode('preview_edit');
+      const defaultCorners = getDefaultCenterCorners();
+      setDetectedCorners([defaultCorners]);
+      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
+      setEditLogoOffset({ x: 0, y: 0 });
+      setEditLogoScale(1);
+      setEditLogoRotation(0);
+      setToastMessage(null);
+      setIsProcessing(true);
+
+      setTimeout(() => {
+        const blurCanvas = document.createElement('canvas');
+        blurCanvas.width = Math.min(480, originalW);
+        blurCanvas.height = Math.max(1, Math.round(blurCanvas.width * (originalH / originalW)));
+        const blurCtx = blurCanvas.getContext('2d');
+        if (blurCtx) {
+          blurCtx.drawImage(fullResCanvas, 0, 0, blurCanvas.width, blurCanvas.height);
+          setIsBlurWarning(getBlurScore(blurCanvas) < BLUR_SCORE_THRESHOLD);
+        }
+      }, 0);
+
+      if (!(await canAutoDetectNow())) {
+        setIsProcessing(false);
+        showDailyLimitBlocked();
+        return;
+      }
+
+      const controller = new AbortController();
+      activeDetectControllerRef.current = controller;
+      const timeoutId = setTimeout(() => controller.abort(), 25_000);
+      try {
+        const deviceId = getStableDeviceId();
+        const outcome = await runPlateDetection(fullResCanvas, originalW, originalH, deviceId, controller.signal);
+        if (isLatestRequest()) {
+          applyDetectOutcome(outcome);
+        }
+      } catch (fetchErr: unknown) {
+        if (!isLatestRequest()) return;
+        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
+          setToastMessage(tx('processingSlow'));
+        } else {
+          setToastMessage(tx('autoDetectFailedManual'));
+        }
+        showManualHelpAfterFailure();
+      } finally {
+        clearTimeout(timeoutId);
+        if (activeDetectControllerRef.current === controller) {
+          activeDetectControllerRef.current = null;
+        }
+        if (isLatestRequest()) {
+          setIsProcessing(false);
+          setRetryStatusText(null);
+        }
+      }
+    },
+    [
+      applyDetectOutcome,
+      canAutoDetectNow,
+      createTrackedObjectUrl,
+      discardRetakeSnapshot,
+      showDailyLimitBlocked,
+      showManualHelpAfterFailure,
+      tx,
+    ]
+  );
+
+  const startCamera = useCallback(async () => {
+    setCameraError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError(tx('cameraHttpsRequired'));
+      return;
+    }
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      streamRef.current = s;
+      setStream(s);
+      setScreenMode('camera');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCameraError(msg.includes('Permission') ? tx('cameraPermissionError') : tx('cameraStartFailed'));
+    }
+  }, [tx]);
+
+  const stopCamera = useCallback(() => {
+    discardRetakeSnapshot();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setStream(null);
+    setScreenMode('idle');
+    setCameraError(null);
+    setPreviewImageUrl(null);
+    setDetectedCorners([]);
+    setDetectedBaseAngles([]);
+    setEditLogoOffset({ x: 0, y: 0 });
+    setEditLogoScale(1);
+    setEditLogoRotation(0);
+    setManualEditActive(false);
+    setDetectionFailed(false);
+  }, [discardRetakeSnapshot]);
+
+  useEffect(() => {
+    if (!stream || !videoRef.current) return;
+    const video = videoRef.current;
+    const t = setTimeout(() => {
+      video.srcObject = stream;
+      video.play().catch(() => {});
+    }, 100);
+    return () => clearTimeout(t);
+  }, [stream]);
+
+  useEffect(() => {
+    if (screenMode !== 'camera' || !videoRef.current) return;
+    const v = videoRef.current;
+    const streamToUse = streamRef.current;
+    if (streamToUse) v.srcObject = streamToUse;
+    const t = setTimeout(() => {
+      v.play().catch(() => {});
+    }, 150);
+    return () => clearTimeout(t);
+  }, [screenMode]);
+
+  const captureAndDetect = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video?.videoWidth || !video?.videoHeight) return;
+    activeDetectControllerRef.current?.abort();
+    activeDetectControllerRef.current = null;
+    const requestId = activeDetectRequestIdRef.current + 1;
+    activeDetectRequestIdRef.current = requestId;
+    const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
+
+    setShowDailyLimitOverlay(false);
+    setToastMessage(null);
+    setCameraError(null);
+    setDetectionFailed(false);
+    setManualEditActive(false);
+    setRetryStatusText(null);
+    setIsProcessing(true);
+
+    try {
+      await refreshPlanFromServer();
+    } catch (_) {}
+
+    try {
+      const originalW = video.videoWidth;
+      const originalH = video.videoHeight;
+      const fullResCanvas = document.createElement('canvas');
+      fullResCanvas.width = originalW;
+      fullResCanvas.height = originalH;
+      const fullResCtx = fullResCanvas.getContext('2d');
+      if (!fullResCtx) throw new Error('Canvas error');
+      fullResCtx.drawImage(video, 0, 0, originalW, originalH);
+      await beginDetectFromCanvas(fullResCanvas, originalW, originalH, isLatestRequest);
+    } catch (err) {
+      if (!isLatestRequest()) return;
+      const defaultCorners = getDefaultCenterCorners();
+      setDetectedCorners([defaultCorners]);
+      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
+      setEditLogoOffset({ x: 0, y: 0 });
+      setEditLogoScale(1);
+      setEditLogoRotation(0);
+      setScreenMode('preview_edit');
+      setToastMessage(tx('autoDetectFailedManual'));
+      showManualHelpAfterFailure();
+      setIsProcessing(false);
+    }
+  }, [beginDetectFromCanvas, refreshPlanFromServer, showManualHelpAfterFailure, tx]);
 
   const handlePickImageFromDevice = useCallback(() => {
     photoPickerRef.current?.click();
@@ -1410,13 +1579,16 @@ export default function Home() {
     activeDetectRequestIdRef.current = requestId;
     const isLatestRequest = () => activeDetectRequestIdRef.current === requestId;
 
-    setIsProcessing(true);
     setShowDailyLimitOverlay(false);
     setCameraError(null);
     setDetectionFailed(false);
     setManualEditActive(false);
     setRetryStatusText(null);
     setToastMessage(null);
+
+    try {
+      await refreshPlanFromServer();
+    } catch (_) {}
 
     try {
       const pickedUrl = createTrackedObjectUrl(file);
@@ -1439,72 +1611,14 @@ export default function Home() {
       if (!fullResCtx) throw new Error('Canvas error');
       fullResCtx.drawImage(img, 0, 0, originalW, originalH);
 
-      const fullResBlob = await new Promise<Blob>((resolve, reject) => {
-        fullResCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Blob error'))), 'image/jpeg', 0.98);
-      });
-
-      discardRetakeSnapshot();
-      setPreviewImageUrl(createTrackedObjectUrl(fullResBlob));
-      setScreenMode('preview_edit');
-      const defaultCorners = getDefaultCenterCorners();
-      setDetectedCorners([defaultCorners]);
-      setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
-      setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
-      setEditLogoRotation(0);
-      setToastMessage(null);
-      setIsProcessing(true);
-
-      setTimeout(() => {
-        const blurCanvas = document.createElement('canvas');
-        blurCanvas.width = Math.min(480, originalW);
-        blurCanvas.height = Math.max(1, Math.round(blurCanvas.width * (originalH / originalW)));
-        const blurCtx = blurCanvas.getContext('2d');
-        if (blurCtx) {
-          blurCtx.drawImage(fullResCanvas, 0, 0, blurCanvas.width, blurCanvas.height);
-          setIsBlurWarning(getBlurScore(blurCanvas) < BLUR_SCORE_THRESHOLD);
-        }
-      }, 0);
-
-      if (!(await canAutoDetectNow())) {
-        setIsProcessing(false);
-        showDailyLimitBlocked();
-        return;
-      }
-
-      const controller = new AbortController();
-      activeDetectControllerRef.current = controller;
-      const timeoutId = setTimeout(() => controller.abort(), 25_000);
-      try {
-        const deviceId = getStableDeviceId();
-        const outcome = await runPlateDetection(fullResCanvas, originalW, originalH, deviceId, controller.signal);
-        if (isLatestRequest()) {
-          applyDetectOutcome(outcome);
-        }
-      } catch (fetchErr: unknown) {
-        if (!isLatestRequest()) return;
-        if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-          setToastMessage(tx('processingSlow'));
-        } else {
-          setToastMessage(tx('autoDetectFailedManual'));
-        }
-        showManualHelpAfterFailure();
-      } finally {
-        clearTimeout(timeoutId);
-        if (activeDetectControllerRef.current === controller) {
-          activeDetectControllerRef.current = null;
-        }
-        if (isLatestRequest()) {
-          setIsProcessing(false);
-          setRetryStatusText(null);
-        }
-      }
+      await beginDetectFromCanvas(fullResCanvas, originalW, originalH, isLatestRequest);
     } catch (err) {
+      if (!isLatestRequest()) return;
       const defaultCorners = getDefaultCenterCorners();
       setDetectedCorners([defaultCorners]);
       setDetectedBaseAngles([getPlateBaseAngle(defaultCorners)]);
       setEditLogoOffset({ x: 0, y: 0 });
-      setEditLogoScale(DEFAULT_MANUAL_MASK_SCALE);
+      setEditLogoScale(1);
       setEditLogoRotation(0);
       setScreenMode('preview_edit');
       setToastMessage(`画像の解析に失敗しました。手動で位置を合わせてください。${err instanceof Error ? ` (${err.message})` : ''}`);
@@ -1512,7 +1626,7 @@ export default function Home() {
       setIsProcessing(false);
       setRetryStatusText(null);
     }
-  }, [canAutoDetectNow, applyDetectOutcome, createTrackedObjectUrl, discardRetakeSnapshot, showDailyLimitBlocked, showManualHelpAfterFailure, revokeTrackedObjectUrl, tx]);
+  }, [beginDetectFromCanvas, createTrackedObjectUrl, refreshPlanFromServer, revokeTrackedObjectUrl, showManualHelpAfterFailure, tx]);
 
 
   const retake = useCallback(async () => {
@@ -1545,7 +1659,13 @@ export default function Home() {
     setDetectionFailed(false);
     setManualEditActive(false);
     setIsProcessing(false);
-    handleOpenCamera();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setStream(null);
+    await startCamera();
   }, [
     detectionFailed,
     detectedBaseAngles,
@@ -1553,10 +1673,10 @@ export default function Home() {
     editLogoOffset,
     editLogoRotation,
     editLogoScale,
-    handleOpenCamera,
     manualEditActive,
     maskTemplate,
     previewImageUrl,
+    startCamera,
   ]);
 
   const cancelRetakeBackToPreview = useCallback(() => {
@@ -1683,7 +1803,7 @@ export default function Home() {
             customMaskPreparedImage.naturalWidth > 0 &&
             customMaskPreparedImage.naturalHeight > 0
           ) {
-            drawImageWarpedToQuad(
+            drawImageRigidOnPlate(
               ctx,
               customMaskPreparedImage,
               quadPx,
@@ -1691,7 +1811,7 @@ export default function Home() {
               PLATE_MASK_HEIGHT
             );
           } else {
-            fillQuad(ctx, quadPx, '#000000');
+            fillRigidPlate(ctx, quadPx, '#000000');
           }
         } else if (maskStyle === 'carkus') {
           let carkusMaskCanvas = carkusMaskCanvasRef.current;
@@ -1710,7 +1830,7 @@ export default function Home() {
               maskTemplate,
               carkusBrandImage
             );
-            drawImageWarpedToQuad(
+            drawImageRigidOnPlate(
               ctx,
               carkusMaskCanvas,
               quadPx,
@@ -1720,11 +1840,15 @@ export default function Home() {
           }
         } else {
           const plateFillColor = maskStyle === 'white' ? '#ffffff' : '#000000';
-          fillQuad(ctx, quadPx, plateFillColor);
+          fillRigidPlate(ctx, quadPx, plateFillColor);
         }
       });
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, carkusBrandImage, customMaskPreparedImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive]);
+
+    if (planFeatures.watermarkOnExport) {
+      drawCarkusExportWatermark(ctx, w, h);
+    }
+  }, [screenMode, previewImageLoaded, detectedCorners, carkusBrandImage, customMaskPreparedImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive, planFeatures.watermarkOnExport]);
 
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
@@ -1745,29 +1869,11 @@ export default function Home() {
     outCtx.imageSmoothingQuality = 'high';
     outCtx.drawImage(source, 0, 0, source.width, source.height, 0, 0, exportWidth, exportHeight);
 
-    if (planFeatures.watermarkOnExport) {
-      const shortEdge = Math.min(outCanvas.width, outCanvas.height);
-      const padding = Math.max(16, Math.round(shortEdge * 0.03));
-      const liftY = Math.max(22, Math.round(shortEdge * 0.08));
-      const fontSize = Math.max(12, Math.round(shortEdge * 0.036));
-      const text = 'Made with Carkus';
-      outCtx.save();
-      outCtx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif`;
-      outCtx.textAlign = 'right';
-      outCtx.textBaseline = 'bottom';
-      outCtx.lineWidth = Math.max(2, Math.round(fontSize * 0.12));
-      outCtx.strokeStyle = 'rgba(0,0,0,0.26)';
-      outCtx.fillStyle = 'rgba(255,255,255,0.34)';
-      outCtx.strokeText(text, outCanvas.width - padding, outCanvas.height - padding - liftY);
-      outCtx.fillText(text, outCanvas.width - padding, outCanvas.height - padding - liftY);
-      outCtx.restore();
-    }
-
     const jpegQuality = isFreePlan ? FREE_EXPORT_JPEG_QUALITY : PRO_EXPORT_JPEG_QUALITY;
     return await new Promise<Blob | null>((resolve) => {
       outCanvas.toBlob((b) => resolve(b), 'image/jpeg', jpegQuality);
     });
-  }, [isFreePlan, planFeatures.watermarkOnExport]);
+  }, [isFreePlan]);
 
   const handleSaveFromPreview = useCallback(async () => {
     if (!previewCanvasRef.current) return;
@@ -2057,7 +2163,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-black" style={{ fontFamily }}>
-      <input ref={cameraCaptureRef} type="file" accept="image/*" capture="environment" onChange={handleImageFileSelected} className="hidden" />
       <input ref={photoPickerRef} type="file" accept="image/*" onChange={handleImageFileSelected} className="hidden" />
       <input ref={customLogoPickerRef} type="file" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleCustomLogoSelected} className="hidden" />
       <div className="fixed top-3 right-3 z-[120] flex flex-col items-end gap-2">
@@ -2167,6 +2272,72 @@ export default function Home() {
       )}
 
 
+      {screenMode === 'camera' && (
+        <div className="fixed inset-0 z-0 bg-black">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          {isProcessing && (
+            <div className="absolute inset-0 bg-black/30 backdrop-blur-sm flex flex-col items-center justify-center z-10">
+              <Loader2 className="animate-spin text-white" size={44} strokeWidth={2.5} />
+              <p className="text-white/90 font-light text-sm mt-3">{text.processing}</p>
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden">
+                <div className="h-full bg-white/80 processing-sweep" />
+              </div>
+            </div>
+          )}
+          <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+            <span className="h-5 flex items-center shrink-0 text-white drop-shadow-md">
+              <CarkusLogo className="h-full w-auto text-white" />
+            </span>
+            <div className="flex items-center gap-2">
+              {retakeSnapshot && (
+                <button
+                  type="button"
+                  onClick={cancelRetakeBackToPreview}
+                  className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
+                >
+                  {text.backToEdit}
+                </button>
+              )}
+              <button
+                onClick={stopCamera}
+                className="py-1.5 px-3 rounded-full bg-black/40 backdrop-blur-sm text-white text-xs font-light border border-white/20 hover:bg-white/20 transition-colors"
+              >
+                {text.finish}
+              </button>
+            </div>
+          </div>
+          <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-center gap-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 px-4 bg-gradient-to-t from-black/50 to-transparent">
+            <button
+              onClick={handlePickImageFromDevice}
+              disabled={isProcessing}
+              className="w-11 h-11 rounded-full bg-black/40 backdrop-blur-sm border border-white/25 text-white flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+              aria-label={text.pickPhoto}
+            >
+              <ImagePlus size={20} strokeWidth={1.8} />
+            </button>
+            <button
+              onClick={captureAndDetect}
+              disabled={isProcessing}
+              className="w-[4.5rem] h-[4.5rem] rounded-full bg-white/15 backdrop-blur-sm border-2 border-white/40 flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+              aria-label={text.capture}
+            >
+              {isProcessing ? (
+                <Loader2 className="animate-spin text-white" size={28} strokeWidth={2} />
+              ) : (
+                <span className="w-12 h-12 rounded-full bg-white/90" />
+              )}
+            </button>
+            <div className="w-11" aria-hidden />
+          </div>
+        </div>
+      )}
+
       {screenMode === 'idle' && (
         <main className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)] gap-6 px-6">
           <div className="text-center max-w-md space-y-3">
@@ -2219,7 +2390,7 @@ export default function Home() {
           </div>
           <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
-              onClick={handleOpenCamera}
+              onClick={startCamera}
               className="flex items-center justify-center gap-2 px-4 py-4 rounded-full bg-white/10 backdrop-blur-xl text-white font-light text-sm tracking-wide border border-white/20 hover:bg-white/20 transition-colors shadow-lg"
             >
               <Camera size={20} strokeWidth={1.5} />
@@ -2534,6 +2705,11 @@ export default function Home() {
                   </div>
                 </div>
               </>
+            )}
+            {planFeatures.watermarkOnExport && !isProcessing && (
+              <p className="text-white/45 text-[10px] font-light text-center mb-2 leading-relaxed">
+                {text.freeWatermarkNote}
+              </p>
             )}
             <div className="flex justify-center items-center gap-2 flex-wrap landscape:justify-start">
               <button
