@@ -2,6 +2,8 @@ export type Corner = { x: number; y: number };
 export type Corners = [Corner, Corner, Corner, Corner];
 
 export const PLATE_ASPECT_RATIO = 2;
+/** 検出四隅を中心から外側へ拡張（マスクの取りこぼし防止） */
+export const PLATE_MASK_COVERAGE_EXPAND = 1.1;
 
 export function normalizeCornersOrder(corners: Corners): Corners {
   return corners;
@@ -61,7 +63,19 @@ export function refinePlateCorners(corners: Corners, imageW: number, imageH: num
       y: centerNy + (c.y - centerNy) * shrink,
     })) as Corners;
   }
-  return next;
+  return expandPlateCorners(next);
+}
+
+export function expandPlateCorners(
+  corners: Corners,
+  expandFactor = PLATE_MASK_COVERAGE_EXPAND
+): Corners {
+  const centerNx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4;
+  const centerNy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4;
+  return corners.map((c) => ({
+    x: Math.max(0, Math.min(1, centerNx + (c.x - centerNx) * expandFactor)),
+    y: Math.max(0, Math.min(1, centerNy + (c.y - centerNy) * expandFactor)),
+  })) as Corners;
 }
 
 export function refinePlateCornersList(cornersList: Corners[], imageW: number, imageH: number): Corners[] {

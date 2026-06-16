@@ -158,13 +158,16 @@ function quadToRigidPlacement(quad: QuadPx, aspectRatio = 2): RigidPlatePlacemen
   return { cx, cy, angle, width, height };
 }
 
-function fillRigidPlate(ctx: CanvasRenderingContext2D, quad: QuadPx, fillStyle: string) {
-  const { cx, cy, angle, width, height } = quadToRigidPlacement(quad);
+function fillQuad(ctx: CanvasRenderingContext2D, quad: QuadPx, fillStyle: string) {
   ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(angle);
   ctx.fillStyle = fillStyle;
-  ctx.fillRect(-width / 2, -height / 2, width, height);
+  ctx.beginPath();
+  ctx.moveTo(quad[0].x, quad[0].y);
+  ctx.lineTo(quad[1].x, quad[1].y);
+  ctx.lineTo(quad[2].x, quad[2].y);
+  ctx.lineTo(quad[3].x, quad[3].y);
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 
@@ -391,23 +394,19 @@ type Plan = 'free' | 'pro';
 type MaskTemplate = 'fit' | 'centered' | 'badge';
 type MaskStyle = 'carkus' | 'black' | 'white' | 'custom';
 
-/** Carkus マスク（黒地+ロゴ）を 2:1 UV 空間に描画し、剛体配置で貼り付け */
-function renderCarkusMaskCanvas(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
+function computeCarkusLogoLayout(
+  plateWidth: number,
+  plateHeight: number,
   maskTemplate: MaskTemplate,
   logoImage: HTMLImageElement | null
-) {
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, width, height);
-  if (!logoImage?.complete || !logoImage.naturalWidth || !logoImage.naturalHeight) return;
-
-  const logoAspect = logoImage.naturalWidth / logoImage.naturalHeight;
-  const inset = Math.max(1, height * LOGO_INSET_RATIO_BY_PLATE_HEIGHT);
-  const availableW = Math.max(1, width - inset * 2);
-  const availableH = Math.max(1, height - inset * 2);
+): { logoDrawW: number; logoDrawH: number; offsetX: number; offsetY: number } {
+  const logoAspect =
+    logoImage?.complete && logoImage.naturalWidth && logoImage.naturalHeight
+      ? logoImage.naturalWidth / logoImage.naturalHeight
+      : 2;
+  const inset = Math.max(1, plateHeight * LOGO_INSET_RATIO_BY_PLATE_HEIGHT);
+  const availableW = Math.max(1, plateWidth - inset * 2);
+  const availableH = Math.max(1, plateHeight - inset * 2);
 
   let logoDrawW = availableW;
   let logoDrawH = logoDrawW / Math.max(0.01, logoAspect);
@@ -420,14 +419,76 @@ function renderCarkusMaskCanvas(
   logoDrawH *= templateScale;
   const templateShiftU = maskTemplate === 'badge' ? availableW * 0.22 : 0;
 
-  const centerX = width / 2 + templateShiftU + LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW;
-  const centerY = height / 2 + LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH;
+  return {
+    logoDrawW,
+    logoDrawH,
+    offsetX: templateShiftU + LOGO_VISUAL_CENTER_OFFSET.x * logoDrawW,
+    offsetY: LOGO_VISUAL_CENTER_OFFSET.y * logoDrawH,
+  };
+}
 
+/** 四隅台形に黒背景をワープし、ロゴだけ剛体配置（ロゴ潰れなし） */
+function drawCarkusMaskHybrid(
+  ctx: CanvasRenderingContext2D,
+  quad: QuadPx,
+  maskTemplate: MaskTemplate,
+  logoImage: HTMLImageElement | null
+) {
+  fillQuad(ctx, quad, '#000000');
+  if (!logoImage?.complete || !logoImage.naturalWidth || !logoImage.naturalHeight) return;
+
+  const { cx, cy, angle, width, height } = quadToRigidPlacement(quad);
+  const layout = computeCarkusLogoLayout(width, height, maskTemplate, logoImage);
   ctx.save();
-  ctx.translate(centerX, centerY);
-  drawCarkusLogoAtOrigin(ctx, logoDrawW, logoDrawH, undefined, logoImage);
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.translate(layout.offsetX, layout.offsetY);
+  drawCarkusLogoAtOrigin(ctx, layout.logoDrawW, layout.logoDrawH, undefined, logoImage);
   ctx.restore();
 }
+
+function drawCustomLogoOnPlate(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  source: HTMLImageElement,
+  setup: CustomMaskSetup
+) {
+  const iw = source.naturalWidth || source.width;
+  const ih = source.naturalHeight || source.height;
+  if (!iw || !ih) return;
+  const baseScale = Math.max(width / iw, height / ih);
+  const s = baseScale * Math.max(0.2, setup.scale);
+  const drawW = iw * s;
+  const drawH = ih * s;
+  const x = (width - drawW) / 2 + setup.offsetX;
+  const y = (height - drawH) / 2 + setup.offsetY;
+  ctx.drawImage(source, x, y, drawW, drawH);
+}
+
+/** 四隅台形に黒背景をワープし、独自ロゴだけ剛体配置 */
+function drawCustomMaskHybrid(
+  ctx: CanvasRenderingContext2D,
+  quad: QuadPx,
+  source: HTMLImageElement,
+  setup: CustomMaskSetup
+) {
+  fillQuad(ctx, quad, '#000000');
+  let logoLayer = customLogoLayerCanvasCache;
+  if (!logoLayer) {
+    logoLayer = document.createElement('canvas');
+    customLogoLayerCanvasCache = logoLayer;
+  }
+  logoLayer.width = PLATE_MASK_WIDTH;
+  logoLayer.height = PLATE_MASK_HEIGHT;
+  const lctx = logoLayer.getContext('2d');
+  if (!lctx) return;
+  lctx.clearRect(0, 0, PLATE_MASK_WIDTH, PLATE_MASK_HEIGHT);
+  drawCustomLogoOnPlate(lctx, PLATE_MASK_WIDTH, PLATE_MASK_HEIGHT, source, setup);
+  drawImageRigidOnPlate(ctx, logoLayer, quad, PLATE_MASK_WIDTH, PLATE_MASK_HEIGHT);
+}
+
+let customLogoLayerCanvasCache: HTMLCanvasElement | null = null;
 
 type RetakeSnapshot = {
   previewImageUrl: string;
@@ -490,16 +551,7 @@ function renderPreparedCustomMask(
   if (!ctx) return canvas;
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, W, H);
-  const iw = source.naturalWidth || source.width;
-  const ih = source.naturalHeight || source.height;
-  if (!iw || !ih) return canvas;
-  const baseScale = Math.max(W / iw, H / ih);
-  const s = baseScale * Math.max(0.2, setup.scale);
-  const drawW = iw * s;
-  const drawH = ih * s;
-  const x = (W - drawW) / 2 + setup.offsetX;
-  const y = (H - drawH) / 2 + setup.offsetY;
-  ctx.drawImage(source, x, y, drawW, drawH);
+  drawCustomLogoOnPlate(ctx, W, H, source, setup);
   return canvas;
 }
 const t = {
@@ -784,7 +836,6 @@ export default function Home() {
   const dragStartRef = useRef<{ x: number; y: number; startOffset: { x: number; y: number } } | null>(null);
   const scaleStartRef = useRef<{ y: number; startScale: number } | null>(null);
   const previewImageRef = useRef<HTMLImageElement | null>(null);
-  const carkusMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const langRef = useRef<Lang>('ja');
 
   const text = t[lang];
@@ -1794,15 +1845,21 @@ export default function Home() {
           };
         }) as QuadPx;
 
-        // マスク種別ごとの描画（四隅 quadPx に射影ワープ）
+        // マスク種別ごとの描画
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         if (maskStyle === 'custom') {
-          if (
+          const customSetup = parseCustomMaskSetup(
+            typeof window !== 'undefined' ? window.localStorage.getItem(CUSTOM_MASK_SETUP_KEY) : null
+          );
+          if (customLogoImage) {
+            drawCustomMaskHybrid(ctx, quadPx, customLogoImage, customSetup);
+          } else if (
             customMaskPreparedImage &&
             customMaskPreparedImage.naturalWidth > 0 &&
             customMaskPreparedImage.naturalHeight > 0
           ) {
+            fillQuad(ctx, quadPx, '#000000');
             drawImageRigidOnPlate(
               ctx,
               customMaskPreparedImage,
@@ -1811,36 +1868,13 @@ export default function Home() {
               PLATE_MASK_HEIGHT
             );
           } else {
-            fillRigidPlate(ctx, quadPx, '#000000');
+            fillQuad(ctx, quadPx, '#000000');
           }
         } else if (maskStyle === 'carkus') {
-          let carkusMaskCanvas = carkusMaskCanvasRef.current;
-          if (!carkusMaskCanvas) {
-            carkusMaskCanvas = document.createElement('canvas');
-            carkusMaskCanvasRef.current = carkusMaskCanvas;
-          }
-          carkusMaskCanvas.width = PLATE_MASK_WIDTH;
-          carkusMaskCanvas.height = PLATE_MASK_HEIGHT;
-          const mctx = carkusMaskCanvas.getContext('2d');
-          if (mctx) {
-            renderCarkusMaskCanvas(
-              mctx,
-              PLATE_MASK_WIDTH,
-              PLATE_MASK_HEIGHT,
-              maskTemplate,
-              carkusBrandImage
-            );
-            drawImageRigidOnPlate(
-              ctx,
-              carkusMaskCanvas,
-              quadPx,
-              PLATE_MASK_WIDTH,
-              PLATE_MASK_HEIGHT
-            );
-          }
+          drawCarkusMaskHybrid(ctx, quadPx, maskTemplate, carkusBrandImage);
         } else {
           const plateFillColor = maskStyle === 'white' ? '#ffffff' : '#000000';
-          fillRigidPlate(ctx, quadPx, plateFillColor);
+          fillQuad(ctx, quadPx, plateFillColor);
         }
       });
     }
@@ -1848,7 +1882,7 @@ export default function Home() {
     if (planFeatures.watermarkOnExport) {
       drawCarkusExportWatermark(ctx, w, h);
     }
-  }, [screenMode, previewImageLoaded, detectedCorners, carkusBrandImage, customMaskPreparedImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive, planFeatures.watermarkOnExport]);
+  }, [screenMode, previewImageLoaded, detectedCorners, carkusBrandImage, customLogoImage, customMaskPreparedImage, maskStyle, editLogoOffset, editLogoScale, editLogoRotation, maskTemplate, isProcessing, manualEditActive, planFeatures.watermarkOnExport]);
 
   const exportPreviewBlob = useCallback(async (): Promise<Blob | null> => {
     const source = previewCanvasRef.current;
